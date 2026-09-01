@@ -1,0 +1,16 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@deepseek-ai/dsh-tools':
+        specifier: link:../../../../vendor/@deepseek-ai/dsh-tools
+        version: link:../../../../vendor/@deepseek-ai/dsh-tools
+      '@dsh-external/mes-runtime':
+        specifier: link:../mes-runtime
+        version: link:../mes-runtime

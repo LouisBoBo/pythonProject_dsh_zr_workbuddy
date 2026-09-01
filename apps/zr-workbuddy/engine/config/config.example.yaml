@@ -1,0 +1,23 @@
+# 复制为 config.yaml 后填写真实连接信息（config.yaml 勿提交）
+mes:
+  base_url: ""
+  auth_type: password
+  username: ""
+  password: ""
+  token: ""
+  enterprise_code: ""
+  extra_headers: "{}"
+  verify_ssl: true
+  timeout: 30
+api_docs:
+  endpoints: []
+  raw_docs: ""
+data_dictionary:
+  work_orders: []
+  equipment_events: []
+  quality_records: []
+deepseek:
+  provider: deepseek
+  api_key: ""
+  base_url: https://api.deepseek.com
+  model: deepseek-chat

@@ -1,0 +1,7 @@
+{
+  "enabled": [
+    "mes-config",
+    "mes-pcb",
+    "mes-ask"
+  ]
+}

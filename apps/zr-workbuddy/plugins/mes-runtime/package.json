@@ -1,0 +1,13 @@
+{
+  "name": "@dsh-external/mes-runtime",
+  "version": "0.4.1",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": { ".": "./lib/index.js" },
+  "description": "应用引擎调用辅助库（业务层，非 Cordis 插件）；attachChart 须用 ctx.get('attachments')",
+  "dshApp": {
+    "cordisPlugin": false
+  },
+  "license": "MIT"
+}

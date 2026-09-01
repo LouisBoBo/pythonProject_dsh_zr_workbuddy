@@ -1,0 +1,38 @@
+# secrets & runtime config
+**/engine/config/config.yaml
+**/engine/config/config.yaml.bak
+**/engine/data/chat_log.jsonl
+**/engine/data/.mplcache/
+**/engine/data/charts/
+**/engine/data/engine.pid
+**/engine/data/engine.log
+# plugins.json 是启停状态，可提交；勿忽略
+.env
+.env.*
+!**/.env.example
+**/credentials.json
+**/secrets.yaml
+
+# python
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+**/venv/
+**/*.egg-info/
+.pytest_cache/
+
+# node / OS
+node_modules/
+.DS_Store
+*.log
+.npm/
+.pnpm-store/
+
+# editor
+.idea/
+.vscode/
+*.swp
+apps/*/plugins/*/node_modules/
+**/vendor/@deepseek-ai/dsh-tools.bak-copy/
+
+**/engine/data/plugins.json.lock

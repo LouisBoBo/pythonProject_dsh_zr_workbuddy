@@ -1,0 +1,7 @@
+# 本应用运行时（业务配置，不属于框架）
+# 插件与 start-engine.sh 读取此文件；可用环境变量覆盖：
+#   APP_ENGINE_PORT / APP_ENGINE_HOST / APP_ENGINE_PYTHON
+server:
+  host: 127.0.0.1
+  port: 8000
+python: python3

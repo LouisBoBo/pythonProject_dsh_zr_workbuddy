@@ -1,0 +1,5 @@
+{
+  "id": "mes-config",
+  "name": "业务连接配置",
+  "purpose": "注册 mes_config / mes_status：测试业务连接/LLM 与查看连接状态"
+}
