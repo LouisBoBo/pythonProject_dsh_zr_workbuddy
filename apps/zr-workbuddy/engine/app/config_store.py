@@ -16,6 +16,7 @@ SECRET_PATHS: List[Tuple[str, ...]] = [
     ("mes", "password"),
     ("mes", "token"),
     ("deepseek", "api_key"),
+    ("code_dev", "cursor_api_key"),
 ]
 
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -80,6 +81,15 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "api_key": "",
         "base_url": "https://api.deepseek.com",  # deepseek 默认；ollama 填 http://127.0.0.1:11434
         "model": "deepseek-chat",  # deepseek 默认；ollama 填已拉取的模型名，如 qwen2.5:7b
+    },
+    # P0-1 本机 Cursor Local 写码（默认关闭，避免误改工程）
+    "code_dev": {
+        "enabled": False,
+        "cursor_api_key": "",
+        "model": "composer-2.5",
+        "max_concurrent": 1,
+        "cursor_timeout_sec": 2700,
+        "default_workspace": "",
     },
 }
 

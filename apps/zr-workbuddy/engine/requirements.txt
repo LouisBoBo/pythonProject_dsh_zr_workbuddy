@@ -5,3 +5,5 @@ httpx>=0.27
 numpy>=1.26
 pandas>=2.0
 matplotlib>=3.8
+# P0-1 本机写码（可选；未装时 code-dev-status 会提示）
+cursor-sdk>=1.0.24

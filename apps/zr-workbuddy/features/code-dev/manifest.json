@@ -1,0 +1,5 @@
+{
+  "id": "code-dev",
+  "name": "本机 Cursor 写码",
+  "purpose": "注册 mes_code_dev_*：本机目录 + Cursor Local 沙箱写码（默认需 config code_dev.enabled）"
+}

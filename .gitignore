@@ -36,3 +36,5 @@ apps/*/plugins/*/node_modules/
 **/vendor/@deepseek-ai/dsh-tools.bak-copy/
 
 **/engine/data/plugins.json.lock
+**/engine/data/local_dev/sandboxes/
+**/engine/data/local_dev/jobs/

@@ -101,6 +101,7 @@ from .health import check_net  # noqa: E402
 
 class ChatBody(BaseModel):
     message: str
+    code_dev_brief: dict | None = None
 
 
 @app.post(
@@ -114,7 +115,7 @@ async def api_chat(body: ChatBody):
     if not text:
         return JSONResponse({"ok": False, "detail": "问题不能为空"}, status_code=400)
     from .cli_ops import chat
-    out = await chat(text)
+    out = await chat(text, code_dev_brief=body.code_dev_brief)
     if not out.get("ok"):
         return JSONResponse(out, status_code=400)
     resp = {
@@ -139,7 +140,7 @@ async def api_chat(body: ChatBody):
     tags=["工作助手"],
     summary="流式自然语言对话",
     description="SSE 推送：status / thinking（思考过程）/ reply（正文增量）/ done / error。"
-    "PCB 问题走专家流式；MES 查数先 status 再一次性 done。",
+    "写码意图会在 done 中附带 code_dev_ui（选项卡或确认卡）；PCB 问题走专家流式；MES 查数先 status 再一次性 done。",
 )
 async def api_chat_stream(body: ChatBody):
     import json as _json
@@ -154,7 +155,7 @@ async def api_chat_stream(body: ChatBody):
 
     async def event_gen():
         try:
-            async for ev in chat_stream(text):
+            async for ev in chat_stream(text, code_dev_brief=body.code_dev_brief):
                 yield f"data: {_json.dumps(ev, ensure_ascii=False)}\n\n"
                 if ev.get("type") == "done":
                     _log_chat({
@@ -166,6 +167,132 @@ async def api_chat_stream(body: ChatBody):
                     })
         except Exception as e:
             yield f"data: {_json.dumps({'type': 'error', 'detail': f'{type(e).__name__}: {e}'}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class CodeDevConfirmBody(BaseModel):
+    workspace: str
+    requirement: str
+    code_dev_brief: dict | None = None
+
+
+@app.post(
+    "/api/code-dev/confirm",
+    tags=["本机写码"],
+    summary="确认写码并启动本机 Cursor 任务",
+    description="用户在聊天确认卡点击后调用；才会真正排队/启动写码 Job。不会自动 commit。"
+    "启动后请用 GET /api/code-dev/jobs/{job_id}/stream 订阅进度。",
+)
+def api_code_dev_confirm(body: CodeDevConfirmBody):
+    from . import plugins_store
+    from .code_dev.chat_bridge import confirm_and_start
+    from .code_dev.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机 Cursor 写码")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    out = confirm_and_start(
+        workspace=body.workspace or "",
+        requirement=body.requirement or "",
+        client_brief=body.code_dev_brief,
+    )
+    if not out.get("ok"):
+        return JSONResponse(out, status_code=400)
+    return out
+
+
+@app.get(
+    "/api/code-dev/jobs/{job_id}",
+    tags=["本机写码"],
+    summary="查询本机写码任务",
+    description="返回任务状态、进度步骤、已同步文件与助手小结。",
+)
+def api_code_dev_job(job_id: str):
+    from . import plugins_store
+    from .code_dev import get_job as code_dev_get_job
+    from .code_dev.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机 Cursor 写码")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    out = code_dev_get_job(job_id)
+    if not out.get("ok"):
+        return JSONResponse(out, status_code=404)
+    return out
+
+
+@app.get(
+    "/api/code-dev/jobs/{job_id}/stream",
+    tags=["本机写码"],
+    summary="订阅本机写码任务进度（SSE）",
+    description="推送 status / step / token / done / error；对齐 simplified local-dev job stream。"
+    "已结束的任务会立刻推送终态 done。",
+)
+async def api_code_dev_job_stream(job_id: str):
+    import asyncio
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    from . import plugins_store
+    from .code_dev.ops import FEATURE_ID, format_job_done_reply, get_job as code_dev_get_job
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机 Cursor 写码")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+
+    jid = (job_id or "").strip()
+    terminal = {"succeeded", "failed", "cancelled"}
+
+    async def event_gen():
+        last_n = 0
+        last_text_len = 0
+        last_progress = ""
+        saw_terminal = False
+        try:
+            for _ in range(3600):  # ~1h @1s
+                out = code_dev_get_job(jid)
+                if not out.get("ok"):
+                    yield f"data: {_json.dumps({'type': 'error', 'message': out.get('detail') or '找不到任务'}, ensure_ascii=False)}\n\n"
+                    return
+                job = out.get("job") or {}
+                st = str(job.get("status") or "")
+                events = job.get("events") or []
+                for ev in events[last_n:]:
+                    if isinstance(ev, dict) and ev.get("type"):
+                        yield f"data: {_json.dumps(ev, ensure_ascii=False)}\n\n"
+                last_n = len(events)
+
+                live = str(job.get("live_text") or "")
+                if len(live) > last_text_len:
+                    yield f"data: {_json.dumps({'type': 'token', 'text': live[last_text_len:]}, ensure_ascii=False)}\n\n"
+                    last_text_len = len(live)
+
+                progress = str(job.get("progress") or "").strip()
+                if progress and progress != last_progress and last_n == len(events):
+                    # 无新 event 时仍推进度文案
+                    yield f"data: {_json.dumps({'type': 'status', 'text': progress}, ensure_ascii=False)}\n\n"
+                    last_progress = progress
+
+                if st in terminal:
+                    reply = format_job_done_reply(job)
+                    yield f"data: {_json.dumps({'type': 'done', 'ok': st == 'succeeded', 'status': st, 'job_id': jid, 'job': job, 'reply': reply, 'synced_files': job.get('synced_files') or [], 'error': job.get('error')}, ensure_ascii=False)}\n\n"
+                    saw_terminal = True
+                    return
+                await asyncio.sleep(1.0)
+            if not saw_terminal:
+                yield f"data: {_json.dumps({'type': 'error', 'message': '订阅超时，请用 code-dev-job 查询'}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {_json.dumps({'type': 'error', 'message': f'{type(e).__name__}: {e}'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_gen(),

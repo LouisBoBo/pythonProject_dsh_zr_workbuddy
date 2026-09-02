@@ -126,6 +126,79 @@
   .think-box .think-body { padding: 0 12px 10px; font-size: 12px; color: var(--text-2); white-space: pre-wrap; word-break: break-word; line-height: 1.55; border-top: 1px dashed var(--border); }
   .status-line { color: var(--text-2); font-size: 12px; font-style: italic; margin-bottom: 6px; }
 
+  /* 写码 HITL：选项卡 / 确认卡 */
+  .cd-card { margin-top: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); overflow: hidden; }
+  .cd-card.done { opacity: .85; }
+  .cd-head { padding: 12px 14px 8px; }
+  .cd-title-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .cd-badge { font-size: 11px; font-weight: 600; color: var(--brand); background: var(--brand-weak); padding: 2px 8px; border-radius: 999px; }
+  .cd-hint { font-size: 11px; color: var(--text-2); }
+  .cd-summary { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+  .cd-desc { font-size: 12px; color: var(--text-2); margin: 0; }
+  .cd-group { padding: 8px 14px; border-top: 1px solid var(--border); }
+  .cd-group-label { font-size: 12px; color: var(--text-2); margin-bottom: 8px; display: flex; gap: 8px; align-items: center; }
+  .cd-req { color: #b45309; font-size: 11px; }
+  .cd-mode { font-size: 11px; color: var(--text-2); }
+  .cd-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .cd-opt { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; background: var(--bg-soft); }
+  .cd-opt.on { border-color: var(--brand); background: var(--brand-weak); }
+  .cd-opt input { margin: 0; }
+  .cd-field { display: block; padding: 10px 14px; border-top: 1px solid var(--border); }
+  .cd-label { display: block; font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+  .cd-input { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; background: var(--bg); color: var(--text); }
+  .cd-textarea { resize: vertical; min-height: 64px; }
+  .cd-error { color: #b91c1c; font-size: 12px; padding: 0 14px 8px; margin: 0; }
+  .cd-actions { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 14px 12px; border-top: 1px solid var(--border); }
+  .cd-btn { border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; background: var(--bg); color: var(--text); }
+  .cd-btn.confirm { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .cd-btn:disabled { opacity: .45; cursor: not-allowed; }
+  .cd-chosen { padding: 8px 14px 12px; font-size: 13px; }
+  .cd-chosen-row { display: flex; gap: 10px; margin: 4px 0; }
+  .cd-k { color: var(--text-2); min-width: 72px; flex: none; }
+  .cd-v { word-break: break-word; }
+  /* 写码进度（对齐 simplified CodingPlanCard） */
+  .coding-plan { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid #e8eef5; border-radius: 10px; background: #f8fafc; max-width: min(640px, 100%); }
+  .coding-plan.is-running { border-color: #bfdbfe; background: #f0f7ff; }
+  .coding-plan.is-done { border-color: #bbf7d0; background: #f0fdf4; }
+  .cp-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .cp-badge { font-size: 12px; font-weight: 700; color: #1e3a5f; flex-shrink: 0; }
+  .cp-summary { flex: 1; font-size: 12px; color: #64748b; min-width: 120px; }
+  .cp-duration { font-size: 11px; color: #94a3b8; font-variant-numeric: tabular-nums; }
+  .cp-list { margin: 8px 0 0; padding: 0; list-style: none; }
+  .cp-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-top: 1px solid #eef2f7; }
+  .cp-item:first-child { border-top: none; padding-top: 2px; }
+  .cp-icon { width: 22px; height: 22px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px; }
+  .cp-pending { width: 20px; height: 20px; border-radius: 50%; background: #e2e8f0; color: #64748b; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  .cp-check { width: 20px; height: 20px; border-radius: 50%; background: #dcfce7; color: #15803d; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  .cp-fail { width: 20px; height: 20px; border-radius: 50%; background: #fee2e2; color: #be123c; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  .cp-spinner { width: 16px; height: 16px; border: 2px solid #bfdbfe; border-top-color: #2563eb; border-radius: 50%; animation: cp-spin 0.7s linear infinite; }
+  @keyframes cp-spin { to { transform: rotate(360deg); } }
+  .cp-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .cp-title { font-size: 13px; font-weight: 600; color: #1f2937; line-height: 1.45; }
+  .cp-state { font-size: 11px; color: #94a3b8; font-weight: 500; }
+  .cp-item.is-running .cp-title, .cp-item.is-running .cp-state { color: #2563eb; }
+  .cp-item.is-done .cp-title { color: #334155; font-weight: 500; }
+  .cp-item.is-error .cp-title { color: #be123c; }
+  .cd-done-banner { display: flex; align-items: flex-start; gap: 10px; margin-top: 10px; padding: 12px 14px; border-radius: 10px; font-size: 13px; line-height: 1.5; }
+  .cd-done-banner.ok { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+  .cd-done-banner.err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+  .cd-done-icon { font-size: 18px; font-weight: 700; flex: none; line-height: 1.2; }
+  .cd-synced { margin-top: 6px; font-size: 12px; color: #047857; word-break: break-all; }
+  .cd-result-details { margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-soft); overflow: hidden; }
+  .cd-result-details summary { cursor: pointer; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--text-2); list-style: none; }
+  .cd-result-details summary::-webkit-details-marker { display: none; }
+  .cd-result-body { padding: 0 12px 12px; font-size: 13px; color: var(--text); max-height: 360px; overflow-y: auto; }
+  .cd-goal-banner { margin: 0 12px 8px; padding: 10px 12px; border-radius: 8px; background: #eff6ff; border: 1px solid #bfdbfe; font-size: 12px; line-height: 1.55; }
+  .cd-goal-banner strong { color: #1e40af; display: block; margin-bottom: 4px; font-size: 11px; letter-spacing: .04em; }
+  .cd-target-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+  .cd-target-chip { display: inline-flex; padding: 4px 10px; border-radius: 999px; background: #f0fdf4; border: 1px solid #bbf7d0; font-size: 11px; color: #166534; font-weight: 600; }
+  .cd-path-list { margin: 0 12px 8px; padding: 8px 10px; border-radius: 8px; background: var(--bg-soft); border: 1px solid var(--border); font-size: 11px; color: var(--text-2); line-height: 1.5; }
+  .cd-warn-box { margin: 0 12px 8px; padding: 8px 10px; border-radius: 8px; background: #fffbeb; border: 1px solid #fde68a; font-size: 12px; color: #92400e; }
+  .cd-err-box { margin: 0 12px 8px; padding: 8px 10px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca; font-size: 12px; color: #991b1b; }
+  .cd-checklist { margin: 0 12px 8px; padding: 8px 10px; border-radius: 8px; background: var(--bg-soft); border: 1px solid var(--border); font-size: 12px; }
+  .cd-checklist label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+  .cd-notes-required .cd-label::after { content: ' *'; color: #dc2626; }
+
   /* ============ 输入区 ============ */
   .input-area { flex: none; padding: 4px 24px 16px; }
   .input-inner { max-width: 768px; margin: 0 auto; }
@@ -454,6 +527,46 @@
             </div>
           </div>
 
+          <div class="card">
+            <h2><span class="step">5</span> 写码车道（本机 Cursor Local）</h2>
+            <div class="body">
+              <p class="hint" style="margin-bottom:10px;">
+                对齐 simplified「写码车道」：在本机工程目录用 Cursor SDK Local Agent 改码（沙箱同步）。
+                默认关闭；开启并保存后，可用功能插件 <code>code-dev</code> / 工具 <code>mes_code_dev_*</code>。
+                <b>不会</b>自动 git commit / push / 部署。
+              </p>
+              <div class="check-row" style="margin-bottom:12px;">
+                <input type="checkbox" id="code_dev_enabled">
+                <label for="code_dev_enabled">开启本机写码（code_dev.enabled）</label>
+              </div>
+              <div class="grid">
+                <div class="full">
+                  <label>Cursor API Key（回显脱敏）</label>
+                  <input type="password" id="code_dev_cursor_api_key" autocomplete="new-password" placeholder="Cursor 控制台 API Key">
+                </div>
+                <div>
+                  <label>本机模型</label>
+                  <input type="text" id="code_dev_model" placeholder="composer-2.5" autocomplete="off">
+                </div>
+                <div>
+                  <label>最大并发任务数</label>
+                  <input type="number" id="code_dev_max_concurrent" min="1" max="4" value="1">
+                </div>
+                <div>
+                  <label>超时（秒）</label>
+                  <input type="number" id="code_dev_cursor_timeout_sec" min="60" max="7200" value="2700">
+                </div>
+                <div class="full">
+                  <label>常用本机工程路径（可选，仅备忘；启动任务仍须传绝对路径）</label>
+                  <input type="text" id="code_dev_default_workspace" placeholder="/Users/你/项目" autocomplete="off">
+                </div>
+              </div>
+              <div class="hint" style="margin-top:8px;">需已安装 Python 包 <code>cursor-sdk</code>；改完点下方「保存全部配置」后立即生效（无需重启引擎）。</div>
+              <div style="margin-top: 12px;"><button class="btn ghost" id="btnTestCodeDev">测试写码就绪</button></div>
+              <div class="test-result" id="codeDevTestResult"></div>
+            </div>
+          </div>
+
         </div>
       </div>
       <div class="save-bar">
@@ -529,7 +642,7 @@ function renderConvList() {
 }
 function newConv() {
   const id = "c" + Date.now();
-  convs.unshift({ id, title: "新对话", messages: [] });
+  convs.unshift({ id, title: "新对话", messages: [], codeDevBrief: null });
   curId = id;
   renderConvList(); showWelcome(); saveConvs();
   switchView("chat");
@@ -554,6 +667,35 @@ function deleteConv(id) {
   renderConvList(); saveConvs();
 }
 function curConv() { return convs.find(c => c.id === curId) || null; }
+function touchCodeDevBrief(text, isCodeDevFlow) {
+  const conv = curConv();
+  if (!conv) return null;
+  if (!conv.codeDevBrief) conv.codeDevBrief = { original_goal: "", workspace: "", selections: [], notes: [], option_rounds: 0 };
+  const b = conv.codeDevBrief;
+  const raw = String(text || "").trim();
+  if (raw.startsWith("【写码需求选项已确认】")) {
+    b.option_rounds = (b.option_rounds || 0) + 1;
+    const lines = raw.replace(/^【写码需求选项已确认】\n?/, "").split("\n").filter(Boolean);
+    b.selections = b.selections || [];
+    b.selections.push({ round: b.option_rounds, lines });
+    lines.forEach((ln) => {
+      if (ln.startsWith("工程路径：")) b.workspace = ln.slice(5).trim();
+      if (ln.startsWith("备注：")) {
+        b.notes = b.notes || [];
+        const n = ln.slice(3).trim();
+        if (n && !b.notes.includes(n)) b.notes.push(n);
+      }
+    });
+  } else if (isCodeDevFlow && !raw.startsWith("【写码确认】")) {
+    if ((!b.original_goal || raw.length > b.original_goal.length) && raw.length >= 6) b.original_goal = raw;
+  }
+  saveConvs();
+  return b;
+}
+function getCodeDevBrief() {
+  const conv = curConv();
+  return conv && conv.codeDevBrief ? conv.codeDevBrief : null;
+}
 function showWelcome() {
   $("msgs").innerHTML = ""; $("msgs").classList.remove("show");
   $("welcome").style.display = "";
@@ -773,7 +915,467 @@ function dsLabel(ds) {
   if (ds === "mes") return "MES 实时";
   if (ds === "assistant") return "助手";
   if (ds === "pcb_expert") return "PCB 专家";
+  if (ds === "code_dev") return "本机写码";
   return "演示数据";
+}
+function srcLabel(ev) {
+  if (ev.source === "llm") return "LLM";
+  if (ev.source === "offline") return "离线提示";
+  if (ev.source === "code_dev") return "写码顾问";
+  if (ev.source === "disabled") return "已停用";
+  if (ev.llm_tried) return "LLM 未连通 → 规则引擎";
+  return "规则引擎";
+}
+function formatChatMeta(ev) {
+  const srcTxt = srcLabel(ev);
+  const ds = dsLabel(ev.data_source);
+  const metricMap = { options: "需求选项", propose: "写码确认", code_dev: "本机写码" };
+  let intentTxt = "本机写码";
+  const it = ev.intent || {};
+  if (it.type === "code_dev" && it.metric) intentTxt = metricMap[it.metric] || String(it.metric);
+  else if (it.type) intentTxt = metricMap[it.type] || String(it.type);
+  return "来源：" + srcTxt + (ev.llm_error ? "（" + ev.llm_error + "）" : "") +
+    " · 数据源：" + ds + " · 意图：" + intentTxt;
+}
+const CODE_DEV_PIPELINE = [
+  { id: "boot", title: "任务已排队" },
+  { id: "sandbox-prep", title: "沙箱就绪" },
+  { id: "dev", title: "Cursor 改码" },
+  { id: "sync", title: "同步到本机" },
+];
+const CODE_DEV_STEP_MAP = { "agent-loop": "dev", "cursor-local": "dev" };
+function initCodingSteps() {
+  return CODE_DEV_PIPELINE.map((p) => ({
+    id: p.id,
+    title: p.title,
+    state: p.id === "boot" ? "done" : "pending",
+  }));
+}
+function pipelineIndex(id) {
+  const i = CODE_DEV_PIPELINE.findIndex((p) => p.id === id);
+  return i >= 0 ? i : CODE_DEV_PIPELINE.length + 99;
+}
+function normalizeCodeDevStepId(id) {
+  return CODE_DEV_STEP_MAP[id] || id;
+}
+function markPriorStepsDone(list, id) {
+  const pIdx = pipelineIndex(id);
+  return list.map((s) => (
+    pipelineIndex(s.id) < pIdx && s.state !== "done" && s.state !== "error"
+      ? { ...s, state: "done" }
+      : s
+  ));
+}
+function sealCodingSteps(steps, asError) {
+  return (steps || [])
+    .filter((s) => s.id !== "status" && s.id !== "cursor-heartbeat")
+    .map((s) => {
+      if (asError) {
+        if (s.state === "running" || s.state === "waiting") return { ...s, state: "error" };
+        return s;
+      }
+      if (s.state !== "error") return { ...s, state: "done" };
+      return s;
+    });
+}
+function applyCodingStep(steps, event) {
+  const rawId = event && event.id;
+  if (!rawId || rawId === "status" || rawId === "cursor-heartbeat") return steps;
+  const id = normalizeCodeDevStepId(rawId);
+  const title = String(event.title || "").trim();
+  const nextState = event.state || "running";
+  let list = (steps && steps.length) ? [...steps] : initCodingSteps();
+  const idx = list.findIndex((s) => s.id === id);
+  if (idx < 0) return list;
+  const cur = list[idx];
+  const merged = { ...cur, state: nextState };
+  if (title) merged.title = title;
+  if (id === "dev") {
+    if (rawId === "cursor-local" && nextState === "done") merged.state = "running";
+    else if (rawId === "agent-loop" && nextState === "done") merged.state = "done";
+    else if (nextState === "running") merged.state = "running";
+  }
+  list[idx] = merged;
+  if (nextState === "running" || (id === "dev" && rawId === "agent-loop" && nextState === "done") || nextState === "done") {
+    list = markPriorStepsDone(list, id);
+  }
+  if (id === "sync" && nextState === "running") {
+    list = list.map((s) => (s.id === "dev" && s.state === "running" ? { ...s, state: "done" } : s));
+  }
+  return list;
+}
+function codingPlanSummary(steps) {
+  const list = (steps || []).filter((s) => s.state !== "pending");
+  if (!list.length) return "准备中…";
+  const total = list.length;
+  const done = list.filter((s) => s.state === "done").length;
+  if (list.some((s) => s.state === "running")) return "正在进行 " + done + "/" + total;
+  const err = list.filter((s) => s.state === "error").length;
+  if (err) return "完成 " + done + "/" + total + "（" + err + " 步失败）";
+  if (done === total) return "已全部完成（" + total + " 步）";
+  return "共 " + total + " 步";
+}
+function renderCodingPlanHtml(steps, opts) {
+  opts = opts || {};
+  const visible = (steps || []).filter((s) => s.state !== "pending");
+  const list = visible.length ? visible : [{ id: "boot", title: "任务已排队", state: "running" }];
+  const summary = opts.summary || codingPlanSummary(list);
+  const running = list.some((s) => s.state === "running");
+  const allDone = list.length && list.every((s) => s.state === "done" || s.state === "error");
+  let html = '<div class="coding-plan' + (running ? " is-running" : "") + (allDone && !running ? " is-done" : "") + '">';
+  html += '<div class="cp-head"><span class="cp-badge">' + esc(opts.heading || "本轮进度") + "</span>";
+  html += '<span class="cp-summary">' + esc(summary) + "</span>";
+  if (opts.duration) html += '<span class="cp-duration">' + esc(opts.duration) + "</span>";
+  html += '</div><ol class="cp-list">';
+  list.forEach((s, i) => {
+    const st = s.state || "pending";
+    let icon = '<span class="cp-pending">' + (i + 1) + "</span>";
+    if (st === "running") icon = '<span class="cp-spinner"></span>';
+    else if (st === "done") icon = '<span class="cp-check">✓</span>';
+    else if (st === "error") icon = '<span class="cp-fail">!</span>';
+    const hint = st === "running" ? "进行中" : st === "done" ? "已完成" : st === "error" ? "失败" : "等待中";
+    html += '<li class="cp-item is-' + st + '"><span class="cp-icon">' + icon + '</span><div class="cp-body"><span class="cp-title">' + esc(s.title) + '</span><span class="cp-state">' + hint + "</span></div></li>";
+  });
+  html += "</ol></div>";
+  return html;
+}
+function extractCodeDevResultBody(reply) {
+  const raw = String(reply || "").trim();
+  if (!raw) return "";
+  const idx = raw.search(/(?:^|\n)(?:##\s*)?(?:改动说明|验收步骤|【同步】)/m);
+  if (idx >= 0) return raw.slice(idx).replace(/^[\n\r]+/, "").trim();
+  return raw.split("\n").filter((l) => !/^任务\s+ldj-/.test(l.trim()) && !/^已同步\s+\d+/.test(l.trim())).join("\n").trim() || raw;
+}
+function formatDuration(sec) {
+  sec = Math.max(1, Math.round(sec || 0));
+  return sec >= 60 ? Math.floor(sec / 60) + "m " + (sec % 60) + "s" : sec + "s";
+}
+/** 挂写码选项卡 / 确认卡到助手气泡（对齐 simplified HITL） */
+function parseCodeDevUiFromText(text, fallbackWs) {
+  const s = String(text || "");
+  const tryJson = (body) => {
+    try {
+      const o = JSON.parse(body);
+      return o && typeof o === "object" ? o : null;
+    } catch (_) {
+      const a = body.indexOf("{"), b = body.lastIndexOf("}");
+      if (a >= 0 && b > a) {
+        try { return JSON.parse(body.slice(a, b + 1)); } catch (e) { return null; }
+      }
+      return null;
+    }
+  };
+  const mOpt = s.match(/:::cursor_dev_options\b([\s\S]*?)(?:\n[ \t]*:::|$)/i);
+  if (mOpt) {
+    const options = tryJson(mOpt[1].trim());
+    if (options) return { kind: "options", workspace: fallbackWs || "", options };
+  }
+  const mProp = s.match(/:::cursor_dev_propose\b([\s\S]*?)(?:\n[ \t]*:::|$)/i);
+  if (mProp) {
+    const prop = tryJson(mProp[1].trim()) || {};
+    return {
+      kind: "propose",
+      workspace: String(prop.workspace || fallbackWs || "").trim(),
+      requirement: String(prop.requirement || "").trim(),
+      target: String(prop.target || "local"),
+      propose: prop,
+    };
+  }
+  return null;
+}
+function mountCodeDevUi(hostEl, ui, beforeMetaEl) {
+  if (!hostEl || !ui || !ui.kind) return;
+  const old = hostEl.querySelector(".cd-card");
+  if (old) old.remove();
+  const card = document.createElement("div");
+  card.className = "cd-card";
+  if (ui.kind === "options") {
+    renderCdOptions(card, ui);
+  } else if (ui.kind === "propose") {
+    renderCdPropose(card, ui);
+  } else return;
+  if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
+  else hostEl.appendChild(card);
+}
+function renderCdOptions(card, ui) {
+  const opts = ui.options || {};
+  const groups = Array.isArray(opts.groups) ? opts.groups : [];
+  const selected = {};
+  groups.forEach((g) => { selected[g.id] = []; });
+  let html = '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">需求选项</span><span class="cd-hint">勾选即可 · 少打字</span></div>';
+  html += '<p class="cd-summary">' + esc(opts.title || "请确认以下关键项") + "</p>";
+  if (opts.summary) html += '<p class="cd-desc">' + esc(opts.summary) + "</p>";
+  if (ui.original_goal || (ui.brief && ui.brief.original_goal)) {
+    html += '<div class="cd-goal-banner"><strong>原始诉求</strong>' + esc(ui.original_goal || ui.brief.original_goal) + "</div>";
+  }
+  html += "</div>";
+  groups.forEach((g) => {
+    html += '<div class="cd-group" data-gid="' + esc(g.id) + '"><div class="cd-group-label">' + esc(g.label || g.id);
+    if (g.required !== false) html += '<span class="cd-req">必选</span>';
+    html += '<span class="cd-mode">' + (g.multi ? "可多选" : "单选") + '</span></div><div class="cd-opts">';
+    (g.options || []).forEach((o) => {
+      const typ = g.multi ? "checkbox" : "radio";
+      html += '<label class="cd-opt"><input type="' + typ + '" name="cd-' + esc(g.id) + '" value="' + esc(o.id) + '"><span>' + esc(o.label || o.id) + "</span></label>";
+    });
+    html += "</div></div>";
+  });
+  html += '<label class="cd-field' + (opts.notes_required ? " cd-notes-required" : "") + '"><span class="cd-label">备注' +
+    (opts.notes_required ? "（必填）" : "（可选）") + '</span><textarea class="cd-input cd-textarea cd-notes" rows="3" placeholder="' +
+    esc(opts.notes_placeholder || "补充约束、验收点…") + '"></textarea></label>';
+  html += '<p class="cd-error" style="display:none"></p>';
+  html += '<div class="cd-actions"><button type="button" class="cd-btn cd-skip">跳过本卡</button><button type="button" class="cd-btn confirm cd-ok">确认选项</button></div>';
+  card.innerHTML = html;
+  card.querySelectorAll(".cd-opt input").forEach((inp) => {
+    inp.addEventListener("change", () => {
+      const gEl = inp.closest(".cd-group");
+      const gid = gEl.getAttribute("data-gid");
+      const g = groups.find((x) => x.id === gid);
+      if (!g) return;
+      if (g.multi) {
+        selected[gid] = Array.from(gEl.querySelectorAll("input:checked")).map((x) => x.value);
+      } else {
+        selected[gid] = inp.checked ? [inp.value] : [];
+      }
+      gEl.querySelectorAll(".cd-opt").forEach((lab) => {
+        lab.classList.toggle("on", !!lab.querySelector("input:checked"));
+      });
+    });
+  });
+  const errEl = card.querySelector(".cd-error");
+  card.querySelector(".cd-skip").onclick = () => {
+    card.classList.add("done");
+    card.innerHTML = '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">需求选项</span></div><p class="cd-summary">已跳过本卡，可继续文字补充</p></div>';
+  };
+  card.querySelector(".cd-ok").onclick = () => {
+    for (const g of groups) {
+      if (g.required === false) continue;
+      if (!(selected[g.id] || []).length) {
+        errEl.style.display = "";
+        errEl.textContent = "请先选择：「" + (g.label || g.id) + "」";
+        return;
+      }
+    }
+    errEl.style.display = "none";
+    const notes = (card.querySelector(".cd-notes").value || "").trim();
+    if (opts.notes_required && !notes) {
+      errEl.style.display = "";
+      errEl.textContent = "请填写备注：业务模块、页面名称、接口路径等（必填）";
+      return;
+    }
+    const lines = ["【写码需求选项已确认】"];
+    if (ui.workspace) lines.push("工程路径：" + ui.workspace);
+    groups.forEach((g) => {
+      const ids = selected[g.id] || [];
+      const labels = (g.options || []).filter((o) => ids.includes(o.id)).map((o) => o.label || o.id);
+      if (labels.length) lines.push((g.label || g.id) + "：" + labels.join("、"));
+    });
+    if (notes) lines.push("备注：" + notes);
+    card.classList.add("done");
+    card.querySelectorAll("input,textarea,button").forEach((el) => { el.disabled = true; });
+    send(lines.join("\n"));
+  };
+}
+function renderCdPropose(card, ui) {
+  const ws0 = ui.workspace || "";
+  const req0 = ui.requirement || (ui.propose && ui.propose.requirement) || "";
+  const goal = ui.original_goal || (ui.brief && ui.brief.original_goal) || "";
+  const mod = (ui.target_hints && ui.target_hints.module) || "";
+  const paths = (ui.target_hints && ui.target_hints.expected_paths) || [];
+  const val = ui.validation || {};
+  let html =
+    '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">写码确认</span><span class="cd-hint">核对后再开工</span></div>' +
+    '<p class="cd-summary">请确认原始诉求、目标模块与需求摘要</p></div>';
+  if (goal) html += '<div class="cd-goal-banner"><strong>原始诉求</strong>' + esc(goal) + "</div>";
+  if (mod) html += '<div class="cd-target-row"><span class="cd-target-chip">🎯 目标模块：' + esc(mod) + "</span></div>";
+  if (paths.length) {
+    html += '<div class="cd-path-list"><div>预期改动区域：</div>' + paths.slice(0, 6).map((p) => "<code>" + esc(p) + "</code>").join(" · ") + "</div>";
+  }
+  if (val.errors && val.errors.length) html += '<div class="cd-err-box">' + val.errors.map(esc).join("<br>") + "</div>";
+  else if (val.warnings && val.warnings.length) html += '<div class="cd-warn-box">' + val.warnings.map(esc).join("<br>") + "</div>";
+  html +=
+    '<label class="cd-field"><span class="cd-label">本机工程绝对路径</span><input class="cd-input cd-ws" value="' + esc(ws0) + '"></label>' +
+    '<label class="cd-field"><span class="cd-label">需求摘要（可编辑，须含原始业务名称）</span><textarea class="cd-input cd-textarea cd-req" rows="8">' + esc(req0) + "</textarea></label>";
+  if (val.warnings && val.warnings.length && !(val.errors && val.errors.length)) {
+    html += '<div class="cd-checklist"><label><input type="checkbox" class="cd-ack"><span>我已核对原始诉求与目标模块，确认摘要不偏离业务目标</span></label></div>';
+  }
+  html += '<p class="cd-error" style="display:none"></p><div class="cd-actions"><button type="button" class="cd-btn cd-cancel">取消</button>' +
+    '<button type="button" class="cd-btn confirm cd-go">确认并用 Cursor 写入本机</button></div>';
+  card.innerHTML = html;
+  const errEl = card.querySelector(".cd-error");
+  const ackEl = card.querySelector(".cd-ack");
+  const goBtn = card.querySelector(".cd-go");
+  if (val.errors && val.errors.length) goBtn.disabled = true;
+  card.querySelector(".cd-cancel").onclick = () => {
+    card.classList.add("done");
+    card.innerHTML = '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">写码确认</span></div><p class="cd-summary">已取消，未启动写码</p></div>';
+  };
+  goBtn.onclick = async () => {
+    const workspace = (card.querySelector(".cd-ws").value || "").trim();
+    const requirement = (card.querySelector(".cd-req").value || "").trim();
+    if (!workspace || !requirement) {
+      errEl.style.display = "";
+      errEl.textContent = "请填写工程路径与需求摘要";
+      return;
+    }
+    if (ackEl && !ackEl.checked) {
+      errEl.style.display = "";
+      errEl.textContent = "请先勾选确认：摘要与原始诉求一致";
+      return;
+    }
+    goBtn.disabled = true;
+    goBtn.textContent = "启动中…";
+    errEl.style.display = "none";
+    try {
+      const r = await fetch("/api/code-dev/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace, requirement, code_dev_brief: getCodeDevBrief() }),
+      });
+      const d = await r.json();
+      if (!d.ok) {
+        errEl.style.display = "";
+        errEl.textContent = d.detail || d.reply || "启动失败";
+        goBtn.disabled = false;
+        goBtn.textContent = "确认并用 Cursor 写入本机";
+        return;
+      }
+      card.classList.add("done");
+      card.innerHTML =
+        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">写码确认</span></div><p class="cd-summary">已启动</p></div>' +
+        '<div class="cd-chosen"><div class="cd-chosen-row"><span class="cd-k">任务</span><span class="cd-v">' + esc(d.job_id || "") +
+        '</span></div><div class="cd-chosen-row"><span class="cd-k">工程</span><span class="cd-v">' + esc(workspace) + "</span></div></div>";
+      startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")), workspace);
+    } catch (e) {
+      errEl.style.display = "";
+      errEl.textContent = "请求失败：" + e.message;
+      goBtn.disabled = false;
+      goBtn.textContent = "确认并用 Cursor 写入本机";
+    }
+  };
+}
+function startCodeDevJobWatch(jobId, startReply, workspace) {
+  if (!jobId) {
+    renderMsg("assistant", startReply || "已启动", null, null, "来源：写码顾问 · 数据源：本机写码 · 意图：code_dev", true, "");
+    return;
+  }
+  if ($("welcome").style.display !== "none") { $("welcome").style.display = "none"; $("msgs").classList.add("show"); }
+  const wrap = document.createElement("div");
+  wrap.className = "msg-assistant cd-job-msg";
+  wrap.innerHTML =
+    '<div class="cd-job-shell">' +
+    '  <div class="cd-plan-host"></div>' +
+    '  <div class="cd-done-banner" style="display:none"></div>' +
+    '  <details class="cd-result-details" style="display:none"><summary>改动说明与验收步骤</summary><div class="cd-result-body"></div></details>' +
+    "</div>" +
+    '<div class="msg-meta">来源：写码顾问 · 数据源：本机写码 · 意图：code_dev · ' + esc(jobId) + "</div>";
+  $("msgs").appendChild(wrap);
+  const planHost = wrap.querySelector(".cd-plan-host");
+  const bannerEl = wrap.querySelector(".cd-done-banner");
+  const detailsEl = wrap.querySelector(".cd-result-details");
+  const resultBody = wrap.querySelector(".cd-result-body");
+  const startedAt = Date.now();
+  let steps = initCodingSteps();
+  let finished = false;
+  let durationText = "0s";
+
+  const paintPlan = () => {
+    planHost.innerHTML = renderCodingPlanHtml(steps, { heading: "写码进度 · " + jobId, duration: durationText });
+  };
+  paintPlan();
+
+  const durTimer = setInterval(() => {
+    if (finished) { clearInterval(durTimer); return; }
+    durationText = formatDuration((Date.now() - startedAt) / 1000);
+    paintPlan();
+  }, 1000);
+
+  const finish = (ev) => {
+    if (finished) return;
+    finished = true;
+    clearInterval(durTimer);
+    durationText = formatDuration((Date.now() - startedAt) / 1000);
+    const mismatch = (ev && ev.job && ev.job.sync_mismatch) || "";
+    let ok = !!(ev && ev.ok);
+    if (ok && mismatch) ok = false;
+    steps = sealCodingSteps(steps, !ok);
+    paintPlan();
+    const synced = (ev && ev.synced_files) || (ev && ev.job && ev.job.synced_files) || [];
+    const n = synced.length;
+    bannerEl.style.display = "";
+    bannerEl.className = "cd-done-banner " + (ok ? "ok" : "err");
+    bannerEl.innerHTML =
+      '<span class="cd-done-icon">' + (ok ? "✓" : "!") + "</span>" +
+      "<div><strong>" + (ok ? "写码完成" : (mismatch ? "写码完成但模块可能不对" : "写码结束")) + "</strong> · 用时 " + esc(durationText) +
+      (ok ? " · 已同步 " + n + " 个文件到本机（未自动 commit）" : " · " + esc(mismatch || (ev && ev.error) || "失败")) +
+      (n && ok ? '<div class="cd-synced">' + esc(synced.slice(0, 8).join("、")) + (n > 8 ? " …" : "") + "</div>" : "") +
+      (mismatch ? '<div class="cd-warn-box" style="margin-top:8px">' + esc(mismatch) + "</div>" : "") +
+      "</div>";
+    const body = extractCodeDevResultBody((ev && ev.reply) || "");
+    if (body) {
+      detailsEl.style.display = "";
+      resultBody.innerHTML = md(stripMarks(body));
+    }
+    const conv = curConv();
+    const summaryText = (ok ? "✅ 写码完成" : "❌ 写码结束") + "（" + jobId + "，" + durationText + (n ? "，同步 " + n + " 个文件" : "") + "）";
+    if (conv) {
+      conv.messages.push({ role: "assistant", text: summaryText + (body ? "\n\n" + body : ""), thinking: null, chart: null, table: null, meta: "来源：写码顾问 · 数据源：本机写码 · 意图：code_dev · " + jobId });
+      renderConvList();
+      saveConvs();
+    }
+    document.querySelector(".chat-body").scrollTop = document.querySelector(".chat-body").scrollHeight;
+  };
+
+  const onStreamEvent = (ev) => {
+    if (!ev || !ev.type) return;
+    if (ev.type === "step") {
+      steps = applyCodingStep(steps, ev);
+      paintPlan();
+    } else if (ev.type === "done") {
+      finish(ev);
+    } else if (ev.type === "error") {
+      finish({ ok: false, status: "failed", error: ev.message || ev.detail, reply: ev.message || ev.detail });
+    }
+  };
+
+  fetch("/api/code-dev/jobs/" + encodeURIComponent(jobId) + "/stream", {
+    method: "GET",
+    headers: { Accept: "text/event-stream" },
+  }).then(async (r) => {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = "";
+    let terminal = false;
+    while (!terminal) {
+      const { done: rd, value } = await reader.read();
+      if (rd) break;
+      pending += decoder.decode(value, { stream: true });
+      const parts = pending.split("\n\n");
+      pending = parts.pop() || "";
+      for (const block of parts) {
+        for (const line of block.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (!raw) continue;
+          try {
+            const ev = JSON.parse(raw);
+            onStreamEvent(ev);
+            if (ev.type === "done" || ev.type === "error") terminal = true;
+          } catch (_) {}
+        }
+      }
+      document.querySelector(".chat-body").scrollTop = document.querySelector(".chat-body").scrollHeight;
+    }
+    if (!finished) {
+      const jr = await fetch("/api/code-dev/jobs/" + encodeURIComponent(jobId));
+      const jd = await jr.json();
+      if (jd && jd.job && ["succeeded", "failed", "cancelled"].indexOf(jd.job.status) >= 0) {
+        finish({ ok: jd.job.status === "succeeded", status: jd.job.status, reply: jd.reply, error: jd.job.error, synced_files: jd.job.synced_files, job: jd.job });
+      }
+    }
+  }).catch((e) => {
+    finish({ ok: false, reply: "进度订阅失败：" + e.message, error: e.message });
+  });
 }
 async function send(pre) {
   if (!curConv()) newConv();
@@ -781,6 +1383,12 @@ async function send(pre) {
   const text = (pre || input.value).trim();
   if (!text) return;
   input.value = "";
+  const isOpt = text.startsWith("【写码需求选项已确认】");
+  const isCodeDevFlow = isOpt || /写码|改界面|改代码|报表中心|消息中心|开发|菜单|页面|接口|工时/.test(text);
+  touchCodeDevBrief(text, isCodeDevFlow);
+  const payload = { message: text };
+  const brief = getCodeDevBrief();
+  if (brief && isCodeDevFlow) payload.code_dev_brief = brief;
   if ($("welcome").style.display !== "none") { $("welcome").style.display = "none"; $("msgs").classList.add("show"); }
   renderMsg("user", text);
   $("btnSend").disabled = true;
@@ -789,7 +1397,7 @@ async function send(pre) {
     const r = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify(payload),
     });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const reader = r.body.getReader();
@@ -858,17 +1466,21 @@ async function send(pre) {
             ev.table.map(row => "<tr><td>" + esc(row.label) + "</td><td>" + esc(row.value) + "</td></tr>").join("");
           bubble.el.insertBefore(tbl, bubble.meta);
         }
-        const srcTxt = ev.source === "llm" ? "LLM" : ev.source === "offline" ? "离线提示" : (ev.llm_tried ? "LLM 未连通 → 规则引擎" : "规则引擎");
-        const it = ev.intent ? (ev.intent.metric ? " · " + ev.intent.metric + "/" + ev.intent.type : " · " + (ev.intent.type || "")) : "";
-        const meta = "来源：" + srcTxt + (ev.llm_error ? "（" + ev.llm_error + "）" : "") +
-          " · 数据源：" + dsLabel(ev.data_source) + " · 意图：" + it + (ev.note ? " " + ev.note : "");
+        const meta = formatChatMeta(ev);
         bubble.meta.style.display = "";
         bubble.meta.textContent = meta;
+        if (ev.code_dev_ui) mountCodeDevUi(bubble.el, ev.code_dev_ui, bubble.meta);
+        else {
+          const fb = parseCodeDevUiFromText(bubble.replyText, "");
+          if (fb) mountCodeDevUi(bubble.el, fb, bubble.meta);
+        }
         const conv = curConv();
+        if (conv && ev.code_dev_brief) conv.codeDevBrief = ev.code_dev_brief;
         if (conv) {
           conv.messages.push({
             role: "assistant", text: bubble.replyText, thinking: bubble.thinkingText || null,
             chart: ev.chart || null, table: ev.table || null, meta,
+            code_dev_ui: ev.code_dev_ui || null,
           });
           renderConvList();
           saveConvs();
@@ -938,6 +1550,13 @@ function fillForm(c) {
   $("ds_base_url").value = ds.base_url || (prov === "ollama" ? "http://127.0.0.1:11434" : "https://api.deepseek.com");
   $("ds_model").value = ds.model || (prov === "ollama" ? "" : "deepseek-chat");
   syncLlmProvider();
+  const cd = c.code_dev || {};
+  $("code_dev_enabled").checked = !!cd.enabled;
+  $("code_dev_cursor_api_key").value = cd.cursor_api_key || "";
+  $("code_dev_model").value = cd.model || "composer-2.5";
+  $("code_dev_max_concurrent").value = cd.max_concurrent != null ? cd.max_concurrent : 1;
+  $("code_dev_cursor_timeout_sec").value = cd.cursor_timeout_sec != null ? cd.cursor_timeout_sec : 2700;
+  $("code_dev_default_workspace").value = cd.default_workspace || "";
   updateSummaries(c);
 }
 function syncLlmProvider() {
@@ -985,6 +1604,14 @@ function collect() {
       provider: document.querySelector('input[name="llm_provider"]:checked').value,
       api_key: $("ds_api_key").value, base_url: $("ds_base_url").value.trim(),
       model: $("ds_model").value.trim(),
+    },
+    code_dev: {
+      enabled: $("code_dev_enabled").checked,
+      cursor_api_key: $("code_dev_cursor_api_key").value,
+      model: ($("code_dev_model").value.trim() || "composer-2.5"),
+      max_concurrent: Math.max(1, Number($("code_dev_max_concurrent").value) || 1),
+      cursor_timeout_sec: Math.max(60, Number($("code_dev_cursor_timeout_sec").value) || 2700),
+      default_workspace: $("code_dev_default_workspace").value.trim(),
     },
   };
 }
@@ -1166,6 +1793,29 @@ document.querySelectorAll('input[name="auth_type"]').forEach(r => r.onchange = t
 document.querySelectorAll('input[name="llm_provider"]').forEach(r => r.onchange = syncLlmProvider);
 $("btnTestMes").onclick = () => runTest("/api/config/test/mes", "mesTestResult", "MES 连接");
 $("btnTestDs").onclick = () => runTest("/api/config/test/deepseek", "dsTestResult", "LLM 引擎");
+$("btnTestCodeDev").onclick = async () => {
+  const el = $("codeDevTestResult");
+  el.className = "test-result"; el.style.display = "block"; el.style.color = "var(--text-2)";
+  el.textContent = "写码就绪检测中…";
+  try {
+    // 先保存当前表单到内存探测：用 /api/cli（读已落盘配置）。提示用户先保存。
+    const r = await fetch("/api/cli", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cmd: "code-dev-status", args: [] }),
+    });
+    const d = await r.json();
+    const ready = !!(d.code_dev && d.code_dev.ok);
+    el.className = "test-result " + (ready ? "ok" : "fail");
+    el.textContent = (ready ? "✅ " : "⚠️ ") + (d.detail || d.reply || JSON.stringify(d));
+    if (!ready) {
+      el.textContent += "（若刚改表单，请先点「保存全部配置」再测）";
+    }
+  } catch (e) {
+    el.className = "test-result fail";
+    el.textContent = "❌ 请求失败：" + e.message;
+  }
+};
 $("btnSave").onclick = saveConfig;
 $("btnReload").onclick = loadConfig;
 $("btnNewChat").onclick = newConv;

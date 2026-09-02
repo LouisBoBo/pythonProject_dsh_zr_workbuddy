@@ -86,6 +86,73 @@ window.__ModuleLoader__.load({
       "#dshMesMsgs .think[open] summary:before{content:'▾'}" +
       "#dshMesMsgs .think .think-body{padding:0 12px 10px;font-size:12px;color:#6b7280;white-space:pre-wrap;word-break:break-word;line-height:1.55;border-top:1px dashed #e5e9f0}" +
       "#dshMesMsgs .status-line{color:#9ca3af;font-size:12px;font-style:italic}" +
+      "#dshMesMsgs .cd-card{margin-top:10px;border:1px solid #e8ecf4;border-radius:12px;background:#fff;overflow:hidden}" +
+      "#dshMesMsgs .cd-card.done{opacity:.88}" +
+      "#dshMesMsgs .cd-head{padding:10px 12px 6px}" +
+      "#dshMesMsgs .cd-title-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}" +
+      "#dshMesMsgs .cd-badge{font-size:11px;font-weight:600;color:#4d6bfe;background:rgba(77,107,254,.1);padding:2px 8px;border-radius:999px}" +
+      "#dshMesMsgs .cd-hint{font-size:11px;color:#9ca3af}" +
+      "#dshMesMsgs .cd-summary{font-size:13px;font-weight:600;margin:0 0 2px}" +
+      "#dshMesMsgs .cd-desc{font-size:12px;color:#6b7280;margin:0}" +
+      "#dshMesMsgs .cd-group{padding:8px 12px;border-top:1px solid #eef0f3}" +
+      "#dshMesMsgs .cd-group-label{font-size:12px;color:#6b7280;margin-bottom:6px;display:flex;gap:6px;align-items:center}" +
+      "#dshMesMsgs .cd-req{color:#b45309;font-size:11px}" +
+      "#dshMesMsgs .cd-mode{font-size:11px;color:#9ca3af}" +
+      "#dshMesMsgs .cd-opts{display:flex;flex-wrap:wrap;gap:6px}" +
+      "#dshMesMsgs .cd-opt{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;cursor:pointer;background:#f7f8fc}" +
+      "#dshMesMsgs .cd-opt.on{border-color:#4d6bfe;background:rgba(77,107,254,.08)}" +
+      "#dshMesMsgs .cd-field{display:block;padding:8px 12px;border-top:1px solid #eef0f3}" +
+      "#dshMesMsgs .cd-label{display:block;font-size:11px;color:#6b7280;margin-bottom:4px}" +
+      "#dshMesMsgs .cd-input{width:100%;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:8px;padding:7px 9px;font-size:12px;font-family:inherit}" +
+      "#dshMesMsgs .cd-textarea{resize:vertical;min-height:56px}" +
+      "#dshMesMsgs .cd-error{color:#b91c1c;font-size:12px;padding:0 12px 6px;margin:0}" +
+      "#dshMesMsgs .cd-actions{display:flex;gap:8px;justify-content:flex-end;padding:8px 12px 10px;border-top:1px solid #eef0f3}" +
+      "#dshMesMsgs .cd-btn{border:1px solid #e5e7eb;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;background:#fff}" +
+      "#dshMesMsgs .cd-btn.confirm{background:#4d6bfe;color:#fff;border-color:#4d6bfe}" +
+      "#dshMesMsgs .cd-btn:disabled{opacity:.45;cursor:not-allowed}" +
+      "#dshMesMsgs .cd-chosen{padding:6px 12px 10px;font-size:12px}" +
+      "#dshMesMsgs .cd-chosen-row{display:flex;gap:8px;margin:3px 0}" +
+      "#dshMesMsgs .cd-k{color:#9ca3af;min-width:56px;flex:none}" +
+      "#dshMesMsgs .coding-plan{margin:10px 0 4px;padding:10px 12px;border:1px solid #e8eef5;border-radius:10px;background:#f8fafc;max-width:100%}" +
+      "#dshMesMsgs .coding-plan.is-running{border-color:#bfdbfe;background:#f0f7ff}" +
+      "#dshMesMsgs .coding-plan.is-done{border-color:#bbf7d0;background:#f0fdf4}" +
+      "#dshMesMsgs .cp-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}" +
+      "#dshMesMsgs .cp-badge{font-size:12px;font-weight:700;color:#1e3a5f;flex-shrink:0}" +
+      "#dshMesMsgs .cp-summary{flex:1;font-size:12px;color:#64748b;min-width:100px}" +
+      "#dshMesMsgs .cp-duration{font-size:11px;color:#94a3b8;font-variant-numeric:tabular-nums}" +
+      "#dshMesMsgs .cp-list{margin:8px 0 0;padding:0;list-style:none}" +
+      "#dshMesMsgs .cp-item{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-top:1px solid #eef2f7}" +
+      "#dshMesMsgs .cp-item:first-child{border-top:none;padding-top:2px}" +
+      "#dshMesMsgs .cp-icon{width:22px;height:22px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center}" +
+      "#dshMesMsgs .cp-pending{width:20px;height:20px;border-radius:50%;background:#e2e8f0;color:#64748b;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}" +
+      "#dshMesMsgs .cp-check{width:20px;height:20px;border-radius:50%;background:#dcfce7;color:#15803d;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}" +
+      "#dshMesMsgs .cp-fail{width:20px;height:20px;border-radius:50%;background:#fee2e2;color:#be123c;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}" +
+      "#dshMesMsgs .cp-spinner{width:16px;height:16px;border:2px solid #bfdbfe;border-top-color:#2563eb;border-radius:50%;animation:cp-spin 0.7s linear infinite}" +
+      "@keyframes cp-spin{to{transform:rotate(360deg)}}" +
+      "#dshMesMsgs .cp-body{display:flex;flex-direction:column;gap:2px;min-width:0}" +
+      "#dshMesMsgs .cp-title{font-size:13px;font-weight:600;color:#1f2937;line-height:1.45}" +
+      "#dshMesMsgs .cp-state{font-size:11px;color:#94a3b8;font-weight:500}" +
+      "#dshMesMsgs .cp-item.is-running .cp-title,#dshMesMsgs .cp-item.is-running .cp-state{color:#2563eb}" +
+      "#dshMesMsgs .cd-done-banner{display:flex;align-items:flex-start;gap:10px;margin-top:10px;padding:12px 14px;border-radius:10px;font-size:13px;line-height:1.5}" +
+      "#dshMesMsgs .cd-done-banner.ok{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46}" +
+      "#dshMesMsgs .cd-done-banner.err{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}" +
+      "#dshMesMsgs .cd-done-icon{font-size:18px;font-weight:700;flex:none}" +
+      "#dshMesMsgs .cd-synced{margin-top:6px;font-size:12px;color:#047857;word-break:break-all}" +
+      "#dshMesMsgs .cd-result-details{margin-top:10px;border:1px solid #e8ecf4;border-radius:10px;background:#f7f8fc;overflow:hidden}" +
+      "#dshMesMsgs .cd-result-details summary{cursor:pointer;padding:8px 12px;font-size:12px;font-weight:600;color:#64748b;list-style:none}" +
+      "#dshMesMsgs .cd-result-details summary::-webkit-details-marker{display:none}" +
+      "#dshMesMsgs .cd-result-body{padding:0 12px 12px;font-size:13px;max-height:300px;overflow-y:auto}" +
+      "#dshMesMsgs .cd-goal-banner{margin:0 12px 8px;padding:10px 12px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;font-size:12px;line-height:1.55}" +
+      "#dshMesMsgs .cd-goal-banner strong{color:#1e40af;display:block;margin-bottom:4px;font-size:11px;text-transform:uppercase;letter-spacing:.04em}" +
+      "#dshMesMsgs .cd-target-row{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 8px}" +
+      "#dshMesMsgs .cd-target-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:11px;color:#166534;font-weight:600}" +
+      "#dshMesMsgs .cd-path-list{margin:0 12px 8px;padding:8px 10px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0;font-size:11px;color:#64748b;line-height:1.5}" +
+      "#dshMesMsgs .cd-path-list code{font-size:10px;color:#475569;background:transparent;padding:0}" +
+      "#dshMesMsgs .cd-warn-box{margin:0 12px 8px;padding:8px 10px;border-radius:8px;background:#fffbeb;border:1px solid #fde68a;font-size:12px;color:#92400e;line-height:1.45}" +
+      "#dshMesMsgs .cd-err-box{margin:0 12px 8px;padding:8px 10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;font-size:12px;color:#991b1b;line-height:1.45}" +
+      "#dshMesMsgs .cd-checklist{margin:0 12px 8px;padding:8px 10px;border-radius:8px;background:#fafafa;border:1px solid #e5e7eb;font-size:12px}" +
+      "#dshMesMsgs .cd-checklist label{display:flex;align-items:flex-start;gap:8px;cursor:pointer;line-height:1.45}" +
+      "#dshMesMsgs .cd-notes-required .cd-label::after{content:' *';color:#dc2626}" +
       "#dshMesChips{padding:0 16px 8px;display:flex;gap:6px;flex-wrap:wrap}" +
       "#dshMesChips button{font-size:11px;padding:4px 10px;border-radius:999px;border:1px solid #e5e7eb;background:#fff;color:#374151;cursor:pointer}" +
       "#dshMesChips button:hover{border-color:#4d6bfe;color:#4d6bfe}" +
@@ -121,7 +188,364 @@ window.__ModuleLoader__.load({
       if (ds === "mes") return "MES 实时";
       if (ds === "assistant") return "助手";
       if (ds === "pcb_expert") return "PCB 专家";
+      if (ds === "code_dev") return "本机写码";
       return "演示数据";
+    }
+    function srcLabel(ev) {
+      if (ev && ev.source === "llm") return "LLM";
+      if (ev && ev.source === "offline") return "离线提示";
+      if (ev && ev.source === "code_dev") return "写码顾问";
+      if (ev && ev.source === "disabled") return "已停用";
+      return "规则引擎";
+    }
+    function formatChatMeta(ev) {
+      var srcTxt = srcLabel(ev);
+      var ds = dataSourceLabel(ev && ev.data_source);
+      var metricMap = { options: "需求选项", propose: "写码确认", code_dev: "本机写码" };
+      var intentTxt = "本机写码";
+      var it = (ev && ev.intent) || {};
+      if (it.type === "code_dev" && it.metric) intentTxt = metricMap[it.metric] || String(it.metric);
+      else if (it.type) intentTxt = metricMap[it.type] || String(it.type);
+      return "来源：" + srcTxt + " · 数据源：" + ds + " · 意图：" + intentTxt;
+    }
+    var CODE_DEV_PIPELINE = [
+      { id: "boot", title: "任务已排队" },
+      { id: "sandbox-prep", title: "沙箱就绪" },
+      { id: "dev", title: "Cursor 改码" },
+      { id: "sync", title: "同步到本机" },
+    ];
+    var CODE_DEV_STEP_MAP = { "agent-loop": "dev", "cursor-local": "dev" };
+    function initCodingSteps() {
+      return CODE_DEV_PIPELINE.map(function (p) {
+        return { id: p.id, title: p.title, state: p.id === "boot" ? "done" : "pending" };
+      });
+    }
+    function pipelineIndex(id) {
+      for (var i = 0; i < CODE_DEV_PIPELINE.length; i++) {
+        if (CODE_DEV_PIPELINE[i].id === id) return i;
+      }
+      return CODE_DEV_PIPELINE.length + 99;
+    }
+    function normalizeCodeDevStepId(id) {
+      return CODE_DEV_STEP_MAP[id] || id;
+    }
+    function markPriorStepsDone(list, id) {
+      var pIdx = pipelineIndex(id);
+      return list.map(function (s) {
+        if (pipelineIndex(s.id) < pIdx && s.state !== "done" && s.state !== "error") {
+          return Object.assign({}, s, { state: "done" });
+        }
+        return s;
+      });
+    }
+    function sealCodingSteps(steps, asError) {
+      return (steps || []).filter(function (s) {
+        return s.id !== "status" && s.id !== "cursor-heartbeat";
+      }).map(function (s) {
+        if (asError) {
+          if (s.state === "running" || s.state === "waiting") return Object.assign({}, s, { state: "error" });
+          return s;
+        }
+        if (s.state !== "error") return Object.assign({}, s, { state: "done" });
+        return s;
+      });
+    }
+    function applyCodingStep(steps, event) {
+      var rawId = event && event.id;
+      if (!rawId || rawId === "status" || rawId === "cursor-heartbeat") return steps;
+      var id = normalizeCodeDevStepId(rawId);
+      var title = String(event.title || "").trim();
+      var nextState = event.state || "running";
+      var list = (steps && steps.length) ? steps.slice() : initCodingSteps();
+      var idx = -1;
+      for (var i = 0; i < list.length; i++) { if (list[i].id === id) { idx = i; break; } }
+      if (idx < 0) return list;
+      var cur = list[idx];
+      var merged = Object.assign({}, cur, { state: nextState });
+      if (title) merged.title = title;
+      if (id === "dev") {
+        if (rawId === "cursor-local" && nextState === "done") {
+          merged.state = "running";
+        } else if (rawId === "agent-loop" && nextState === "done") {
+          merged.state = "done";
+        } else if (nextState === "running") {
+          merged.state = "running";
+        }
+      }
+      list[idx] = merged;
+      if (nextState === "running" || (id === "dev" && rawId === "agent-loop" && nextState === "done") || nextState === "done") {
+        list = markPriorStepsDone(list, id);
+      }
+      if (id === "sync" && nextState === "running") {
+        list = list.map(function (s) {
+          return s.id === "dev" && s.state === "running" ? Object.assign({}, s, { state: "done" }) : s;
+        });
+      }
+      return list;
+    }
+    function codingPlanSummary(steps) {
+      var list = (steps || []).filter(function (s) { return s.state !== "pending"; });
+      if (!list.length) return "准备中…";
+      var total = list.length;
+      var done = list.filter(function (s) { return s.state === "done"; }).length;
+      if (list.some(function (s) { return s.state === "running"; })) return "正在进行 " + done + "/" + total;
+      var err = list.filter(function (s) { return s.state === "error"; }).length;
+      if (err) return "完成 " + done + "/" + total + "（" + err + " 步失败）";
+      if (done === total) return "已全部完成（" + total + " 步）";
+      return "共 " + total + " 步";
+    }
+    function renderCodingPlanHtml(steps, opts) {
+      opts = opts || {};
+      var visible = (steps || []).filter(function (s) { return s.state !== "pending"; });
+      if (!visible.length) visible = [{ id: "boot", title: "任务已排队", state: "running" }];
+      var summary = opts.summary || codingPlanSummary(visible);
+      var running = visible.some(function (s) { return s.state === "running"; });
+      var allDone = visible.length && visible.every(function (s) { return s.state === "done" || s.state === "error"; });
+      var html = '<div class="coding-plan' + (running ? " is-running" : "") + (allDone && !running ? " is-done" : "") + '">';
+      html += '<div class="cp-head"><span class="cp-badge">' + esc(opts.heading || "本轮进度") + "</span>";
+      html += '<span class="cp-summary">' + esc(summary) + "</span>";
+      if (opts.duration) html += '<span class="cp-duration">' + esc(opts.duration) + "</span>";
+      html += '</div><ol class="cp-list">';
+      visible.forEach(function (s, i) {
+        var st = s.state || "pending";
+        var icon = '<span class="cp-pending">' + (i + 1) + "</span>";
+        if (st === "running") icon = '<span class="cp-spinner"></span>';
+        else if (st === "done") icon = '<span class="cp-check">✓</span>';
+        else if (st === "error") icon = '<span class="cp-fail">!</span>';
+        var hint = st === "running" ? "进行中" : st === "done" ? "已完成" : st === "error" ? "失败" : "等待中";
+        html += '<li class="cp-item is-' + st + '"><span class="cp-icon">' + icon + '</span><div class="cp-body"><span class="cp-title">' + esc(s.title) + '</span><span class="cp-state">' + hint + "</span></div></li>";
+      });
+      html += "</ol></div>";
+      return html;
+    }
+    function extractCodeDevResultBody(reply) {
+      var raw = String(reply || "").trim();
+      if (!raw) return "";
+      var m = raw.match(/(?:^|\n)(?:##\s*)?(?:改动说明|验收步骤|【同步】)/m);
+      if (m && m.index >= 0) return raw.slice(m.index).replace(/^[\n\r]+/, "").trim();
+      return raw.split("\n").filter(function (l) {
+        return !/^任务\s+ldj-/.test(l.trim()) && !/^已同步\s+\d+/.test(l.trim());
+      }).join("\n").trim() || raw;
+    }
+    function formatDuration(sec) {
+      sec = Math.max(1, Math.round(sec || 0));
+      return sec >= 60 ? Math.floor(sec / 60) + "m " + (sec % 60) + "s" : sec + "s";
+    }
+    function mountCodeDevUi(hostEl, ui, beforeMetaEl, hooks) {
+      if (!hostEl || !ui || !ui.kind) return;
+      var old = hostEl.querySelector(".cd-card");
+      if (old) old.remove();
+      var card = document.createElement("div");
+      card.className = "cd-card";
+      hooks = hooks || {};
+      if (ui.kind === "options") renderCdOptions(card, ui, hooks.send);
+      else if (ui.kind === "propose") renderCdPropose(card, ui, hooks);
+      else return;
+      if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
+      else hostEl.appendChild(card);
+    }
+    function parseCodeDevUiFromText(text, fallbackWs) {
+      var s = String(text || "");
+      function tryJson(body) {
+        try {
+          var o = JSON.parse(body);
+          return o && typeof o === "object" ? o : null;
+        } catch (e) {
+          var a = body.indexOf("{"), b = body.lastIndexOf("}");
+          if (a >= 0 && b > a) {
+            try { return JSON.parse(body.slice(a, b + 1)); } catch (e2) { return null; }
+          }
+          return null;
+        }
+      }
+      var mOpt = s.match(/:::cursor_dev_options\b([\s\S]*?)(?:\n[ \t]*:::|$)/i);
+      if (mOpt) {
+        var options = tryJson(mOpt[1].trim());
+        if (options) return { kind: "options", workspace: fallbackWs || "", options: options };
+      }
+      var mProp = s.match(/:::cursor_dev_propose\b([\s\S]*?)(?:\n[ \t]*:::|$)/i);
+      if (mProp) {
+        var prop = tryJson(mProp[1].trim()) || {};
+        return {
+          kind: "propose",
+          workspace: String(prop.workspace || fallbackWs || "").trim(),
+          requirement: String(prop.requirement || "").trim(),
+          target: String(prop.target || "local"),
+          propose: prop,
+        };
+      }
+      return null;
+    }
+    function renderCdOptions(card, ui, sendFn) {
+      var opts = ui.options || {};
+      var groups = Array.isArray(opts.groups) ? opts.groups : [];
+      var selected = {};
+      groups.forEach(function (g) { selected[g.id] = []; });
+      var html = '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">需求选项</span><span class="cd-hint">勾选即可 · 少打字</span></div>';
+      html += '<p class="cd-summary">' + esc(opts.title || "请确认以下关键项") + "</p>";
+      if (opts.summary) html += '<p class="cd-desc">' + esc(opts.summary) + "</p>";
+      if (ui.original_goal || (ui.brief && ui.brief.original_goal)) {
+        html += '<div class="cd-goal-banner"><strong>原始诉求</strong>' + esc(ui.original_goal || ui.brief.original_goal) + "</div>";
+      }
+      html += "</div>";
+      groups.forEach(function (g) {
+        html += '<div class="cd-group" data-gid="' + esc(g.id) + '"><div class="cd-group-label">' + esc(g.label || g.id);
+        if (g.required !== false) html += '<span class="cd-req">必选</span>';
+        html += '<span class="cd-mode">' + (g.multi ? "可多选" : "单选") + '</span></div><div class="cd-opts">';
+        (g.options || []).forEach(function (o) {
+          var typ = g.multi ? "checkbox" : "radio";
+          html += '<label class="cd-opt"><input type="' + typ + '" name="cd-' + esc(g.id) + '" value="' + esc(o.id) + '"><span>' + esc(o.label || o.id) + "</span></label>";
+        });
+        html += "</div></div>";
+      });
+      html += '<label class="cd-field' + (opts.notes_required ? " cd-notes-required" : "") + '"><span class="cd-label">备注' +
+        (opts.notes_required ? "（必填）" : "（可选）") + '</span><textarea class="cd-input cd-textarea cd-notes" rows="3" placeholder="' +
+        esc(opts.notes_placeholder || "补充约束、验收点…") + '"></textarea></label>';
+      html += '<p class="cd-error" style="display:none"></p>';
+      html += '<div class="cd-actions"><button type="button" class="cd-btn cd-skip">跳过本卡</button><button type="button" class="cd-btn confirm cd-ok">确认选项</button></div>';
+      card.innerHTML = html;
+      Array.prototype.forEach.call(card.querySelectorAll(".cd-opt input"), function (inp) {
+        inp.addEventListener("change", function () {
+          var gEl = inp.closest(".cd-group");
+          var gid = gEl.getAttribute("data-gid");
+          var g = groups.find(function (x) { return x.id === gid; });
+          if (!g) return;
+          if (g.multi) {
+            selected[gid] = Array.prototype.map.call(gEl.querySelectorAll("input:checked"), function (x) { return x.value; });
+          } else {
+            selected[gid] = inp.checked ? [inp.value] : [];
+          }
+          Array.prototype.forEach.call(gEl.querySelectorAll(".cd-opt"), function (lab) {
+            lab.classList.toggle("on", !!lab.querySelector("input:checked"));
+          });
+        });
+      });
+      var errEl = card.querySelector(".cd-error");
+      card.querySelector(".cd-skip").onclick = function () {
+        card.className = "cd-card done";
+        card.innerHTML = '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">需求选项</span></div><p class="cd-summary">已跳过本卡，可继续文字补充</p></div>';
+      };
+      card.querySelector(".cd-ok").onclick = function () {
+        for (var i = 0; i < groups.length; i++) {
+          var g = groups[i];
+          if (g.required === false) continue;
+          if (!(selected[g.id] || []).length) {
+            errEl.style.display = "";
+            errEl.textContent = "请先选择：「" + (g.label || g.id) + "」";
+            return;
+          }
+        }
+        errEl.style.display = "none";
+        var notes = (card.querySelector(".cd-notes").value || "").trim();
+        if (opts.notes_required && !notes) {
+          errEl.style.display = "";
+          errEl.textContent = "请填写备注：业务模块、页面名称、接口路径等（必填）";
+          return;
+        }
+        var lines = ["【写码需求选项已确认】"];
+        if (ui.workspace) lines.push("工程路径：" + ui.workspace);
+        groups.forEach(function (g) {
+          var ids = selected[g.id] || [];
+          var labels = (g.options || []).filter(function (o) { return ids.indexOf(o.id) >= 0; }).map(function (o) { return o.label || o.id; });
+          if (labels.length) lines.push((g.label || g.id) + "：" + labels.join("、"));
+        });
+        if (notes) lines.push("备注：" + notes);
+        card.className = "cd-card done";
+        Array.prototype.forEach.call(card.querySelectorAll("input,textarea,button"), function (el) { el.disabled = true; });
+        if (sendFn) sendFn(lines.join("\n"));
+      };
+    }
+    function renderCdPropose(card, ui, hooks) {
+      hooks = hooks || {};
+      var ws0 = ui.workspace || "";
+      var req0 = ui.requirement || (ui.propose && ui.propose.requirement) || "";
+      var goal = ui.original_goal || (ui.brief && ui.brief.original_goal) || (ui.propose && ui.propose.original_goal) || "";
+      var mod = (ui.target_hints && ui.target_hints.module) || (ui.propose && ui.propose.target_module) || "";
+      var paths = (ui.target_hints && ui.target_hints.expected_paths) || (ui.propose && ui.propose.expected_paths) || [];
+      var val = ui.validation || {};
+      var html =
+        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">写码确认</span><span class="cd-hint">核对后再开工</span></div>' +
+        '<p class="cd-summary">请确认原始诉求、目标模块与需求摘要</p></div>';
+      if (goal) {
+        html += '<div class="cd-goal-banner"><strong>原始诉求</strong>' + esc(goal) + "</div>";
+      }
+      if (mod) {
+        html += '<div class="cd-target-row"><span class="cd-target-chip">🎯 目标模块：' + esc(mod) + "</span></div>";
+      }
+      if (paths && paths.length) {
+        html += '<div class="cd-path-list"><div>预期改动区域：</div>' +
+          paths.slice(0, 6).map(function (p) { return "<code>" + esc(p) + "</code>"; }).join(" · ") + "</div>";
+      }
+      if (val.errors && val.errors.length) {
+        html += '<div class="cd-err-box">' + val.errors.map(esc).join("<br>") + "</div>";
+      } else if (val.warnings && val.warnings.length) {
+        html += '<div class="cd-warn-box">' + val.warnings.map(esc).join("<br>") + "</div>";
+      }
+      html +=
+        '<label class="cd-field"><span class="cd-label">本机工程绝对路径</span><input class="cd-input cd-ws" value="' + esc(ws0) + '"></label>' +
+        '<label class="cd-field"><span class="cd-label">需求摘要（可编辑，须含原始业务名称）</span><textarea class="cd-input cd-textarea cd-req" rows="8">' + esc(req0) + "</textarea></label>";
+      if (val.warnings && val.warnings.length && !(val.errors && val.errors.length)) {
+        html += '<div class="cd-checklist"><label><input type="checkbox" class="cd-ack"><span>我已核对原始诉求与目标模块，确认摘要不偏离业务目标</span></label></div>';
+      }
+      html += '<p class="cd-error" style="display:none"></p>' +
+        '<div class="cd-actions"><button type="button" class="cd-btn cd-cancel">取消</button>' +
+        '<button type="button" class="cd-btn confirm cd-go">确认并用 Cursor 写入本机</button></div>';
+      card.innerHTML = html;
+      var errEl = card.querySelector(".cd-error");
+      var ackEl = card.querySelector(".cd-ack");
+      var goBtn = card.querySelector(".cd-go");
+      if (val.errors && val.errors.length) goBtn.disabled = true;
+      card.querySelector(".cd-cancel").onclick = function () {
+        card.className = "cd-card done";
+        card.innerHTML = '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">写码确认</span></div><p class="cd-summary">已取消，未启动写码</p></div>';
+      };
+      goBtn.onclick = function () {
+        var workspace = (card.querySelector(".cd-ws").value || "").trim();
+        var requirement = (card.querySelector(".cd-req").value || "").trim();
+        if (!workspace || !requirement) {
+          errEl.style.display = "";
+          errEl.textContent = "请填写工程路径与需求摘要";
+          return;
+        }
+        if (ackEl && !ackEl.checked) {
+          errEl.style.display = "";
+          errEl.textContent = "请先勾选确认：摘要与原始诉求一致";
+          return;
+        }
+        var btn = goBtn;
+        btn.disabled = true;
+        btn.textContent = "启动中…";
+        errEl.style.display = "none";
+        var briefPayload = (typeof hooks.getBrief === "function" ? hooks.getBrief() : null) || ui.brief || null;
+        fetch(engineBase() + "/api/code-dev/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace: workspace, requirement: requirement, code_dev_brief: briefPayload }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d.ok) {
+              errEl.style.display = "";
+              errEl.textContent = d.detail || d.reply || "启动失败";
+              btn.disabled = false;
+              btn.textContent = "确认并用 Cursor 写入本机";
+              return;
+            }
+            card.className = "cd-card done";
+            card.innerHTML =
+              '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">写码确认</span></div><p class="cd-summary">已启动</p></div>' +
+              '<div class="cd-chosen"><div class="cd-chosen-row"><span class="cd-k">任务</span><span class="cd-v">' + esc(d.job_id || "") +
+              '</span></div><div class="cd-chosen-row"><span class="cd-k">工程</span><span class="cd-v">' + esc(workspace) + "</span></div></div>";
+            if (typeof hooks.onStarted === "function") hooks.onStarted(d);
+            else startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")));
+          })
+          .catch(function (e) {
+            errEl.style.display = "";
+            errEl.textContent = "请求失败：" + e.message;
+            btn.disabled = false;
+            btn.textContent = "确认并用 Cursor 写入本机";
+          });
+      };
     }
 
     function buildPanel() {
@@ -164,9 +588,39 @@ window.__ModuleLoader__.load({
         try { localStorage.setItem(LS_KEY, JSON.stringify(convs.slice(-50))); } catch (e) {}
       }
       function newConv() {
-        cur = { id: Date.now(), msgs: [] };
+        cur = { id: Date.now(), msgs: [], codeDevBrief: null };
         convs.push(cur);
         save();
+      }
+      function touchCodeDevBrief(text, isCodeDevFlow) {
+        if (!cur) return null;
+        if (!cur.codeDevBrief) {
+          cur.codeDevBrief = { original_goal: "", workspace: "", selections: [], notes: [], option_rounds: 0 };
+        }
+        var b = cur.codeDevBrief;
+        var raw = String(text || "").trim();
+        if (raw.indexOf("【写码需求选项已确认】") === 0) {
+          b.option_rounds = (b.option_rounds || 0) + 1;
+          var lines = raw.replace(/^【写码需求选项已确认】\n?/, "").split("\n").filter(function (x) { return x.trim(); });
+          b.selections = b.selections || [];
+          b.selections.push({ round: b.option_rounds, lines: lines });
+          lines.forEach(function (ln) {
+            if (ln.indexOf("工程路径：") === 0) b.workspace = ln.slice(5).trim();
+            if (ln.indexOf("备注：") === 0) {
+              b.notes = b.notes || [];
+              var n = ln.slice(3).trim();
+              if (n && b.notes.indexOf(n) < 0) b.notes.push(n);
+            }
+          });
+        } else if (isCodeDevFlow && raw.indexOf("【写码确认】") !== 0) {
+          if ((!b.original_goal || raw.length > b.original_goal.length) && raw.length >= 6) {
+            b.original_goal = raw;
+          }
+        }
+        return b;
+      }
+      function getCodeDevBrief() {
+        return (cur && cur.codeDevBrief) ? cur.codeDevBrief : null;
       }
       function renderMsg(role, text, chart, table, meta, persist, thinking) {
         var div = document.createElement("div");
@@ -201,6 +655,146 @@ window.__ModuleLoader__.load({
         return div;
       }
 
+      function startCodeDevJobWatch(jobId, startReply, workspace) {
+        if (!jobId) {
+          renderMsg("assistant", startReply || "已启动", null, null,
+            "来源：写码顾问 · 数据源：本机写码 · 意图：本机写码", true, "");
+          return;
+        }
+        if (!cur) newConv();
+        var wrap = document.createElement("div");
+        wrap.className = "assist cd-job-msg";
+        wrap.innerHTML =
+          '<div class="cd-job-shell">' +
+          '  <div class="cd-plan-host"></div>' +
+          '  <div class="cd-done-banner" style="display:none"></div>' +
+          '  <details class="cd-result-details" style="display:none"><summary>改动说明与验收步骤</summary><div class="cd-result-body"></div></details>' +
+          "</div>" +
+          '<div class="meta">来源：写码顾问 · 数据源：本机写码 · 意图：本机写码 · ' + esc(jobId) + "</div>";
+        msgs.appendChild(wrap);
+        msgs.scrollTop = msgs.scrollHeight;
+        var planHost = wrap.querySelector(".cd-plan-host");
+        var bannerEl = wrap.querySelector(".cd-done-banner");
+        var detailsEl = wrap.querySelector(".cd-result-details");
+        var resultBody = wrap.querySelector(".cd-result-body");
+        var startedAt = Date.now();
+        var steps = initCodingSteps();
+        var finished = false;
+        var durationText = "0s";
+        function paintPlan() {
+          planHost.innerHTML = renderCodingPlanHtml(steps, { heading: "写码进度 · " + jobId, duration: durationText });
+        }
+        paintPlan();
+        var durTimer = setInterval(function () {
+          if (finished) { clearInterval(durTimer); return; }
+          durationText = formatDuration((Date.now() - startedAt) / 1000);
+          paintPlan();
+        }, 1000);
+        function finish(ev) {
+          if (finished) return;
+          finished = true;
+          clearInterval(durTimer);
+          durationText = formatDuration((Date.now() - startedAt) / 1000);
+          var ok = !!(ev && ev.ok);
+          var mismatch = (ev && ev.job && ev.job.sync_mismatch) || "";
+          if (ok && mismatch) ok = false;
+          steps = sealCodingSteps(steps, !ok);
+          paintPlan();
+          var synced = (ev && ev.synced_files) || (ev && ev.job && ev.job.synced_files) || [];
+          var n = synced.length;
+          bannerEl.style.display = "";
+          bannerEl.className = "cd-done-banner " + (ok ? "ok" : "err");
+          bannerEl.innerHTML =
+            '<span class="cd-done-icon">' + (ok ? "✓" : "!") + "</span>" +
+            "<div><strong>" + (ok ? "写码完成" : (mismatch ? "写码完成但模块可能不对" : "写码结束")) + "</strong> · 用时 " + esc(durationText) +
+            (ok ? " · 已同步 " + n + " 个文件到本机（未自动 commit）" : " · " + esc(mismatch || (ev && ev.error) || "失败")) +
+            (n && ok ? '<div class="cd-synced">' + esc(synced.slice(0, 8).join("、")) + (n > 8 ? " …" : "") + "</div>" : "") +
+            (mismatch ? '<div class="cd-warn-box" style="margin-top:8px">' + esc(mismatch) + "</div>" : "") +
+            "</div>";
+          var body = extractCodeDevResultBody((ev && ev.reply) || "");
+          if (body) {
+            detailsEl.style.display = "";
+            resultBody.innerHTML = md(stripMarks(body));
+          }
+          var summaryText = (ok ? "✅ 写码完成" : "❌ 写码结束") + "（" + jobId + "，" + durationText + (n ? "，同步 " + n + " 个文件" : "") + "）";
+          var meta = "来源：写码顾问 · 数据源：本机写码 · 意图：本机写码 · " + jobId;
+          if (cur) {
+            cur.msgs.push({
+              role: "assistant", text: summaryText + (body ? "\n\n" + body : ""),
+              thinking: null, chart: null, table: null, meta: meta,
+            });
+            save();
+          }
+          msgs.scrollTop = msgs.scrollHeight;
+        }
+        function onStreamEvent(ev) {
+          if (!ev || !ev.type) return;
+          if (ev.type === "step") {
+            steps = applyCodingStep(steps, ev);
+            paintPlan();
+          } else if (ev.type === "done") {
+            finish(ev);
+          } else if (ev.type === "error") {
+            finish({ ok: false, status: "failed", error: ev.message || ev.detail, reply: ev.message || ev.detail });
+          }
+        }
+        fetch(engineBase() + "/api/code-dev/jobs/" + encodeURIComponent(jobId) + "/stream", {
+          method: "GET",
+          headers: { Accept: "text/event-stream" },
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            if (!r.body || !r.body.getReader) throw new Error("不支持流式");
+            var reader = r.body.getReader();
+            var decoder = new TextDecoder();
+            var pending = "";
+            var terminal = false;
+            function pump() {
+              return reader.read().then(function (res) {
+                if (res.done) {
+                  if (!finished) {
+                    return fetch(engineBase() + "/api/code-dev/jobs/" + encodeURIComponent(jobId))
+                      .then(function (jr) { return jr.json(); })
+                      .then(function (jd) {
+                        if (jd && jd.job && ["succeeded", "failed", "cancelled"].indexOf(jd.job.status) >= 0) {
+                          finish({
+                            ok: jd.job.status === "succeeded", status: jd.job.status,
+                            reply: jd.reply, error: jd.job.error,
+                            synced_files: jd.job.synced_files, job: jd.job,
+                          });
+                        }
+                      })
+                      .catch(function () {});
+                  }
+                  return;
+                }
+                pending += decoder.decode(res.value, { stream: true });
+                var parts = pending.split("\n\n");
+                pending = parts.pop() || "";
+                parts.forEach(function (block) {
+                  block.split("\n").forEach(function (line) {
+                    if (line.indexOf("data:") !== 0) return;
+                    var raw = line.slice(5).trim();
+                    if (!raw) return;
+                    try {
+                      var ev = JSON.parse(raw);
+                      onStreamEvent(ev);
+                      if (ev.type === "done" || ev.type === "error") terminal = true;
+                    } catch (e) {}
+                  });
+                });
+                msgs.scrollTop = msgs.scrollHeight;
+                if (terminal) return;
+                return pump();
+              });
+            }
+            return pump();
+          })
+          .catch(function (e) {
+            finish({ ok: false, reply: "进度订阅失败：" + e.message, error: e.message });
+          });
+      }
+
       function createStreamBubble() {
         var div = document.createElement("div");
         div.className = "assist";
@@ -230,6 +824,11 @@ window.__ModuleLoader__.load({
         if (!text) return;
         input.value = "";
         if (!cur) newConv();
+        var isOpt = text.indexOf("【写码需求选项已确认】") === 0;
+        var isCodeDevFlow = isOpt || /写码|改界面|改代码|报表中心|消息中心|开发|菜单|页面|接口|工时/.test(text);
+        touchCodeDevBrief(text, isCodeDevFlow);
+        var payload = { message: text };
+        if (cur && cur.codeDevBrief && isCodeDevFlow) payload.code_dev_brief = cur.codeDevBrief;
         renderMsg("user", text, null, null, null, true);
         sendBtn.disabled = true;
         var bubble = createStreamBubble();
@@ -237,7 +836,7 @@ window.__ModuleLoader__.load({
         fetch(engineBase() + "/api/chat/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-          body: JSON.stringify({ message: text }),
+          body: JSON.stringify(payload),
         })
           .then(function (r) {
             if (!r.ok) throw new Error("HTTP " + r.status);
@@ -336,13 +935,32 @@ window.__ModuleLoader__.load({
                     }).join("");
                   bubble.el.insertBefore(tbl, bubble.meta);
                 }
-                var srcTxt = ev.source === "llm" ? "LLM" : ev.source === "offline" ? "离线提示" : "规则引擎";
-                var meta =
-                  "来源：" + srcTxt + " · 数据源：" + dataSourceLabel(ev.data_source) +
-                  (ev.intent && ev.intent.type ? " · " + ev.intent.type : "") +
-                  (ev.note ? " · " + ev.note : "");
+                var meta = formatChatMeta(ev);
                 bubble.meta.style.display = "";
                 bubble.meta.textContent = meta;
+                if (ev.code_dev_ui) {
+                  mountCodeDevUi(bubble.el, ev.code_dev_ui, bubble.meta, {
+                    send: send,
+                    getBrief: getCodeDevBrief,
+                    onStarted: function (d) {
+                      startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")));
+                    },
+                  });
+                } else {
+                  var fbUi = parseCodeDevUiFromText(bubble.replyText, "");
+                  if (fbUi) {
+                    mountCodeDevUi(bubble.el, fbUi, bubble.meta, {
+                      send: send,
+                      getBrief: getCodeDevBrief,
+                      onStarted: function (d) {
+                        startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")));
+                      },
+                    });
+                  }
+                }
+                if (ev.code_dev_brief && cur) {
+                  cur.codeDevBrief = ev.code_dev_brief;
+                }
                 if (cur) {
                   cur.msgs.push({
                     role: "assistant",

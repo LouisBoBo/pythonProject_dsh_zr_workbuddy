@@ -21,3 +21,12 @@ deepseek:
   api_key: ""
   base_url: https://api.deepseek.com
   model: deepseek-chat
+
+# P0-1 本机 Cursor Local 写码（默认关闭；请在引擎「配置中心 → 写码车道」填写）
+code_dev:
+  enabled: false
+  cursor_api_key: ""
+  model: composer-2.5
+  max_concurrent: 1
+  cursor_timeout_sec: 2700
+  default_workspace: ""

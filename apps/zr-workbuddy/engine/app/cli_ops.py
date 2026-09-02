@@ -15,6 +15,7 @@ from . import plugins_store
 FEATURE_ASK = "mes-ask"
 FEATURE_CONFIG = "mes-config"
 FEATURE_PCB = "mes-pcb"
+FEATURE_CODE_DEV = "code-dev"
 
 
 def _ask_disabled_chat_response() -> dict:
@@ -32,7 +33,7 @@ def _ask_disabled_chat_response() -> dict:
     }
 
 
-async def chat_stream(text: str):
+async def chat_stream(text: str, *, code_dev_brief: dict | None = None):
     """流式聊天事件生成器（供 /api/chat/stream）。
     yield dict：status|thinking|reply|meta|error|done
     """
@@ -42,6 +43,45 @@ async def chat_stream(text: str):
         return
 
     from .pcb_expert import feature_enabled, is_pcb_question, pcb_ask_stream
+    from .code_dev import handle_chat_code_dev, is_code_dev_question
+
+    def _emit_code_dev(out: dict):
+        """统一写码结果事件（含 code_dev_ui，禁止丢卡）。"""
+        thinking = out.get("thinking") or ""
+        events = []
+        if thinking:
+            events.append({"type": "thinking", "text": thinking})
+        if out.get("reply"):
+            events.append({"type": "reply", "delta": out["reply"]})
+        intent = out.get("intent") or {"type": "code_dev", "metric": "", "dim": None, "chart": None}
+        note = out.get("note")
+        ui = out.get("code_dev_ui")
+        events.append(
+            {
+                "type": "done",
+                "ok": True,
+                "reply": out.get("reply") or "",
+                "thinking": thinking,
+                "chart": None,
+                "table": None,
+                "note": note,
+                "source": out.get("source") or "code_dev",
+                "data_source": out.get("data_source") or "code_dev",
+                "intent": intent,
+                "job_id": out.get("job_id"),
+                "code_dev_ui": ui,
+                "code_dev_brief": out.get("code_dev_brief"),
+            }
+        )
+        return events
+
+    # 写码意图：需求收集 → 思考 + 选项/确认卡（确认后才开工，绝不在此 start）
+    if is_code_dev_question(text) and plugins_store.is_enabled(FEATURE_CODE_DEV):
+        yield {"type": "status", "detail": "正在梳理写码需求…"}
+        out = await handle_chat_code_dev(text, client_brief=code_dev_brief)
+        for ev in _emit_code_dev(out):
+            yield ev
+        return
 
     if is_pcb_question(text) and feature_enabled():
         async for ev in pcb_ask_stream(text):
@@ -95,13 +135,22 @@ async def chat_stream(text: str):
         return
 
     # MES 查数：先提示再一次性返回完整结果（规则/分析路径不便 token 流）
+    # 注意：LLM 可能中途判成写码 → chat() 返回 code_dev，必须透传 code_dev_ui
     yield {"type": "status", "detail": "正在查询与分析…"}
     out = await chat(text)
     if not out.get("ok"):
         yield {"type": "error", "detail": out.get("detail") or "查询失败"}
         return
+    if (
+        out.get("code_dev_ui")
+        or out.get("source") == "code_dev"
+        or (out.get("intent") or {}).get("type") == "code_dev"
+    ):
+        for ev in _emit_code_dev(out):
+            yield ev
+        return
     if out.get("thinking"):
-        yield {"type": "thinking", "delta": out["thinking"]}
+        yield {"type": "thinking", "text": out["thinking"]}
     if out.get("reply"):
         yield {"type": "reply", "delta": out["reply"]}
     yield {
@@ -117,16 +166,22 @@ async def chat_stream(text: str):
         "intent": out.get("intent"),
         "llm_tried": out.get("llm_tried"),
         "llm_error": out.get("llm_error"),
+        "code_dev_ui": out.get("code_dev_ui"),
     }
 
 
-async def chat(text: str) -> dict:
+async def chat(text: str, *, code_dev_brief: dict | None = None) -> dict:
     text = (text or "").strip()
     if not text:
         return {"ok": False, "detail": "问题不能为空"}
 
-    # PCB 工艺问题：仅当 mes-pcb feature 已启用才走专家（热插拔真相源 = plugins.json）
+    from .code_dev import handle_chat_code_dev, is_code_dev_question
     from .pcb_expert import chat_response, is_pcb_question, pcb_ask
+
+    if is_code_dev_question(text) and plugins_store.is_enabled(FEATURE_CODE_DEV):
+        return await handle_chat_code_dev(text, client_brief=code_dev_brief)
+
+    # PCB 工艺问题：仅当 mes-pcb feature 已启用才走专家（热插拔真相源 = plugins.json）
     if is_pcb_question(text):
         return chat_response(await pcb_ask(text))
 
@@ -146,6 +201,8 @@ async def chat(text: str) -> dict:
         context = ("数据源：MES 实时（已连接 ERP 系统）" if mes_connected
                    else "数据源：演示数据（未连接 MES，查数据会返回演示数据）")
         r = await llm_chat(text, llm_cfg, context)
+        if r and r.get("kind") == "code_dev":
+            return await handle_chat_code_dev(text, client_brief=code_dev_brief)
         if r and r.get("kind") == "query" and r.get("intent"):
             intent = r["intent"]
             source = "llm"
@@ -271,4 +328,49 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
     if cmd == "plugins-disable":
         fid = rest[0] if rest else ""
         return plugins_store.disable(fid)
+    if cmd == "code-dev-status":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_DEV, capability="本机 Cursor 写码")
+        if blocked:
+            return blocked
+        from .code_dev import status as code_dev_status
+        return code_dev_status()
+    if cmd == "code-dev-check":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_DEV, capability="本机 Cursor 写码")
+        if blocked:
+            return blocked
+        from .code_dev import check_workspace
+        return check_workspace(" ".join(rest) if rest else "")
+    if cmd == "code-dev-start":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_DEV, capability="本机 Cursor 写码")
+        if blocked:
+            return blocked
+        from .code_dev import start as code_dev_start
+        # args: <workspace绝对路径> | <需求…>
+        # 约定：第一个参数为路径，其余为空格拼成需求；也可用 JSON 单参（由 HTTP 传）
+        if not rest:
+            return {"ok": False, "detail": "用法: code-dev-start <workspace绝对路径> <需求>"}
+        workspace = rest[0]
+        message = " ".join(rest[1:]).strip()
+        return code_dev_start(workspace=workspace, message=message)
+    if cmd == "code-dev-job":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_DEV, capability="本机 Cursor 写码")
+        if blocked:
+            return blocked
+        from .code_dev import get_job as code_dev_get_job
+        return code_dev_get_job(rest[0] if rest else "")
+    if cmd == "code-dev-cancel":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_DEV, capability="本机 Cursor 写码")
+        if blocked:
+            return blocked
+        from .code_dev import cancel as code_dev_cancel
+        return code_dev_cancel(rest[0] if rest else "")
+    if cmd == "code-dev-confirm":
+        # 确认卡点「开始」后调用；args: <workspace> <requirement…>
+        blocked = plugins_store.require_enabled(FEATURE_CODE_DEV, capability="本机 Cursor 写码")
+        if blocked:
+            return blocked
+        from .code_dev.chat_bridge import confirm_and_start
+        if not rest:
+            return {"ok": False, "detail": "用法: code-dev-confirm <workspace绝对路径> <需求>"}
+        return confirm_and_start(workspace=rest[0], requirement=" ".join(rest[1:]).strip())
     return {"ok": False, "detail": f"未知命令: {cmd}"}

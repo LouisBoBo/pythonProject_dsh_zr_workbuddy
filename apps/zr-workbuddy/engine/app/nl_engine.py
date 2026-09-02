@@ -247,14 +247,20 @@ intent 字段说明：
 - 「今天完工工单数量」→ metric=completed_orders, type=single, days=1
 - 「工单一共多少个」→ metric=work_orders_total, type=single, days=1
 
-【规则二：其他任何输入】输出：{"kind":"chat","reply":"..."}
+【规则二：用户要改代码 / 做界面 / 开发菜单页面等】输出：{"kind":"code_dev","reply":"简短确认这是写码需求即可"}
+当用户提到开发界面、改菜单、写码、改前端/后端、实现某某页面等（不是查产量/良率）：
+- 即使你不确定能否立刻改代码，也必须输出 kind=code_dev，**禁止**说「平台不支持界面开发/代码修改」。
+- reply 可很短，系统会接管后续引导（路径、配置中心）。
+
+【规则三：其他任何输入】输出：{"kind":"chat","reply":"..."}
 包括：问候/感谢/闲聊；问概念（如"OEE是什么""良率怎么算"）；问"你能做什么"；问平台怎么用；
-以及用户要求但平台做不了的事（预测未来产量、导出Excel、修改/写入数据、接入其他系统、实时推送等）
+以及用户要求但平台做不了的事（预测未来产量、导出Excel、修改/写入 MES 业务数据、接入其他系统、实时推送等）
 ——这类必须**如实说明目前不支持/尚未接入**，语气友善，并给出可以怎么做，2~4 句，中文，简洁。
 
 【平台能力边界（用于如实回答）】
-支持：查询 MES 生产数据并自动出图与洞察（__METRICS_SUMMARY__）；单日/区间原因分析（当日 vs 均值、按产线、缺陷构成、待处理异常）。
-暂不支持：预测/机器学习、数据导出、数据写入/修改、跨系统查询、实时告警推送。
+支持：查询 MES 生产数据并自动出图与洞察（__METRICS_SUMMARY__）；单日/区间原因分析；
+__CODE_DEV_BOUNDARY__
+暂不支持：预测/机器学习、数据导出、向 MES **写入业务数据**、跨系统查询、实时告警推送。
 
 【当前环境】__CONTEXT__
 """
@@ -502,11 +508,26 @@ async def llm_freeform_stream(
 async def llm_chat(text: str, llm_cfg: dict, context: str) -> dict | None:
     """大模型理解任何输入 → 返回：
     - {"kind":"query","intent":{...}}  查数据
+    - {"kind":"code_dev","reply":"..."} 写码意图（由调用方接管）
     - {"kind":"chat","reply":"..."}    对话/能力边界
     - None                              调用失败（调用方回退规则引擎）
     """
-    system = (LLM_CHAT_SYSTEM.replace("__METRICS_SUMMARY__", METRICS_SUMMARY)
-                       .replace("__CONTEXT__", context))
+    from . import plugins_store
+    from .code_dev.ops import FEATURE_ID as CODE_DEV_FEATURE
+
+    if plugins_store.is_enabled(CODE_DEV_FEATURE):
+        code_boundary = (
+            "本机 Cursor 写码（改工程界面/功能）：用户提出开发/改界面/写码时输出 kind=code_dev，"
+            "不要说不支持代码修改。"
+        )
+    else:
+        code_boundary = "本机写码功能当前未启用；若用户要开发界面，kind=chat 并说明可到配置中心开启写码车道。"
+
+    system = (
+        LLM_CHAT_SYSTEM.replace("__METRICS_SUMMARY__", METRICS_SUMMARY)
+        .replace("__CONTEXT__", context)
+        .replace("__CODE_DEV_BOUNDARY__", code_boundary)
+    )
     content = await _llm_call([
         {"role": "system", "content": system},
         {"role": "user", "content": text},
@@ -522,6 +543,8 @@ async def llm_chat(text: str, llm_cfg: dict, context: str) -> dict | None:
         if intent:
             return {"kind": "query", "intent": intent}
         return None
+    if kind == "code_dev":
+        return {"kind": "code_dev", "reply": str(obj.get("reply") or "").strip()}
     if kind == "chat":
         reply = str(obj.get("reply") or "").strip()
         if reply:
