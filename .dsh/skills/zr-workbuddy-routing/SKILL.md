@@ -17,6 +17,7 @@ description: >-
 | 查产量、良率、OEE、工单、缺陷等 **MES 数据** | `mes_ask` | mes-ask |
 | PCB 工序、叠层阻抗、DFM、AOI/飞针、IPC、缺陷排障 | `mes_pcb` | mes-pcb |
 | 在本机工程 **写代码 / 改页面 / 加功能 / 做报表页** | `mes_code_dev_*`（见 zr-workbuddy-code-dev） | code-dev |
+| **本机目录审码**（直读源码，非 Git） | `mes_code_review_*`（见 zr-workbuddy-code-review） | code-review |
 | 测 MES/LLM 连接、看引擎状态 | `mes_config` / `mes_status` | mes-config |
 
 ## 边界（易错）
@@ -60,6 +61,14 @@ description: >-
 - 工具：`mes_code_dev_status`、`mes_code_dev_check`、`mes_code_dev_start`、
   `mes_code_dev_job`、`mes_code_dev_cancel`。
 - 写码车道须在引擎配置中心开启（`code_dev.enabled`）。
+
+### code-review（`mes_code_review_*`）
+
+- 本机直读源码 + Viprasol Skill LLM + 规则补种；终稿「代码审核汇总报告」；**非 Git diff、非 VS Code Bridge**。
+- 对话确认卡优先走引擎 **`/api/code-review/run/stream`**（SSE 进度 + 终稿逐行流式）。
+- Skill：**zr-workbuddy-code-review**
+- 工具：`mes_code_review_status`、`check`、`list`、`run`、`report`。
+- 审码车道须在配置中心开启（`code_review.enabled`）+ LLM 已配置。
 
 ## Feature 未启用时
 

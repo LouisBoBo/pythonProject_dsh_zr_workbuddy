@@ -16,6 +16,7 @@ FEATURE_ASK = "mes-ask"
 FEATURE_CONFIG = "mes-config"
 FEATURE_PCB = "mes-pcb"
 FEATURE_CODE_DEV = "code-dev"
+FEATURE_CODE_REVIEW = "code-review"
 
 
 def _ask_disabled_chat_response() -> dict:
@@ -44,6 +45,33 @@ async def chat_stream(text: str, *, code_dev_brief: dict | None = None):
 
     from .pcb_expert import feature_enabled, is_pcb_question, pcb_ask_stream
     from .code_dev import handle_chat_code_dev, is_code_dev_question
+    from .code_review import handle_chat_code_review, is_code_review_question
+
+    def _emit_code_review(out: dict):
+        thinking = out.get("thinking") or ""
+        events = []
+        if thinking:
+            events.append({"type": "thinking", "text": thinking})
+        if out.get("reply"):
+            events.append({"type": "reply", "delta": out["reply"]})
+        events.append(
+            {
+                "type": "done",
+                "ok": bool(out.get("ok", True)),
+                "reply": out.get("reply") or "",
+                "thinking": thinking,
+                "chart": None,
+                "table": None,
+                "note": out.get("note"),
+                "source": out.get("source") or "code_review",
+                "data_source": out.get("data_source") or "code_review",
+                "intent": out.get("intent") or {"type": "code_review", "metric": "", "dim": None, "chart": None},
+                "report_id": out.get("report_id"),
+                "findings": out.get("findings"),
+                "code_review_ui": out.get("code_review_ui"),
+            }
+        )
+        return events
 
     def _emit_code_dev(out: dict):
         """统一写码结果事件（含 code_dev_ui，禁止丢卡）。"""
@@ -74,6 +102,14 @@ async def chat_stream(text: str, *, code_dev_brief: dict | None = None):
             }
         )
         return events
+
+    # 本机审码：对话触发确认卡（在写码之前；点确认后才 run）
+    if is_code_review_question(text) and plugins_store.is_enabled(FEATURE_CODE_REVIEW):
+        yield {"type": "status", "detail": "请选择要审核的本机工程目录…"}
+        out = await handle_chat_code_review(text)
+        for ev in _emit_code_review(out):
+            yield ev
+        return
 
     # 写码意图：需求收集 → 思考 + 选项/确认卡（确认后才开工，绝不在此 start）
     if is_code_dev_question(text) and plugins_store.is_enabled(FEATURE_CODE_DEV):
@@ -176,7 +212,11 @@ async def chat(text: str, *, code_dev_brief: dict | None = None) -> dict:
         return {"ok": False, "detail": "问题不能为空"}
 
     from .code_dev import handle_chat_code_dev, is_code_dev_question
+    from .code_review import handle_chat_code_review, is_code_review_question
     from .pcb_expert import chat_response, is_pcb_question, pcb_ask
+
+    if is_code_review_question(text) and plugins_store.is_enabled(FEATURE_CODE_REVIEW):
+        return await handle_chat_code_review(text)
 
     if is_code_dev_question(text) and plugins_store.is_enabled(FEATURE_CODE_DEV):
         return await handle_chat_code_dev(text, client_brief=code_dev_brief)
@@ -373,4 +413,56 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
         if not rest:
             return {"ok": False, "detail": "用法: code-dev-confirm <workspace绝对路径> <需求>"}
         return confirm_and_start(workspace=rest[0], requirement=" ".join(rest[1:]).strip())
+    if cmd == "code-review-status":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_REVIEW, capability="本机目录审码")
+        if blocked:
+            return blocked
+        from .code_review import status as code_review_status
+        return code_review_status()
+    if cmd == "code-review-check":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_REVIEW, capability="本机目录审码")
+        if blocked:
+            return blocked
+        from .code_review import check_path as code_review_check
+        return code_review_check(" ".join(rest) if rest else "")
+    if cmd == "code-review-list":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_REVIEW, capability="本机目录审码")
+        if blocked:
+            return blocked
+        from .code_review.ops import list_files as code_review_list
+        path = rest[0] if rest else ""
+        scope = ""
+        if len(rest) >= 2 and rest[1].startswith("scope="):
+            scope = rest[1][6:]
+        return code_review_list(path, scope=scope)
+    if cmd == "code-review-run":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_REVIEW, capability="本机目录审码")
+        if blocked:
+            return blocked
+        from .code_review.ops import _parse_files_arg, run_review
+        if not rest:
+            return {"ok": False, "detail": "用法: code-review-run <local_path> [scope=子路径] [focus=审查重点] [files=a,b]"}
+        local_path = rest[0]
+        scope = ""
+        focus = ""
+        files_raw = ""
+        for arg in rest[1:]:
+            if arg.startswith("scope="):
+                scope = arg[6:]
+            elif arg.startswith("focus="):
+                focus = arg[6:]
+            elif arg.startswith("files="):
+                files_raw = arg[6:]
+        return run_review(
+            local_path=local_path,
+            scope=scope,
+            files=_parse_files_arg(files_raw),
+            focus=focus,
+        )
+    if cmd == "code-review-report":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_REVIEW, capability="本机目录审码")
+        if blocked:
+            return blocked
+        from .code_review import get_report as code_review_report
+        return code_review_report(rest[0] if rest else "")
     return {"ok": False, "detail": f"未知命令: {cmd}"}

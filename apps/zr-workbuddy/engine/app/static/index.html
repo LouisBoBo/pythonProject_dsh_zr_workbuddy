@@ -101,12 +101,23 @@
   .msgs.show { display: flex; }
   .msg-user { align-self: flex-end; max-width: 75%; background: var(--user-bubble); border-radius: 16px; border-bottom-right-radius: 4px; padding: 10px 16px; font-size: 15px; white-space: pre-wrap; word-break: break-word; }
   .msg-assistant { display: flex; flex-direction: column; gap: 2px; max-width: 100%; }
-  .msg-assistant .reply { font-size: 15px; white-space: pre-wrap; word-break: break-word; }
-  .msg-assistant .reply strong { font-weight: 600; }
-  .msg-assistant .reply h1, .msg-assistant .reply h2, .msg-assistant .reply h3 { margin: 0.6em 0 0.25em; font-weight: 650; line-height: 1.35; }
+  .msg-assistant .reply { font-size: 15px; white-space: normal; word-break: break-word; line-height: 1.55; }
+  .msg-assistant .reply h1, .msg-assistant .reply h2, .msg-assistant .reply h3, .msg-assistant .reply h4 { margin: 0.45em 0 0.2em; font-weight: 650; line-height: 1.35; }
   .msg-assistant .reply h1 { font-size: 1.15em; }
   .msg-assistant .reply h2 { font-size: 1.08em; }
   .msg-assistant .reply h3 { font-size: 1.02em; }
+  .msg-assistant .reply h4 { font-size: 1em; }
+  .msg-assistant .reply .md-inline {
+    font-family: ui-monospace, Menlo, monospace; font-size: 0.92em;
+    padding: 1px 5px; border-radius: 4px; background: #0f172a0d;
+  }
+  .msg-assistant .reply .md-code {
+    display: block; margin: 6px 0 8px; padding: 8px 10px; border-radius: 8px;
+    background: #0f172a0d; border: 1px solid var(--border); font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px; white-space: pre; overflow-x: auto; line-height: 1.45;
+  }
+  .msg-assistant .reply .md-code code { font-family: inherit; font-size: inherit; background: none; padding: 0; }
+  .msg-assistant .reply .md-hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   .msg-assistant img.chart { margin-top: 12px; max-width: 100%; border-radius: var(--radius-md); border: 1px solid var(--border); display: block; }
   .msg-assistant table.res { margin-top: 12px; border-collapse: collapse; font-size: 13px; align-self: flex-start; }
   .msg-assistant table.res th, .msg-assistant table.res td { border: 1px solid var(--border); padding: 6px 14px; text-align: left; }
@@ -156,6 +167,12 @@
   .cd-chosen-row { display: flex; gap: 10px; margin: 4px 0; }
   .cd-k { color: var(--text-2); min-width: 72px; flex: none; }
   .cd-v { word-break: break-word; }
+  .cd-path-row { display: flex; gap: 8px; align-items: stretch; }
+  .cd-path-row .cd-input { flex: 1; min-width: 0; }
+  .cd-btn.browse { flex: none; white-space: nowrap; }
+  .cd-suggest { padding: 0 14px 10px; margin: 0; font-size: 12px; color: var(--text-2); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .cd-chip { border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 11px; cursor: pointer; background: var(--bg-soft); color: var(--text); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cd-chip:hover { border-color: var(--brand); color: var(--brand); }
   /* 写码进度（对齐 simplified CodingPlanCard） */
   .coding-plan { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid #e8eef5; border-radius: 10px; background: #f8fafc; max-width: min(640px, 100%); }
   .coding-plan.is-running { border-color: #bfdbfe; background: #f0f7ff; }
@@ -187,7 +204,13 @@
   .cd-result-details { margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-soft); overflow: hidden; }
   .cd-result-details summary { cursor: pointer; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--text-2); list-style: none; }
   .cd-result-details summary::-webkit-details-marker { display: none; }
-  .cd-result-body { padding: 0 12px 12px; font-size: 13px; color: var(--text); max-height: 360px; overflow-y: auto; }
+  .cd-result-body { padding: 0 12px 12px; font-size: 13px; color: var(--text); max-height: 480px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
+  .cd-result-body h2, .cd-result-body h3, .cd-result-body h4 { margin: 0.7em 0 0.3em; font-weight: 650; line-height: 1.35; }
+  .cd-result-body .md-code {
+    display: block; margin: 6px 0 10px; padding: 10px 12px; border-radius: 8px;
+    background: #0f172a0d; border: 1px solid var(--border); font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px; white-space: pre; overflow-x: auto; line-height: 1.45;
+  }
   .cd-goal-banner { margin: 0 12px 8px; padding: 10px 12px; border-radius: 8px; background: #eff6ff; border: 1px solid #bfdbfe; font-size: 12px; line-height: 1.55; }
   .cd-goal-banner strong { color: #1e40af; display: block; margin-bottom: 4px; font-size: 11px; letter-spacing: .04em; }
   .cd-target-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
@@ -567,6 +590,41 @@
             </div>
           </div>
 
+          <div class="card">
+            <h2><span class="step">6</span> 审码车道（本机直读）</h2>
+            <div class="body">
+              <div class="hint" style="margin-bottom:10px;">
+                对齐 simplified 本机审码：直读本地源码 + LLM 出 findings；<b>不用 Git、不用 VS Code Bridge</b>。
+                在<b>工作助手对话</b>中说「审核代码 /Users/你/项目」即可触发；Agent 工具 <code>mes_code_review_*</code>。
+              </div>
+              <div class="check-row">
+                <input type="checkbox" id="code_review_enabled">
+                <label for="code_review_enabled">开启本机审码（code_review.enabled）</label>
+              </div>
+              <div class="grid" style="margin-top:12px;">
+                <div>
+                  <label>单次最多文件数</label>
+                  <input type="number" id="code_review_max_files" min="1" max="200" value="40">
+                </div>
+                <div>
+                  <label>单文件最大字节</label>
+                  <input type="number" id="code_review_max_file_bytes" min="1024" max="500000" value="120000">
+                </div>
+                <div>
+                  <label>总读取上限（字节）</label>
+                  <input type="number" id="code_review_max_total_bytes" min="4096" max="2000000" value="800000">
+                </div>
+                <div class="full">
+                  <label>常用本机工程路径（可选备忘）</label>
+                  <input type="text" id="code_review_default_workspace" placeholder="/Users/你/项目" autocomplete="off">
+                </div>
+              </div>
+              <div class="hint" style="margin-top:8px;">依赖配置中心 LLM（DeepSeek / Ollama）；改完点「保存全部配置」后生效。</div>
+              <div style="margin-top: 12px;"><button class="btn ghost" id="btnTestCodeReview">测试审码就绪</button></div>
+              <div class="test-result" id="codeReviewTestResult"></div>
+            </div>
+          </div>
+
         </div>
       </div>
       <div class="save-bar">
@@ -831,10 +889,28 @@ function esc(s) {
 }
 function md(s) {
   let t = esc(s);
+  const blocks = [];
+  t = t.replace(/```([^\n`]*)\n?([\s\S]*?)```/g, (_, _lang, code) => {
+    const i = blocks.length;
+    blocks.push('<pre class="md-code"><code>' + String(code).replace(/\s+$/, "") + "</code></pre>");
+    return "\u0000MDCODE" + i + "\u0000";
+  });
+  t = t.replace(/`([^`\n]+)`/g, '<code class="md-inline">$1</code>');
+  t = t.replace(/^####\s+(.+)$/gm, "<h4>$1</h4>");
   t = t.replace(/^###\s+(.+)$/gm, "<h3>$1</h3>");
   t = t.replace(/^##\s+(.+)$/gm, "<h2>$1</h2>");
   t = t.replace(/^#\s+(.+)$/gm, "<h1>$1</h1>");
-  return t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  t = t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  t = t.replace(/^---\s*$/gm, '<hr class="md-hr">');
+  // 仅用 <br>，容器勿再用 pre-wrap，否则空行翻倍
+  t = t.replace(/\n/g, "<br>");
+  t = t.replace(/(?:<br>)*(<(?:h[1-4]|pre|hr)\b[^>]*>)/gi, "$1");
+  t = t.replace(/(<\/(?:h[1-4]|pre)>)(?:<br>)*/gi, "$1");
+  t = t.replace(/(?:<br>)*(\u0000MDCODE\d+\u0000)/g, "$1");
+  t = t.replace(/(\u0000MDCODE\d+\u0000)(?:<br>)*/g, "$1");
+  t = t.replace(/(?:<br>){2,}/g, "<br>");
+  t = t.replace(/\u0000MDCODE(\d+)\u0000/g, (_, i) => blocks[Number(i)] || "");
+  return t;
 }
 function stripMarks(s) {
   return String(s || "")
@@ -916,12 +992,14 @@ function dsLabel(ds) {
   if (ds === "assistant") return "助手";
   if (ds === "pcb_expert") return "PCB 专家";
   if (ds === "code_dev") return "本机写码";
+  if (ds === "code_review") return "本机审码";
   return "演示数据";
 }
 function srcLabel(ev) {
   if (ev.source === "llm") return "LLM";
   if (ev.source === "offline") return "离线提示";
   if (ev.source === "code_dev") return "写码顾问";
+  if (ev.source === "code_review") return "审码顾问";
   if (ev.source === "disabled") return "已停用";
   if (ev.llm_tried) return "LLM 未连通 → 规则引擎";
   return "规则引擎";
@@ -929,10 +1007,11 @@ function srcLabel(ev) {
 function formatChatMeta(ev) {
   const srcTxt = srcLabel(ev);
   const ds = dsLabel(ev.data_source);
-  const metricMap = { options: "需求选项", propose: "写码确认", code_dev: "本机写码" };
-  let intentTxt = "本机写码";
+  const metricMap = { options: "需求选项", propose: "写码确认", code_dev: "本机写码", code_review: "本机审码", need_path: "待填路径", pick: "选目录确认", done: "审码完成", run: "本机审码" };
   const it = ev.intent || {};
+  let intentTxt = it.type === "code_review" ? "本机审码" : "本机写码";
   if (it.type === "code_dev" && it.metric) intentTxt = metricMap[it.metric] || String(it.metric);
+  else if (it.type === "code_review" && it.metric) intentTxt = metricMap[it.metric] || "本机审码";
   else if (it.type) intentTxt = metricMap[it.type] || String(it.type);
   return "来源：" + srcTxt + (ev.llm_error ? "（" + ev.llm_error + "）" : "") +
     " · 数据源：" + ds + " · 意图：" + intentTxt;
@@ -1096,6 +1175,327 @@ function mountCodeDevUi(hostEl, ui, beforeMetaEl) {
   } else return;
   if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
   else hostEl.appendChild(card);
+}
+/** 审码确认卡（对齐 simplified CodeReviewSourcePickCard：选目录 → 开始审核） */
+function mountCodeReviewUi(hostEl, ui, beforeMetaEl) {
+  if (!hostEl || !ui || !ui.kind) return;
+  const old = hostEl.querySelector(".cd-card.cr-pick");
+  if (old) old.remove();
+  const card = document.createElement("div");
+  card.className = "cd-card cr-pick";
+  if (ui.kind === "pick") renderCrPick(card, ui);
+  else return;
+  if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
+  else hostEl.appendChild(card);
+}
+function renderCrPick(card, ui) {
+  const ws0 = ui.workspace || "";
+  const scope0 = ui.scope || "";
+  const focus0 = ui.focus || "";
+  const suggestions = Array.isArray(ui.suggestions) ? ui.suggestions : [];
+  let html =
+    '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">代码审核</span><span class="cd-hint">' +
+    esc(ui.hint || "选择目录 · 确认后开始") +
+    '</span></div><p class="cd-summary">' +
+    esc(ui.summary || "请确认要审核的本机工程") +
+    '</p><p class="cd-desc">' +
+    esc(ui.desc || "直读本机磁盘源码（不走 Git / VS Code Bridge），确认后开始审查。") +
+    "</p></div>";
+  html +=
+    '<label class="cd-field"><span class="cd-label">本机工程目录</span><div class="cd-path-row">' +
+    '<input class="cd-input cd-ws" value="' + esc(ws0) + '" placeholder="/Users/你/项目" autocomplete="off">' +
+    '<button type="button" class="cd-btn browse cd-browse">浏览…</button></div></label>';
+  if (suggestions.length) {
+    html += '<p class="cd-suggest">常用：';
+    suggestions.forEach((s) => {
+      const p = typeof s === "string" ? s : (s && s.path) || "";
+      const lab = (typeof s === "object" && s.label) ? s.label + " · " : "";
+      if (!p) return;
+      html += '<button type="button" class="cd-chip" data-path="' + esc(p) + '" title="' + esc(p) + '">' + esc(lab + p) + "</button>";
+    });
+    html += "</p>";
+  }
+  html +=
+    '<label class="cd-field"><span class="cd-label">范围（可选，相对子路径）</span>' +
+    '<input class="cd-input cd-scope" value="' + esc(scope0) + '" placeholder="如 frontend/src"></label>';
+  html +=
+    '<label class="cd-field"><span class="cd-label">审查重点（可选）</span>' +
+    '<input class="cd-input cd-focus" value="' + esc(focus0) + '" placeholder="如 SQL 注入、权限校验"></label>';
+  html +=
+    '<p class="cd-error" style="display:none"></p><div class="cd-actions">' +
+    '<button type="button" class="cd-btn cd-cancel">取消</button>' +
+    '<button type="button" class="cd-btn confirm cd-go">开始审核</button></div>';
+  card.innerHTML = html;
+  const errEl = card.querySelector(".cd-error");
+  const wsEl = card.querySelector(".cd-ws");
+  const goBtn = card.querySelector(".cd-go");
+  card.querySelectorAll(".cd-chip").forEach((btn) => {
+    btn.onclick = () => { wsEl.value = btn.getAttribute("data-path") || ""; };
+  });
+  card.querySelector(".cd-browse").onclick = async () => {
+    const browseBtn = card.querySelector(".cd-browse");
+    browseBtn.disabled = true;
+    browseBtn.textContent = "选择中…";
+    errEl.style.display = "none";
+    try {
+      const r = await fetch("/api/pick-folder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: "选择要审核的工程目录" }),
+      });
+      const d = await r.json();
+      if (d.ok && d.path) wsEl.value = d.path;
+      else if (d.error && d.error !== "已取消选择") {
+        errEl.style.display = "";
+        errEl.textContent = d.error || "选文件夹失败";
+      }
+    } catch (e) {
+      errEl.style.display = "";
+      errEl.textContent = "浏览失败：" + e.message;
+    } finally {
+      browseBtn.disabled = false;
+      browseBtn.textContent = "浏览…";
+    }
+  };
+  card.querySelector(".cd-cancel").onclick = () => {
+    card.classList.add("done");
+    card.innerHTML =
+      '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">代码审核</span></div>' +
+      '<p class="cd-summary">已取消，未开始审核</p></div>';
+  };
+  goBtn.onclick = async () => {
+    const local_path = (wsEl.value || "").trim();
+    const scope = (card.querySelector(".cd-scope").value || "").trim();
+    const focus = (card.querySelector(".cd-focus").value || "").trim();
+    if (!local_path) {
+      errEl.style.display = "";
+      errEl.textContent = "请填写或浏览选择本机工程目录";
+      return;
+    }
+    const name = local_path.split(/[/\\]/).filter(Boolean).pop() || local_path;
+    // 立刻切到进度态（禁止停在「审核中…」空等）
+    card.classList.add("done");
+    card.innerHTML =
+      '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">代码审核</span><span class="cd-hint">进行中</span></div>' +
+      '<p class="cd-summary">已确认本机工程，正在审核</p></div>' +
+      '<div class="cd-chosen">' +
+      '<div class="cd-chosen-row"><span class="cd-k">来源</span><span class="cd-v">本机目录直读</span></div>' +
+      '<div class="cd-chosen-row"><span class="cd-k">项目</span><span class="cd-v">' + esc(name) + "</span></div>" +
+      '<div class="cd-chosen-row"><span class="cd-k">路径</span><span class="cd-v">' + esc(local_path) + "</span></div></div>" +
+      '<div class="cd-plan-host" style="padding:0 12px 8px"></div>' +
+      '<div class="cd-done-banner" style="display:none;margin:0 12px 10px"></div>';
+    const host = card.closest(".msg-assistant") || card.parentElement;
+    if (host) {
+      const replyEl = host.querySelector(".reply");
+      // 进度卡在上、报告正文在下（像普通对话流式）
+      if (replyEl && replyEl.nextElementSibling === card) host.insertBefore(card, replyEl);
+      if (replyEl) replyEl.innerHTML = md("正在审核本机工程 `" + local_path + "` …");
+      const metaEl = host.querySelector(".msg-meta");
+      if (metaEl) metaEl.textContent = "来源：审码顾问 · 数据源：本机审码 · 意图：审码进行中";
+    }
+    startCodeReviewWatch(local_path, scope, focus, {
+      planHost: card.querySelector(".cd-plan-host"),
+      bannerEl: card.querySelector(".cd-done-banner"),
+      metaEl: host && host.querySelector(".msg-meta"),
+      replyEl: host && host.querySelector(".reply"),
+      mountInPlace: true,
+    });
+  };
+}
+const CR_PIPELINE = [
+  { id: "validate", title: "校验工程路径" },
+  { id: "list", title: "筛选功能源码" },
+  { id: "read", title: "读取源码" },
+  { id: "llm", title: "Viprasol Skill 审查" },
+  { id: "report", title: "汇总审核报告" },
+];
+function initCrSteps() {
+  return CR_PIPELINE.map((p) => ({ id: p.id, title: p.title, state: "pending" }));
+}
+function applyCrStep(steps, event) {
+  const id = event && event.id;
+  if (!id) return steps;
+  const list = (steps && steps.length) ? steps.slice() : initCrSteps();
+  const idx = list.findIndex((s) => s.id === id);
+  if (idx < 0) return list;
+  const nextState = event.state || "running";
+  const title = String(event.title || "").trim();
+  list[idx] = Object.assign({}, list[idx], { state: nextState }, title ? { title } : {});
+  if (nextState === "running" || nextState === "done") {
+    for (let i = 0; i < idx; i++) {
+      if (list[i].state !== "done" && list[i].state !== "error") list[i] = Object.assign({}, list[i], { state: "done" });
+    }
+  }
+  return list;
+}
+function startCodeReviewWatch(local_path, scope, focus, hosts) {
+  hosts = hosts || {};
+  let wrap = null;
+  let planHost = hosts.planHost;
+  let bannerEl = hosts.bannerEl;
+  let metaEl = hosts.metaEl;
+  let replyEl = hosts.replyEl;
+  if (!planHost || !replyEl) {
+    if ($("welcome").style.display !== "none") { $("welcome").style.display = "none"; $("msgs").classList.add("show"); }
+    wrap = document.createElement("div");
+    wrap.className = "msg-assistant cr-job-msg";
+    wrap.innerHTML =
+      '<div class="reply"></div>' +
+      '<div class="cd-job-shell">' +
+      '  <div class="cd-plan-host"></div>' +
+      '  <div class="cd-done-banner" style="display:none"></div>' +
+      "</div>" +
+      '<div class="msg-meta">来源：审码顾问 · 数据源：本机审码 · 意图：审码进行中</div>';
+    $("msgs").appendChild(wrap);
+    if (!planHost) planHost = wrap.querySelector(".cd-plan-host");
+    if (!bannerEl) bannerEl = wrap.querySelector(".cd-done-banner");
+    if (!replyEl) replyEl = wrap.querySelector(".reply");
+    if (!metaEl) metaEl = wrap.querySelector(".msg-meta");
+  }
+  const startedAt = Date.now();
+  let steps = initCrSteps();
+  steps[0] = Object.assign({}, steps[0], { state: "running" });
+  let finished = false;
+  let durationText = "0s";
+  let streamedText = "";
+  const tokenQueue = [];
+  let tokenDraining = false;
+  let pendingDoneEv = null;
+  const paintPlan = () => {
+    planHost.innerHTML = renderCodingPlanHtml(steps, { heading: "审码进度", duration: durationText, summary: "进行中…" });
+  };
+  const paintReport = (text) => {
+    if (!replyEl) return;
+    replyEl.innerHTML = md(stripMarks(text || ""));
+    const scroller = document.querySelector(".chat-body");
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  };
+  const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+  const drainTokens = async () => {
+    if (tokenDraining) return;
+    tokenDraining = true;
+    while (tokenQueue.length) {
+      const ev = tokenQueue.shift();
+      const text = ev && ev.text != null ? ev.text : (streamedText + ((ev && ev.delta) || ""));
+      streamedText = text;
+      paintReport(text);
+      // 让出一帧，避免同 tick 刷完所有行
+      await sleepMs(28);
+    }
+    tokenDraining = false;
+    if (pendingDoneEv && !finished) {
+      const doneEv = pendingDoneEv;
+      pendingDoneEv = null;
+      finish(doneEv);
+    }
+  };
+  paintPlan();
+  const durTimer = setInterval(() => {
+    if (finished) { clearInterval(durTimer); return; }
+    durationText = formatDuration((Date.now() - startedAt) / 1000);
+    paintPlan();
+  }, 1000);
+
+  const finish = (ev) => {
+    if (finished) return;
+    if (tokenQueue.length || tokenDraining) {
+      pendingDoneEv = ev;
+      drainTokens();
+      return;
+    }
+    finished = true;
+    clearInterval(durTimer);
+    durationText = formatDuration((Date.now() - startedAt) / 1000);
+    const ok = !!(ev && ev.ok);
+    steps = (steps || []).map((s) => {
+      if (s.state === "running" || s.state === "waiting") return Object.assign({}, s, { state: ok ? "done" : "error" });
+      if (!ok && s.state === "pending") return s;
+      if (ok && s.state !== "error") return Object.assign({}, s, { state: "done" });
+      return s;
+    });
+    paintPlan();
+    const reply = (ev && ev.reply) || streamedText || (ok ? "审查完成。" : (ev && (ev.detail || "审核失败")) || "审核失败");
+    streamedText = reply;
+    if (bannerEl) {
+      bannerEl.style.display = "";
+      bannerEl.className = "cd-done-banner " + (ok ? "ok" : "err");
+      const n = (ev && ev.file_count) || ((ev && ev.files_reviewed) || []).length || 0;
+      bannerEl.innerHTML =
+        '<span class="cd-done-icon">' + (ok ? "✓" : "!") + "</span>" +
+        "<div><strong>" + (ok ? "审核报告已生成" : "审核未完成") + "</strong> · 用时 " + esc(durationText) +
+        (ok ? " · 已审 " + n + " 个文件" : " · " + esc((ev && ev.detail) || "")) +
+        (ev && ev.report_id ? '<div class="cd-synced">报告 ID：' + esc(ev.report_id) + "</div>" : "") +
+        "</div>";
+    }
+    paintReport(reply);
+    if (metaEl) metaEl.textContent = "来源：审码顾问 · 数据源：本机审码 · 意图：审码完成" + (ev && ev.report_id ? " · " + ev.report_id : "");
+    const conv = curConv();
+    if (conv) {
+      conv.messages.push({ role: "assistant", text: reply, thinking: null, chart: null, table: null, meta: metaEl ? metaEl.textContent : "" });
+      renderConvList();
+      saveConvs();
+    }
+  };
+
+  (async () => {
+    try {
+      const r = await fetch("/api/code-review/run/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({ local_path, scope: scope || "", focus: focus || "" }),
+      });
+      if (!r.ok) {
+        let detail = "HTTP " + r.status;
+        try { const j = await r.json(); detail = j.detail || j.reply || detail; } catch (_) {}
+        finish({ ok: false, detail, reply: detail });
+        return;
+      }
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        const parts = pending.split("\n\n");
+        pending = parts.pop() || "";
+        for (const block of parts) {
+          for (const line of block.split("\n")) {
+            if (!line.startsWith("data:")) continue;
+            const raw = line.slice(5).trim();
+            if (!raw) continue;
+            let ev;
+            try { ev = JSON.parse(raw); } catch (_) { continue; }
+            if (ev.type === "step") {
+              steps = applyCrStep(steps, ev);
+              paintPlan();
+            } else if (ev.type === "status" && ev.detail) {
+              const running = steps.find((s) => s.state === "running");
+              if (running) {
+                steps = steps.map((s) => s.id === running.id ? Object.assign({}, s, { title: ev.detail }) : s);
+                paintPlan();
+              }
+              if (!streamedText || !streamedText.startsWith("代码审核汇总报告")) {
+                paintReport("⏳ **审码进行中**（尚未生成正式报告）\n\n" + ev.detail);
+              }
+            } else if (ev.type === "token") {
+              tokenQueue.push(ev);
+              drainTokens();
+            } else if (ev.type === "done") {
+              pendingDoneEv = ev;
+              drainTokens();
+            }
+          }
+        }
+      }
+      if (!finished) {
+        if (pendingDoneEv) drainTokens();
+        else finish({ ok: false, detail: "流式结束但未收到完成事件", reply: "审码流中断，请重试" });
+      }
+    } catch (e) {
+      finish({ ok: false, detail: e.message, reply: "请求失败：" + e.message });
+    }
+  })();
 }
 function renderCdOptions(card, ui) {
   const opts = ui.options || {};
@@ -1474,6 +1874,7 @@ async function send(pre) {
           const fb = parseCodeDevUiFromText(bubble.replyText, "");
           if (fb) mountCodeDevUi(bubble.el, fb, bubble.meta);
         }
+        if (ev.code_review_ui) mountCodeReviewUi(bubble.el, ev.code_review_ui, bubble.meta);
         const conv = curConv();
         if (conv && ev.code_dev_brief) conv.codeDevBrief = ev.code_dev_brief;
         if (conv) {
@@ -1481,6 +1882,7 @@ async function send(pre) {
             role: "assistant", text: bubble.replyText, thinking: bubble.thinkingText || null,
             chart: ev.chart || null, table: ev.table || null, meta,
             code_dev_ui: ev.code_dev_ui || null,
+            code_review_ui: ev.code_review_ui || null,
           });
           renderConvList();
           saveConvs();
@@ -1557,6 +1959,12 @@ function fillForm(c) {
   $("code_dev_max_concurrent").value = cd.max_concurrent != null ? cd.max_concurrent : 1;
   $("code_dev_cursor_timeout_sec").value = cd.cursor_timeout_sec != null ? cd.cursor_timeout_sec : 2700;
   $("code_dev_default_workspace").value = cd.default_workspace || "";
+  const cr = c.code_review || {};
+  $("code_review_enabled").checked = !!cr.enabled;
+  $("code_review_max_files").value = cr.max_files != null ? cr.max_files : 40;
+  $("code_review_max_file_bytes").value = cr.max_file_bytes != null ? cr.max_file_bytes : 120000;
+  $("code_review_max_total_bytes").value = cr.max_total_bytes != null ? cr.max_total_bytes : 800000;
+  $("code_review_default_workspace").value = cr.default_workspace || "";
   updateSummaries(c);
 }
 function syncLlmProvider() {
@@ -1612,6 +2020,13 @@ function collect() {
       max_concurrent: Math.max(1, Number($("code_dev_max_concurrent").value) || 1),
       cursor_timeout_sec: Math.max(60, Number($("code_dev_cursor_timeout_sec").value) || 2700),
       default_workspace: $("code_dev_default_workspace").value.trim(),
+    },
+    code_review: {
+      enabled: $("code_review_enabled").checked,
+      max_files: Math.max(1, Number($("code_review_max_files").value) || 40),
+      max_file_bytes: Math.max(1024, Number($("code_review_max_file_bytes").value) || 120000),
+      max_total_bytes: Math.max(4096, Number($("code_review_max_total_bytes").value) || 800000),
+      default_workspace: $("code_review_default_workspace").value.trim(),
     },
   };
 }
@@ -1786,6 +2201,23 @@ $("fileDict").onchange = async (e) => {
   if (!d) return;
   if (!d.ok) { alert("解析失败：" + d.detail); return; }
   showDictPreview(d.info.filename, d);
+};
+
+$("btnTestCodeReview").onclick = async () => {
+  const el = $("codeReviewTestResult");
+  el.className = "test-result"; el.style.display = "block";
+  el.textContent = "审码就绪检测中…";
+  try {
+    const r = await fetch("/api/code-review/status");
+    const d = await r.json();
+    const ready = !!(d.code_review && d.code_review.ok);
+    el.className = "test-result " + (ready ? "ok" : "fail");
+    el.textContent = (ready ? "✅ " : "⚠️ ") + (d.detail || d.reply || JSON.stringify(d));
+    if (!ready) el.textContent += "（若刚改表单，请先点「保存全部配置」再测）";
+  } catch (e) {
+    el.className = "test-result fail";
+    el.textContent = "❌ 请求失败：" + e.message;
+  }
 };
 
 /* ================= 初始化 ================= */

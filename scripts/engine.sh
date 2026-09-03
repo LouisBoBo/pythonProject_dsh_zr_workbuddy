@@ -85,7 +85,7 @@ do_status() {
 }
 
 do_stop() {
-  local pid
+  local pid left
   pid="$(listening_pid)"
   if [ -z "$pid" ]; then
     echo "引擎未在监听 :$PORT"
@@ -96,12 +96,20 @@ do_stop() {
   kill $pid 2>/dev/null || true
   for _ in 1 2 3 4 5; do
     sleep 0.4
-    listening_pid >/dev/null || break
+    [ -z "$(listening_pid)" ] && break
   done
-  if [ -n "$(listening_pid)" ]; then
-    kill -9 $(listening_pid) 2>/dev/null || true
+  left="$(listening_pid)"
+  if [ -n "$left" ]; then
+    echo "优雅退出失败，强制 kill -9 PID=$left…"
+    kill -9 $left 2>/dev/null || true
+    sleep 0.5
   fi
+  left="$(listening_pid)"
   rm -f "$PID_FILE"
+  if [ -n "$left" ]; then
+    echo "停止失败：端口 $PORT 仍被 PID=$left 占用（可能无权限杀进程）" >&2
+    return 1
+  fi
   echo "已停止"
 }
 

@@ -38,3 +38,4 @@ apps/*/plugins/*/node_modules/
 **/engine/data/plugins.json.lock
 **/engine/data/local_dev/sandboxes/
 **/engine/data/local_dev/jobs/
+**/engine/data/code_review/reports/

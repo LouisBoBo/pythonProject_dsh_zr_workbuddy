@@ -34,8 +34,13 @@ SENSITIVE_BASENAMES = frozenset(
         ".env.local",
         ".env.production",
         ".env.development",
+        ".env.staging",
+        ".env.test",
         "credentials.json",
         "service-account.json",
+        "secrets.yml",
+        "secrets.yaml",
+        "secrets.json",
         "id_rsa",
         "id_ed25519",
         "id_ecdsa",
@@ -47,7 +52,7 @@ SENSITIVE_BASENAMES = frozenset(
     }
 )
 
-SENSITIVE_SUFFIXES = (".pem", ".p12", ".pfx", ".key", ".ppk")
+SENSITIVE_SUFFIXES = (".pem", ".p12", ".pfx", ".key", ".ppk", ".env")
 
 SENSITIVE_PATH_PARTS = frozenset(
     {

@@ -1,0 +1,5 @@
+{
+  "id": "code-review",
+  "name": "本机目录审码",
+  "purpose": "注册 mes_code_review_*：直读本机工程文件 + LLM 出审查报告（无 Git / 无 VS Code Bridge）"
+}

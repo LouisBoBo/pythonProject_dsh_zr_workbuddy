@@ -69,12 +69,17 @@ window.__ModuleLoader__.load({
       "#dshMesMsgs{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px;font-size:13px;line-height:1.65}" +
       "#dshMesMsgs .user{align-self:flex-end;background:#f2f2f3;border-radius:12px 12px 4px 12px;padding:8px 12px;max-width:85%;white-space:pre-wrap;word-break:break-word}" +
       "#dshMesMsgs .assist{align-self:flex-start;max-width:100%}" +
-      "#dshMesMsgs .assist .reply{white-space:pre-wrap;word-break:break-word}" +
+      "#dshMesMsgs .assist .reply{white-space:normal;word-break:break-word;line-height:1.55}" +
       "#dshMesMsgs .assist .reply strong{font-weight:600}" +
-      "#dshMesMsgs .assist .reply h1,#dshMesMsgs .assist .reply h2,#dshMesMsgs .assist .reply h3{margin:0.6em 0 0.25em;font-weight:650;line-height:1.35}" +
+      "#dshMesMsgs .assist .reply h1,#dshMesMsgs .assist .reply h2,#dshMesMsgs .assist .reply h3,#dshMesMsgs .assist .reply h4{margin:0.45em 0 0.2em;font-weight:650;line-height:1.35}" +
       "#dshMesMsgs .assist .reply h1{font-size:1.15em}" +
       "#dshMesMsgs .assist .reply h2{font-size:1.08em}" +
       "#dshMesMsgs .assist .reply h3{font-size:1.02em}" +
+      "#dshMesMsgs .assist .reply h4{font-size:1em}" +
+      "#dshMesMsgs .assist .reply .md-inline{font-family:ui-monospace,Menlo,monospace;font-size:0.92em;padding:1px 5px;border-radius:4px;background:#0f172a0d}" +
+      "#dshMesMsgs .assist .reply .md-code{display:block;margin:6px 0 8px;padding:8px 10px;border-radius:8px;background:#0f172a0d;border:1px solid #e5e7eb;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre;overflow-x:auto;line-height:1.45}" +
+      "#dshMesMsgs .assist .reply .md-code code{font-family:inherit;font-size:inherit;background:none;padding:0}" +
+      "#dshMesMsgs .assist .reply .md-hr{border:none;border-top:1px solid #e5e7eb;margin:8px 0}" +
       "#dshMesMsgs .assist img{max-width:100%;border-radius:10px;border:1px solid #e8e8ea;margin-top:8px;display:block}" +
       "#dshMesMsgs .assist table{border-collapse:collapse;margin-top:8px;font-size:12px}" +
       "#dshMesMsgs .assist table td,#dshMesMsgs .assist table th{border:1px solid #e5e7eb;padding:4px 10px}" +
@@ -113,6 +118,12 @@ window.__ModuleLoader__.load({
       "#dshMesMsgs .cd-chosen{padding:6px 12px 10px;font-size:12px}" +
       "#dshMesMsgs .cd-chosen-row{display:flex;gap:8px;margin:3px 0}" +
       "#dshMesMsgs .cd-k{color:#9ca3af;min-width:56px;flex:none}" +
+      "#dshMesMsgs .cd-path-row{display:flex;gap:8px;align-items:stretch}" +
+      "#dshMesMsgs .cd-path-row .cd-input{flex:1;min-width:0}" +
+      "#dshMesMsgs .cd-btn.browse{flex:none;white-space:nowrap}" +
+      "#dshMesMsgs .cd-suggest{padding:0 12px 8px;margin:0;font-size:12px;color:#6b7280;display:flex;flex-wrap:wrap;gap:6px;align-items:center}" +
+      "#dshMesMsgs .cd-chip{border:1px solid #e5e7eb;border-radius:999px;padding:4px 10px;font-size:11px;cursor:pointer;background:#f7f8fc;color:#374151;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+      "#dshMesMsgs .cd-chip:hover{border-color:#4d6bfe;color:#4d6bfe}" +
       "#dshMesMsgs .coding-plan{margin:10px 0 4px;padding:10px 12px;border:1px solid #e8eef5;border-radius:10px;background:#f8fafc;max-width:100%}" +
       "#dshMesMsgs .coding-plan.is-running{border-color:#bfdbfe;background:#f0f7ff}" +
       "#dshMesMsgs .coding-plan.is-done{border-color:#bbf7d0;background:#f0fdf4}" +
@@ -141,7 +152,9 @@ window.__ModuleLoader__.load({
       "#dshMesMsgs .cd-result-details{margin-top:10px;border:1px solid #e8ecf4;border-radius:10px;background:#f7f8fc;overflow:hidden}" +
       "#dshMesMsgs .cd-result-details summary{cursor:pointer;padding:8px 12px;font-size:12px;font-weight:600;color:#64748b;list-style:none}" +
       "#dshMesMsgs .cd-result-details summary::-webkit-details-marker{display:none}" +
-      "#dshMesMsgs .cd-result-body{padding:0 12px 12px;font-size:13px;max-height:300px;overflow-y:auto}" +
+      "#dshMesMsgs .cd-result-body{padding:0 12px 12px;font-size:13px;max-height:480px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;line-height:1.55}" +
+      "#dshMesMsgs .cd-result-body h2,#dshMesMsgs .cd-result-body h3,#dshMesMsgs .cd-result-body h4{margin:0.7em 0 0.3em;font-weight:650;line-height:1.35}" +
+      "#dshMesMsgs .cd-result-body .md-code{display:block;margin:6px 0 10px;padding:10px 12px;border-radius:8px;background:#0f172a0d;border:1px solid #e5e7eb;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre;overflow-x:auto;line-height:1.45}" +
       "#dshMesMsgs .cd-goal-banner{margin:0 12px 8px;padding:10px 12px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;font-size:12px;line-height:1.55}" +
       "#dshMesMsgs .cd-goal-banner strong{color:#1e40af;display:block;margin-bottom:4px;font-size:11px;text-transform:uppercase;letter-spacing:.04em}" +
       "#dshMesMsgs .cd-target-row{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 8px}" +
@@ -167,10 +180,27 @@ window.__ModuleLoader__.load({
     }
     function md(s) {
       var t = esc(s);
+      var blocks = [];
+      t = t.replace(/```([^\n`]*)\n?([\s\S]*?)```/g, function (_, _lang, code) {
+        var i = blocks.length;
+        blocks.push('<pre class="md-code"><code>' + String(code).replace(/\s+$/, "") + "</code></pre>");
+        return "\u0000MDCODE" + i + "\u0000";
+      });
+      t = t.replace(/`([^`\n]+)`/g, '<code class="md-inline">$1</code>');
+      t = t.replace(/^####\s+(.+)$/gm, "<h4>$1</h4>");
       t = t.replace(/^###\s+(.+)$/gm, "<h3>$1</h3>");
       t = t.replace(/^##\s+(.+)$/gm, "<h2>$1</h2>");
       t = t.replace(/^#\s+(.+)$/gm, "<h1>$1</h1>");
-      return t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+      t = t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+      t = t.replace(/^---\s*$/gm, '<hr class="md-hr">');
+      t = t.replace(/\n/g, "<br>");
+      t = t.replace(/(?:<br>)*(<(?:h[1-4]|pre|hr)\b[^>]*>)/gi, "$1");
+      t = t.replace(/(<\/(?:h[1-4]|pre)>)(?:<br>)*/gi, "$1");
+      t = t.replace(/(?:<br>)*(\u0000MDCODE\d+\u0000)/g, "$1");
+      t = t.replace(/(\u0000MDCODE\d+\u0000)(?:<br>)*/g, "$1");
+      t = t.replace(/(?:<br>){2,}/g, "<br>");
+      t = t.replace(/\u0000MDCODE(\d+)\u0000/g, function (_, i) { return blocks[Number(i)] || ""; });
+      return t;
     }
     /** 协议标记不得展示给用户（含流式未写完的 <<<… 碎片） */
     function stripMarks(s) {
@@ -189,22 +219,25 @@ window.__ModuleLoader__.load({
       if (ds === "assistant") return "助手";
       if (ds === "pcb_expert") return "PCB 专家";
       if (ds === "code_dev") return "本机写码";
+      if (ds === "code_review") return "本机审码";
       return "演示数据";
     }
     function srcLabel(ev) {
       if (ev && ev.source === "llm") return "LLM";
       if (ev && ev.source === "offline") return "离线提示";
       if (ev && ev.source === "code_dev") return "写码顾问";
+      if (ev && ev.source === "code_review") return "审码顾问";
       if (ev && ev.source === "disabled") return "已停用";
       return "规则引擎";
     }
     function formatChatMeta(ev) {
       var srcTxt = srcLabel(ev);
       var ds = dataSourceLabel(ev && ev.data_source);
-      var metricMap = { options: "需求选项", propose: "写码确认", code_dev: "本机写码" };
-      var intentTxt = "本机写码";
+      var metricMap = { options: "需求选项", propose: "写码确认", code_dev: "本机写码", code_review: "本机审码", need_path: "待填路径", pick: "选目录确认", done: "审码完成", run: "本机审码" };
       var it = (ev && ev.intent) || {};
+      var intentTxt = it.type === "code_review" ? "本机审码" : "本机写码";
       if (it.type === "code_dev" && it.metric) intentTxt = metricMap[it.metric] || String(it.metric);
+      else if (it.type === "code_review" && it.metric) intentTxt = metricMap[it.metric] || "本机审码";
       else if (it.type) intentTxt = metricMap[it.type] || String(it.type);
       return "来源：" + srcTxt + " · 数据源：" + ds + " · 意图：" + intentTxt;
     }
@@ -333,7 +366,7 @@ window.__ModuleLoader__.load({
     }
     function mountCodeDevUi(hostEl, ui, beforeMetaEl, hooks) {
       if (!hostEl || !ui || !ui.kind) return;
-      var old = hostEl.querySelector(".cd-card");
+      var old = hostEl.querySelector(".cd-card:not(.cr-pick)");
       if (old) old.remove();
       var card = document.createElement("div");
       card.className = "cd-card";
@@ -343,6 +376,333 @@ window.__ModuleLoader__.load({
       else return;
       if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
       else hostEl.appendChild(card);
+    }
+    function mountCodeReviewUi(hostEl, ui, beforeMetaEl, hooks) {
+      if (!hostEl || !ui || !ui.kind) return;
+      var old = hostEl.querySelector(".cd-card.cr-pick");
+      if (old) old.remove();
+      var card = document.createElement("div");
+      card.className = "cd-card cr-pick";
+      hooks = hooks || {};
+      if (ui.kind === "pick") renderCrPick(card, ui, hooks);
+      else return;
+      if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
+      else hostEl.appendChild(card);
+    }
+    function renderCrPick(card, ui, hooks) {
+      hooks = hooks || {};
+      var ws0 = ui.workspace || "";
+      var scope0 = ui.scope || "";
+      var focus0 = ui.focus || "";
+      var suggestions = Array.isArray(ui.suggestions) ? ui.suggestions : [];
+      var html =
+        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">代码审核</span><span class="cd-hint">' +
+        esc(ui.hint || "选择目录 · 确认后开始") +
+        '</span></div><p class="cd-summary">' +
+        esc(ui.summary || "请确认要审核的本机工程") +
+        '</p><p class="cd-desc">' +
+        esc(ui.desc || "直读本机磁盘源码（不走 Git / VS Code Bridge），确认后开始审查。") +
+        "</p></div>";
+      html +=
+        '<label class="cd-field"><span class="cd-label">本机工程目录</span><div class="cd-path-row">' +
+        '<input class="cd-input cd-ws" value="' + esc(ws0) + '" placeholder="/Users/你/项目" autocomplete="off">' +
+        '<button type="button" class="cd-btn browse cd-browse">浏览…</button></div></label>';
+      if (suggestions.length) {
+        html += '<p class="cd-suggest">常用：';
+        suggestions.forEach(function (s) {
+          var p = typeof s === "string" ? s : (s && s.path) || "";
+          var lab = (typeof s === "object" && s.label) ? s.label + " · " : "";
+          if (!p) return;
+          html += '<button type="button" class="cd-chip" data-path="' + esc(p) + '" title="' + esc(p) + '">' + esc(lab + p) + "</button>";
+        });
+        html += "</p>";
+      }
+      html +=
+        '<label class="cd-field"><span class="cd-label">范围（可选，相对子路径）</span>' +
+        '<input class="cd-input cd-scope" value="' + esc(scope0) + '" placeholder="如 frontend/src"></label>';
+      html +=
+        '<label class="cd-field"><span class="cd-label">审查重点（可选）</span>' +
+        '<input class="cd-input cd-focus" value="' + esc(focus0) + '" placeholder="如 SQL 注入、权限校验"></label>';
+      html +=
+        '<p class="cd-error" style="display:none"></p><div class="cd-actions">' +
+        '<button type="button" class="cd-btn cd-cancel">取消</button>' +
+        '<button type="button" class="cd-btn confirm cd-go">开始审核</button></div>';
+      card.innerHTML = html;
+      var errEl = card.querySelector(".cd-error");
+      var wsEl = card.querySelector(".cd-ws");
+      var goBtn = card.querySelector(".cd-go");
+      Array.prototype.forEach.call(card.querySelectorAll(".cd-chip"), function (btn) {
+        btn.onclick = function () { wsEl.value = btn.getAttribute("data-path") || ""; };
+      });
+      card.querySelector(".cd-browse").onclick = function () {
+        var browseBtn = card.querySelector(".cd-browse");
+        browseBtn.disabled = true;
+        browseBtn.textContent = "选择中…";
+        errEl.style.display = "none";
+        fetch(engineBase() + "/api/pick-folder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: "选择要审核的工程目录" }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.ok && d.path) wsEl.value = d.path;
+            else if (d.error && d.error !== "已取消选择") {
+              errEl.style.display = "";
+              errEl.textContent = d.error || "选文件夹失败";
+            }
+          })
+          .catch(function (e) {
+            errEl.style.display = "";
+            errEl.textContent = "浏览失败：" + e.message;
+          })
+          .finally(function () {
+            browseBtn.disabled = false;
+            browseBtn.textContent = "浏览…";
+          });
+      };
+      card.querySelector(".cd-cancel").onclick = function () {
+        card.className = "cd-card cr-pick done";
+        card.innerHTML =
+          '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">代码审核</span></div>' +
+          '<p class="cd-summary">已取消，未开始审核</p></div>';
+      };
+      goBtn.onclick = function () {
+        var local_path = (wsEl.value || "").trim();
+        var scope = (card.querySelector(".cd-scope").value || "").trim();
+        var focus = (card.querySelector(".cd-focus").value || "").trim();
+        if (!local_path) {
+          errEl.style.display = "";
+          errEl.textContent = "请填写或浏览选择本机工程目录";
+          return;
+        }
+        var parts = local_path.split(/[/\\]/).filter(Boolean);
+        var name = parts.length ? parts[parts.length - 1] : local_path;
+        card.className = "cd-card cr-pick done";
+        card.innerHTML =
+          '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">代码审核</span><span class="cd-hint">进行中</span></div>' +
+          '<p class="cd-summary">已确认本机工程，正在审核</p></div>' +
+          '<div class="cd-chosen">' +
+          '<div class="cd-chosen-row"><span class="cd-k">来源</span><span class="cd-v">本机目录直读</span></div>' +
+          '<div class="cd-chosen-row"><span class="cd-k">项目</span><span class="cd-v">' + esc(name) + "</span></div>" +
+          '<div class="cd-chosen-row"><span class="cd-k">路径</span><span class="cd-v">' + esc(local_path) + "</span></div></div>" +
+          '<div class="cd-plan-host" style="padding:0 12px 8px"></div>' +
+          '<div class="cd-done-banner" style="display:none;margin:0 12px 10px"></div>';
+        var host = card.closest(".assist") || card.parentElement;
+        if (host) {
+          var replyEl = host.querySelector(".reply");
+          if (replyEl && replyEl.nextElementSibling === card) host.insertBefore(card, replyEl);
+          if (replyEl) replyEl.innerHTML = md("正在审核本机工程 `" + local_path + "` …");
+          var metaEl0 = host.querySelector(".meta");
+          if (metaEl0) metaEl0.textContent = "来源：审码顾问 · 数据源：本机审码 · 意图：审码进行中";
+        }
+        startCodeReviewWatch(local_path, scope, focus, {
+          planHost: card.querySelector(".cd-plan-host"),
+          bannerEl: card.querySelector(".cd-done-banner"),
+          metaEl: host ? host.querySelector(".meta") : null,
+          replyEl: host ? host.querySelector(".reply") : null,
+        });
+      };
+    }
+    var CR_PIPELINE = [
+      { id: "validate", title: "校验工程路径" },
+      { id: "list", title: "筛选功能源码" },
+      { id: "read", title: "读取源码" },
+      { id: "llm", title: "Viprasol Skill 审查" },
+      { id: "report", title: "汇总审核报告" },
+    ];
+    function initCrSteps() {
+      return CR_PIPELINE.map(function (p) { return { id: p.id, title: p.title, state: "pending" }; });
+    }
+    function applyCrStep(steps, event) {
+      var id = event && event.id;
+      if (!id) return steps;
+      var list = (steps && steps.length) ? steps.slice() : initCrSteps();
+      var idx = -1;
+      for (var i = 0; i < list.length; i++) { if (list[i].id === id) { idx = i; break; } }
+      if (idx < 0) return list;
+      var nextState = event.state || "running";
+      var title = String(event.title || "").trim();
+      var merged = Object.assign({}, list[idx], { state: nextState });
+      if (title) merged.title = title;
+      list[idx] = merged;
+      if (nextState === "running" || nextState === "done") {
+        for (var j = 0; j < idx; j++) {
+          if (list[j].state !== "done" && list[j].state !== "error") {
+            list[j] = Object.assign({}, list[j], { state: "done" });
+          }
+        }
+      }
+      return list;
+    }
+    function startCodeReviewWatch(local_path, scope, focus, hosts) {
+      hosts = hosts || {};
+      var planHost = hosts.planHost;
+      var bannerEl = hosts.bannerEl;
+      var metaEl = hosts.metaEl;
+      var replyEl = hosts.replyEl;
+      var msgs = document.getElementById("dshMesMsgs");
+      if (!planHost || !replyEl) {
+        if (!msgs) return;
+        var wrap = document.createElement("div");
+        wrap.className = "assist cr-job-msg";
+        wrap.innerHTML =
+          '<div class="reply"></div>' +
+          '<div class="cd-job-shell">' +
+          '  <div class="cd-plan-host"></div>' +
+          '  <div class="cd-done-banner" style="display:none"></div>' +
+          "</div>" +
+          '<div class="meta">来源：审码顾问 · 数据源：本机审码 · 意图：审码进行中</div>';
+        msgs.appendChild(wrap);
+        if (!planHost) planHost = wrap.querySelector(".cd-plan-host");
+        if (!bannerEl) bannerEl = wrap.querySelector(".cd-done-banner");
+        if (!replyEl) replyEl = wrap.querySelector(".reply");
+        if (!metaEl) metaEl = wrap.querySelector(".meta");
+      }
+      var startedAt = Date.now();
+      var steps = initCrSteps();
+      steps[0] = Object.assign({}, steps[0], { state: "running" });
+      var finished = false;
+      var durationText = "0s";
+      var streamedText = "";
+      var tokenQueue = [];
+      var tokenDraining = false;
+      var pendingDoneEv = null;
+      function paintPlan() {
+        planHost.innerHTML = renderCodingPlanHtml(steps, { heading: "审码进度", duration: durationText, summary: "进行中…" });
+      }
+      function paintReport(text) {
+        if (!replyEl) return;
+        replyEl.innerHTML = md(stripMarks(text || ""));
+        if (msgs) msgs.scrollTop = msgs.scrollHeight;
+      }
+      function sleepMs(ms) {
+        return new Promise(function (r) { setTimeout(r, ms); });
+      }
+      function finish(ev) {
+        if (finished) return;
+        if (tokenQueue.length || tokenDraining) {
+          pendingDoneEv = ev;
+          drainTokens();
+          return;
+        }
+        finished = true;
+        clearInterval(durTimer);
+        durationText = formatDuration((Date.now() - startedAt) / 1000);
+        var ok = !!(ev && ev.ok);
+        steps = (steps || []).map(function (s) {
+          if (s.state === "running" || s.state === "waiting") return Object.assign({}, s, { state: ok ? "done" : "error" });
+          if (ok && s.state !== "error") return Object.assign({}, s, { state: "done" });
+          return s;
+        });
+        paintPlan();
+        var reply = (ev && ev.reply) || streamedText || (ok ? "审查完成。" : ((ev && ev.detail) || "审核失败"));
+        streamedText = reply;
+        if (bannerEl) {
+          bannerEl.style.display = "";
+          bannerEl.className = "cd-done-banner " + (ok ? "ok" : "err");
+          var n = (ev && ev.file_count) || ((ev && ev.files_reviewed) || []).length || 0;
+          bannerEl.innerHTML =
+            '<span class="cd-done-icon">' + (ok ? "✓" : "!") + "</span>" +
+            "<div><strong>" + (ok ? "审核报告已生成" : "审核未完成") + "</strong> · 用时 " + esc(durationText) +
+            (ok ? " · 已审 " + n + " 个文件" : " · " + esc((ev && ev.detail) || "")) +
+            (ev && ev.report_id ? '<div class="cd-synced">报告 ID：' + esc(ev.report_id) + "</div>" : "") +
+            "</div>";
+        }
+        paintReport(reply);
+        if (metaEl) metaEl.textContent = "来源：审码顾问 · 数据源：本机审码 · 意图：审码完成" + (ev && ev.report_id ? " · " + ev.report_id : "");
+      }
+      function drainTokens() {
+        if (tokenDraining) return;
+        tokenDraining = true;
+        (async function () {
+          while (tokenQueue.length) {
+            var ev = tokenQueue.shift();
+            var text = ev && ev.text != null ? ev.text : (streamedText + ((ev && ev.delta) || ""));
+            streamedText = text;
+            paintReport(text);
+            await sleepMs(28);
+          }
+          tokenDraining = false;
+          if (pendingDoneEv && !finished) {
+            var doneEv = pendingDoneEv;
+            pendingDoneEv = null;
+            finish(doneEv);
+          }
+        })();
+      }
+      paintPlan();
+      var durTimer = setInterval(function () {
+        if (finished) { clearInterval(durTimer); return; }
+        durationText = formatDuration((Date.now() - startedAt) / 1000);
+        paintPlan();
+      }, 1000);
+      fetch(engineBase() + "/api/code-review/run/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({ local_path: local_path, scope: scope || "", focus: focus || "" }),
+      })
+        .then(function (r) {
+          if (!r.ok) {
+            return r.json().catch(function () { return {}; }).then(function (j) {
+              finish({ ok: false, detail: (j && (j.detail || j.reply)) || ("HTTP " + r.status), reply: (j && j.reply) || "" });
+            });
+          }
+          var reader = r.body.getReader();
+          var decoder = new TextDecoder();
+          var pending = "";
+          function pump() {
+            return reader.read().then(function (res) {
+              if (res.done) {
+                if (!finished) {
+                  if (pendingDoneEv) drainTokens();
+                  else finish({ ok: false, detail: "流式结束但未收到完成事件", reply: "审码流中断，请重试" });
+                }
+                return;
+              }
+              pending += decoder.decode(res.value, { stream: true });
+              var chunks = pending.split("\n\n");
+              pending = chunks.pop() || "";
+              chunks.forEach(function (block) {
+                block.split("\n").forEach(function (line) {
+                  if (line.indexOf("data:") !== 0) return;
+                  var raw = line.slice(5).trim();
+                  if (!raw) return;
+                  var ev;
+                  try { ev = JSON.parse(raw); } catch (e) { return; }
+                  if (ev.type === "step") {
+                    steps = applyCrStep(steps, ev);
+                    paintPlan();
+                  } else if (ev.type === "status" && ev.detail) {
+                    for (var i = 0; i < steps.length; i++) {
+                      if (steps[i].state === "running") {
+                        steps[i] = Object.assign({}, steps[i], { title: ev.detail });
+                        break;
+                      }
+                    }
+                    paintPlan();
+                    if (!streamedText || streamedText.indexOf("代码审核汇总报告") !== 0) {
+                      paintReport(
+                        "⏳ **审码进行中**（尚未生成正式报告）\n\n" + ev.detail
+                      );
+                    }
+                  } else if (ev.type === "token") {
+                    tokenQueue.push(ev);
+                    drainTokens();
+                  } else if (ev.type === "done") {
+                    pendingDoneEv = ev;
+                    drainTokens();
+                  }
+                });
+              });
+              return pump();
+            });
+          }
+          return pump();
+        })
+        .catch(function (e) {
+          finish({ ok: false, detail: e.message, reply: "请求失败：" + e.message });
+        });
     }
     function parseCodeDevUiFromText(text, fallbackWs) {
       var s = String(text || "");
@@ -957,6 +1317,11 @@ window.__ModuleLoader__.load({
                       },
                     });
                   }
+                }
+                if (ev.code_review_ui) {
+                  mountCodeReviewUi(bubble.el, ev.code_review_ui, bubble.meta, {
+                    renderMsg: renderMsg,
+                  });
                 }
                 if (ev.code_dev_brief && cur) {
                   cur.codeDevBrief = ev.code_dev_brief;

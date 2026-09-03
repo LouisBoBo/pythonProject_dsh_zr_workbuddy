@@ -91,6 +91,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "cursor_timeout_sec": 2700,
         "default_workspace": "",
     },
+    # P0-3 本机目录直读审码（默认关闭；无 Git / 无 IDE Bridge）
+    "code_review": {
+        "enabled": False,
+        "max_files": 40,
+        "max_file_bytes": 120000,
+        "max_total_bytes": 800000,
+        "default_workspace": "",
+    },
 }
 
 

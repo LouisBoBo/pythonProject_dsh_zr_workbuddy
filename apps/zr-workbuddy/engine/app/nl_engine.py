@@ -347,6 +347,8 @@ async def _llm_call(
     timeout: float = 12,
     max_tokens: int = 500,
     temperature: float = 0,
+    *,
+    no_cache: bool = False,
 ) -> str | None:
     """调用 LLM 并返回回复文本；失败返回 None（含模型名兜底重试）。"""
     import httpx
@@ -367,6 +369,12 @@ async def _llm_call(
         headers = {"Authorization": f"Bearer {(llm_cfg.get('api_key') or '').strip()}"}
         if not llm_cfg.get("api_key"):
             return None
+    if no_cache:
+        headers = {
+            **headers,
+            "Cache-Control": "no-cache, no-store",
+            "Pragma": "no-cache",
+        }
 
     async def _do(m: str):
         payload = {
@@ -375,18 +383,41 @@ async def _llm_call(
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        # DeepSeek V4 默认 thinking 会吃光 max_tokens；仅对该厂商关闭。
+        # Ollama 等兼容网关可能不认 thinking 字段，勿无条件附带。
+        if no_cache and provider == "deepseek":
+            payload["thinking"] = {"type": "disabled"}
         async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.post(v1 + "/chat/completions", headers=headers, json=payload)
             r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"].strip()
+            msg = r.json()["choices"][0]["message"]
+            content = (msg.get("content") or "").strip()
+            reasoning = (
+                msg.get("reasoning_content")
+                or msg.get("reasoning")
+                or msg.get("thinking")
+                or ""
+            )
+            reasoning = str(reasoning).strip()
+            if content:
+                return content
+            if reasoning:
+                return reasoning
+            return ""
 
     try:
-        return await _do(model or "deepseek-chat")
-    except Exception:
+        out = await _do(model or "deepseek-chat")
+        return out if out else None
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning("llm_call failed provider=%s model=%s: %s", provider, model, e)
         if provider != "ollama" and model and model != "deepseek-chat":
             try:
-                return await _do("deepseek-chat")
-            except Exception:
+                out = await _do("deepseek-chat")
+                return out if out else None
+            except Exception as e2:
+                logging.getLogger(__name__).warning("llm_call fallback failed: %s", e2)
                 return None
         return None
 
@@ -399,6 +430,7 @@ async def llm_freeform(
     max_tokens: int = 2000,
     timeout: float = 60,
     temperature: float = 0.3,
+    no_cache: bool = False,
 ) -> str | None:
     """自由对话式 LLM 调用（非 JSON 意图解析）。"""
     return await _llm_call(
@@ -407,6 +439,7 @@ async def llm_freeform(
         timeout=timeout,
         max_tokens=max_tokens,
         temperature=temperature,
+        no_cache=no_cache,
     )
 
 

@@ -305,6 +305,190 @@ async def api_code_dev_job_stream(job_id: str):
     )
 
 
+class CodeReviewListBody(BaseModel):
+    local_path: str
+    scope: str = ""
+
+
+class CodeReviewRunBody(BaseModel):
+    local_path: str
+    scope: str = ""
+    files: list[str] | None = None
+    focus: str = ""
+
+
+class PickFolderBody(BaseModel):
+    prompt: str = "选择工程目录"
+
+
+@app.post(
+    "/api/pick-folder",
+    tags=["本机工具"],
+    summary="弹出本机选文件夹对话框",
+    description="在运行引擎的本机弹出原生文件夹选择框（macOS/Windows/Linux）；"
+    "仅适用于浏览器与引擎同机。用于写码/审码确认卡「浏览…」。",
+)
+def api_pick_folder(body: PickFolderBody = PickFolderBody()):
+    from .folder_picker import pick_local_folder
+
+    return pick_local_folder(prompt=(body.prompt or "选择工程目录").strip() or "选择工程目录")
+
+
+@app.get(
+    "/api/code-review/status",
+    tags=["本机审码"],
+    summary="本机审码就绪状态",
+    description="返回审码车道是否开启、LLM 是否可用及读取上限配置。",
+)
+def api_code_review_status():
+    from . import plugins_store
+    from .code_review import status as code_review_status
+    from .code_review.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机目录审码")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    return code_review_status()
+
+
+@app.post(
+    "/api/code-review/check",
+    tags=["本机审码"],
+    summary="校验本机审码目标路径",
+    description="校验绝对路径是否可读、是否为工程目录或支持的源码文件；不涉及 Git。",
+)
+def api_code_review_check(body: CodeReviewListBody):
+    from . import plugins_store
+    from .code_review import check_path
+    from .code_review.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机目录审码")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    return check_path(body.local_path or "")
+
+
+@app.post(
+    "/api/code-review/list",
+    tags=["本机审码"],
+    summary="列出可审阅的本地源码文件",
+    description="直读本机目录，按后缀白名单与敏感路径规则扫描；可选 scope 相对子路径。",
+)
+def api_code_review_list(body: CodeReviewListBody):
+    from . import plugins_store
+    from .code_review.ops import FEATURE_ID, list_files as code_review_list_files
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机目录审码")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    return code_review_list_files(body.local_path or "", scope=body.scope or "")
+
+
+@app.post(
+    "/api/code-review/run",
+    tags=["本机审码"],
+    summary="对本机工程执行代码审查",
+    description="直读本地文件内容（非 Git diff），经 LLM 输出结构化 findings 与 Markdown 报告；"
+    "报告保存于 engine/data/code_review/reports/。确认卡请优先用 /api/code-review/run/stream 看进度。",
+)
+async def api_code_review_run(body: CodeReviewRunBody):
+    from . import plugins_store
+    from .code_review.config import availability, get_config
+    from .code_review.ops import FEATURE_ID, run_review_async
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机目录审码")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    cfg = get_config()
+    if not cfg.enabled:
+        return JSONResponse(
+            {"ok": False, "detail": "本机审码未开启", "reply": "请到配置中心开启审码车道"},
+            status_code=400,
+        )
+    avail = availability()
+    if not avail.get("ok"):
+        return JSONResponse(
+            {"ok": False, "detail": avail.get("detail"), "reply": avail.get("detail")},
+            status_code=400,
+        )
+    out = await run_review_async(
+        local_path=body.local_path or "",
+        scope=body.scope or "",
+        files=body.files,
+        focus=body.focus or "",
+    )
+    if not out.get("ok"):
+        return JSONResponse(out, status_code=400)
+    return out
+
+
+@app.post(
+    "/api/code-review/run/stream",
+    tags=["本机审码"],
+    summary="流式执行本机代码审查（带进度）",
+    description="SSE：逐步推送校验/筛选/读码/LLM/汇总；过程中推送草稿 token，终态按行流式推送完整「代码审核汇总报告」。",
+)
+async def api_code_review_run_stream(body: CodeReviewRunBody):
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    from . import plugins_store
+    from .code_review.ops import FEATURE_ID, iter_review_events
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机目录审码")
+    if blocked:
+        async def err_gen():
+            yield f"data: {_json.dumps({**blocked, 'type': 'done', 'ok': False}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(err_gen(), media_type="text/event-stream")
+
+    async def event_gen():
+        try:
+            async for ev in iter_review_events(
+                local_path=body.local_path or "",
+                scope=body.scope or "",
+                files=body.files,
+                focus=body.focus or "",
+            ):
+                yield f"data: {_json.dumps(ev, ensure_ascii=False)}\n\n"
+                # 促使中间代理/缓冲尽快下发，避免 token 被攒成一包
+                if ev.get("type") == "token":
+                    yield ": ping\n\n"
+        except Exception as e:
+            yield f"data: {_json.dumps({'type': 'done', 'ok': False, 'detail': f'{type(e).__name__}: {e}', 'reply': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get(
+    "/api/code-review/reports/{report_id}",
+    tags=["本机审码"],
+    summary="查询审码报告",
+    description="按 report_id（cr- 前缀）读取已保存的审码报告 JSON。",
+)
+def api_code_review_report(report_id: str):
+    from . import plugins_store
+    from .code_review import get_report
+    from .code_review.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机目录审码")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    out = get_report(report_id)
+    if not out.get("ok"):
+        return JSONResponse(out, status_code=404)
+    return out
+
+
 def _read_runtime_yaml() -> dict:
     from .runtime_conf import read_runtime
     return read_runtime()
@@ -748,7 +932,12 @@ def api_commit_dictionary(body: DictCommitBody):
 
 @app.get("/", include_in_schema=False)
 def index():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
-
+    return FileResponse(
+        os.path.join(STATIC_DIR, "index.html"),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

@@ -3,6 +3,7 @@
     "mes-config",
     "mes-pcb",
     "mes-ask",
-    "code-dev"
+    "code-dev",
+    "code-review"
   ]
 }
