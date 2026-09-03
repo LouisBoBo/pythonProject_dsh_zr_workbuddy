@@ -45,6 +45,234 @@ def is_sensitive_rel(rel: str) -> bool:
     return False
 
 
+def _should_skip_dirname(name: str, rel_dir: Path) -> bool:
+    """目录过滤：标准跳过名 + engine/data 运行时目录。"""
+    if name in COPY_SKIP_DIR_NAMES or name.startswith(".git"):
+        return True
+    # apps/.../engine/data：Job/沙箱/日志，整仓拷会轻易爆 4000
+    parent = rel_dir.name if str(rel_dir) != "." else ""
+    if name == "data" and parent == "engine":
+        return True
+    parts = rel_dir.parts + (name,)
+    if len(parts) >= 2 and parts[-1] == "data" and parts[-2] == "engine":
+        return True
+    return False
+
+
+def _copy_one_file(
+    src: Path,
+    dest: Path,
+    *,
+    cfg: CodeDevConfig,
+    total_bytes: int,
+) -> tuple[bool, int]:
+    """拷贝单个普通文件；返回 (是否计入, 新 total_bytes)。"""
+    if src.is_symlink() or not src.is_file():
+        return False, total_bytes
+    try:
+        size = src.stat().st_size
+    except OSError:
+        return False, total_bytes
+    if size > cfg.max_file_bytes:
+        return False, total_bytes
+    if total_bytes + size > cfg.copy_max_total_bytes:
+        raise RuntimeError("工程体积过大，无法完整拷入沙箱")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(src, dest, follow_symlinks=False)
+    except OSError:
+        return False, total_bytes
+    if dest.is_symlink():
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+        return False, total_bytes
+    return True, total_bytes + size
+
+
+def _prepare_sandbox_sparse(
+    root: Path,
+    target_workspace: Path,
+    include_rels: list[str],
+    *,
+    cfg: CodeDevConfig,
+    on_progress: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """仅拷贝 write_scope / 门禁 findings 相关路径（及 Python 包 __init__ 链）。"""
+    from .path_scope import normalize_write_scope
+
+    scope = normalize_write_scope(include_rels)
+    if not scope:
+        raise RuntimeError("稀疏拷贝范围为空")
+
+    if on_progress:
+        on_progress(f"按写范围稀疏拷贝沙箱（{len(scope)} 条路径）…")
+
+    # 扩展：目录范围 + 文件 + 祖先 __init__.py（便于 import）
+    planned: list[str] = []
+    seen: set[str] = set()
+
+    def add_rel(rel: str) -> None:
+        r = (rel or "").replace("\\", "/").strip().lstrip("./")
+        if not r or r in seen or is_sensitive_rel(r):
+            return
+        seen.add(r)
+        planned.append(r)
+
+    for item in scope:
+        raw = item.replace("\\", "/").strip().lstrip("./")
+        if not raw:
+            continue
+        if raw.endswith("/"):
+            sub = target_workspace / raw.rstrip("/")
+            if sub.is_dir():
+                for dirpath, dirnames, filenames in os_walk_filtered(sub):
+                    rel_dir = Path(dirpath).relative_to(target_workspace)
+                    dirnames[:] = [
+                        d for d in list(dirnames) if not _should_skip_dirname(d, rel_dir)
+                    ]
+                    for name in filenames:
+                        rel = str(
+                            (rel_dir / name).as_posix() if str(rel_dir) != "." else name
+                        )
+                        add_rel(rel)
+            continue
+        add_rel(raw)
+        # 祖先包初始化文件
+        parent = Path(raw).parent
+        while str(parent) not in {".", ""}:
+            add_rel(str((parent / "__init__.py").as_posix()))
+            parent = parent.parent
+
+    copied = 0
+    total_bytes = 0
+    missing: list[str] = []
+    for rel in planned:
+        if copied >= cfg.copy_max_files:
+            raise RuntimeError(
+                f"稀疏拷贝仍超过上限（>{cfg.copy_max_files}），请缩小 write_scope"
+            )
+        src = target_workspace / rel
+        if not src.is_file():
+            if Path(rel).name == "__init__.py":
+                continue
+            missing.append(rel)
+            continue
+        ok, total_bytes = _copy_one_file(src, root / rel, cfg=cfg, total_bytes=total_bytes)
+        if ok:
+            copied += 1
+
+    if copied == 0:
+        sample = "、".join(missing[:5]) or "（无有效文件）"
+        raise RuntimeError(f"稀疏拷贝未找到可写文件：{sample}")
+
+    if on_progress:
+        on_progress(f"稀疏沙箱就绪：{copied} 个文件" + (f"（缺 {len(missing)}）" if missing else ""))
+    return {
+        "sandbox": str(root),
+        "copied_files": copied,
+        "skipped_dir_hits": 0,
+        "mode": "sparse",
+        "total_bytes": total_bytes,
+        "include_rels": planned[:80],
+        "missing_rels": missing[:20],
+    }
+
+
+def prepare_sandbox(
+    data_dir: Path,
+    job_id: str,
+    target_workspace: Path,
+    *,
+    empty_target: bool,
+    cfg: CodeDevConfig | None = None,
+    on_progress: Callable[[str], None] | None = None,
+    include_rels: list[str] | None = None,
+) -> dict[str, Any]:
+    """创建沙箱：空目标 → 空仓；有 include_rels → 稀疏拷贝；否则受限全量拷贝。"""
+    cfg = cfg or get_config()
+    root = sandbox_root(data_dir, job_id)
+    # 清空旧内容
+    if root.exists():
+        for child in root.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                try:
+                    child.unlink()
+                except OSError:
+                    pass
+    root.mkdir(parents=True, exist_ok=True)
+
+    if empty_target:
+        if on_progress:
+            on_progress("沙箱已就绪（空项目）")
+        return {"sandbox": str(root), "copied_files": 0, "mode": "empty"}
+
+    scoped = [str(p).strip() for p in (include_rels or []) if str(p).strip()]
+    if scoped:
+        return _prepare_sandbox_sparse(
+            root,
+            target_workspace,
+            scoped,
+            cfg=cfg,
+            on_progress=on_progress,
+        )
+
+    copied = 0
+    total_bytes = 0
+    skipped_dirs = 0
+    if on_progress:
+        on_progress("正在将目标工程受限拷贝到沙箱…")
+
+    for dirpath, dirnames, filenames in os_walk_filtered(target_workspace):
+        rel_dir = Path(dirpath).relative_to(target_workspace)
+        keep: list[str] = []
+        for d in list(dirnames):
+            if _should_skip_dirname(d, rel_dir):
+                skipped_dirs += 1
+                continue
+            keep.append(d)
+        dirnames[:] = keep
+
+        dest_dir = root / rel_dir if str(rel_dir) != "." else root
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        for name in filenames:
+            if copied >= cfg.copy_max_files:
+                raise RuntimeError(
+                    f"工程文件过多（>{cfg.copy_max_files}）。"
+                    "请缩小工程目录、排除依赖/运行时 data，"
+                    "或对门禁修复等任务使用带 write_scope 的稀疏拷贝后再试"
+                )
+            src = Path(dirpath) / name
+            rel = str((rel_dir / name).as_posix() if str(rel_dir) != "." else name)
+            if is_sensitive_rel(rel):
+                continue
+            ok, total_bytes = _copy_one_file(
+                src, root / rel, cfg=cfg, total_bytes=total_bytes
+            )
+            if ok:
+                copied += 1
+
+    if on_progress:
+        on_progress(f"沙箱拷贝完成：{copied} 个文件")
+    return {
+        "sandbox": str(root),
+        "copied_files": copied,
+        "skipped_dir_hits": skipped_dirs,
+        "mode": "copy",
+        "total_bytes": total_bytes,
+    }
+
+
+def os_walk_filtered(root: Path):
+    import os
+
+    yield from os.walk(root)
+
+
 def resolve_in_sandbox(sandbox: Path, rel: str) -> Path:
     """相对路径解析到沙箱内；防 ../ 逃逸。"""
     raw = (rel or "").strip().replace("\\", "/")
@@ -69,7 +297,6 @@ def sandbox_entry(sandbox: Path, rel: str) -> Path:
     if ".." in Path(raw).parts:
         raise ValueError("路径不允许包含 ..")
     entry = sandbox / raw
-    # 叶子为符号链接：先返回给调用方拒绝，避免 resolve 跟随外链时语义混成「逃逸」
     if entry.is_symlink():
         return entry
     root = sandbox.resolve()
@@ -90,108 +317,6 @@ def resolve_regular_file_in_sandbox(sandbox: Path, rel: str) -> Path:
     if not entry.is_file():
         raise ValueError("不是普通文件")
     return resolve_in_sandbox(sandbox, rel)
-
-
-def prepare_sandbox(
-    data_dir: Path,
-    job_id: str,
-    target_workspace: Path,
-    *,
-    empty_target: bool,
-    cfg: CodeDevConfig | None = None,
-    on_progress: Callable[[str], None] | None = None,
-) -> dict[str, Any]:
-    """创建沙箱：空目标 → 空仓；非空 → 受限拷贝。"""
-    cfg = cfg or get_config()
-    root = sandbox_root(data_dir, job_id)
-    # 清空旧内容
-    if root.exists():
-        for child in root.iterdir():
-            if child.is_dir():
-                shutil.rmtree(child, ignore_errors=True)
-            else:
-                try:
-                    child.unlink()
-                except OSError:
-                    pass
-    root.mkdir(parents=True, exist_ok=True)
-
-    if empty_target:
-        if on_progress:
-            on_progress("沙箱已就绪（空项目）")
-        return {"sandbox": str(root), "copied_files": 0, "mode": "empty"}
-
-    copied = 0
-    total_bytes = 0
-    skipped_dirs = 0
-    if on_progress:
-        on_progress("正在将目标工程受限拷贝到沙箱…")
-
-    for dirpath, dirnames, filenames in os_walk_filtered(target_workspace):
-        rel_dir = Path(dirpath).relative_to(target_workspace)
-        # 原地过滤 dirnames
-        keep: list[str] = []
-        for d in list(dirnames):
-            if d in COPY_SKIP_DIR_NAMES or d.startswith(".git"):
-                skipped_dirs += 1
-                continue
-            keep.append(d)
-        dirnames[:] = keep
-
-        dest_dir = root / rel_dir if str(rel_dir) != "." else root
-        dest_dir.mkdir(parents=True, exist_ok=True)
-
-        for name in filenames:
-            if copied >= cfg.copy_max_files:
-                raise RuntimeError(
-                    f"工程文件过多（>{cfg.copy_max_files}），请缩小目录或排除依赖后再试"
-                )
-            src = Path(dirpath) / name
-            rel = str((rel_dir / name).as_posix() if str(rel_dir) != "." else name)
-            if is_sensitive_rel(rel):
-                continue
-            # 不跟随符号链接拷入沙箱，避免把宿主机 .env / 密钥链进来给 Agent 读
-            if src.is_symlink() or not src.is_file():
-                continue
-            try:
-                size = src.stat().st_size
-            except OSError:
-                continue
-            if size > cfg.max_file_bytes:
-                continue
-            if total_bytes + size > cfg.copy_max_total_bytes:
-                raise RuntimeError("工程体积过大，无法完整拷入沙箱")
-            dest = root / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                shutil.copy2(src, dest, follow_symlinks=False)
-            except OSError:
-                continue
-            # copy2 在部分平台仍可能落地为链接；再拒一次
-            if dest.is_symlink():
-                try:
-                    dest.unlink()
-                except OSError:
-                    pass
-                continue
-            copied += 1
-            total_bytes += size
-
-    if on_progress:
-        on_progress(f"沙箱拷贝完成：{copied} 个文件")
-    return {
-        "sandbox": str(root),
-        "copied_files": copied,
-        "skipped_dir_hits": skipped_dirs,
-        "mode": "copy",
-        "total_bytes": total_bytes,
-    }
-
-
-def os_walk_filtered(root: Path):
-    import os
-
-    yield from os.walk(root)
 
 
 def sync_changed_to_target(

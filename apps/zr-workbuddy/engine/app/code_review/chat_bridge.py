@@ -81,7 +81,12 @@ async def handle_chat_code_review(text: str) -> dict[str, Any]:
     raw = (text or "").strip()
     if not plugins_store.is_enabled(FEATURE_ID):
         hint = plugins_store.disabled_hint(FEATURE_ID, capability="本机目录审码")
-        return _base(reply=hint, note="code-review 未启用", source="disabled")
+        return _base(
+            reply=hint,
+            note="code-review 未启用",
+            source="disabled",
+            intent={"type": "code_review", "metric": "disabled", "dim": None, "chart": None},
+        )
 
     cfg = get_config()
     avail = availability()

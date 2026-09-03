@@ -82,7 +82,12 @@ async def handle_chat_code_dev(
     raw = (text or "").strip()
     if not plugins_store.is_enabled(FEATURE_ID):
         hint = plugins_store.disabled_hint(FEATURE_ID, capability="本机 Cursor 写码")
-        return _base(reply=hint, note="code-dev 未启用", source="disabled")
+        return _base(
+            reply=hint,
+            note="code-dev 未启用",
+            source="disabled",
+            intent={"type": "code_dev", "metric": "disabled", "dim": None, "chart": None},
+        )
 
     cfg = get_config()
     avail = availability()
@@ -215,6 +220,8 @@ def confirm_and_start(
     workspace: str,
     requirement: str,
     client_brief: dict[str, Any] | None = None,
+    write_scope: list[str] | None = None,
+    source_gate_job_id: str = "",
 ) -> dict[str, Any]:
     """用户点确认卡后调用：真正启动 Job。"""
     ws = (workspace or "").strip()
@@ -227,20 +234,49 @@ def confirm_and_start(
     brief = CodeDevBrief.from_dict(client_brief)
     if ws:
         brief.workspace = ws
-    validation = validate_requirement_for_start(brief, req)
-    if not validation.get("ok"):
-        err = "；".join(validation.get("errors") or ["需求校验未通过"])
-        return {"ok": False, "detail": err, "reply": err, "validation": validation}
+    gate_id = (source_gate_job_id or "").strip()
+    explicit_scope = [str(p).strip() for p in (write_scope or []) if str(p).strip()]
+    from_gate = bool(gate_id) or "【门禁阻断修复】" in req or any(
+        "source=code_commit_gate" in str(n) for n in (brief.notes or [])
+    )
 
-    hints = dict(validation.get("target_hints") or {})
-    # 以需求正文复验模块，避免空 brief 绕过 write_scope
-    hint2 = infer_target_from_text(brief.original_goal, req)
-    if hint2.get("module") and (
-        not hints.get("module")
-        or hint2.get("confidence") == "high"
-    ):
-        hints = hint2
-    scope = write_scope_from_hints(hints)
+    if from_gate:
+        # 门禁修复：跳过模块推断硬校验，以 findings 路径为 write_scope
+        validation = {
+            "ok": True,
+            "errors": [],
+            "warnings": ["来自提交门禁阻断修复"],
+            "target_hints": {
+                "module": "提交门禁修复",
+                "confidence": "high",
+                "expected_paths": explicit_scope[:12],
+                "keywords": ["门禁", "修复"],
+            },
+        }
+        if len(req) < 40:
+            return {
+                "ok": False,
+                "detail": "需求摘要过短",
+                "reply": "需求摘要过短，请保留门禁问题列表后再开工",
+                "validation": {"ok": False, "errors": ["需求摘要过短"], "warnings": []},
+            }
+        hints = dict(validation["target_hints"])
+        scope = explicit_scope[:40] or write_scope_from_hints(hints)
+    else:
+        validation = validate_requirement_for_start(brief, req)
+        if not validation.get("ok"):
+            err = "；".join(validation.get("errors") or ["需求校验未通过"])
+            return {"ok": False, "detail": err, "reply": err, "validation": validation}
+
+        hints = dict(validation.get("target_hints") or {})
+        # 以需求正文复验模块，避免空 brief 绕过 write_scope
+        hint2 = infer_target_from_text(brief.original_goal, req)
+        if hint2.get("module") and (
+            not hints.get("module")
+            or hint2.get("confidence") == "high"
+        ):
+            hints = hint2
+        scope = explicit_scope[:40] or write_scope_from_hints(hints)
 
     out = code_dev_start(
         workspace=ws,
@@ -248,16 +284,29 @@ def confirm_and_start(
         write_scope=scope or None,
         brief=brief.to_dict(),
         target_hints=hints,
+        resume_commit=from_gate,
+        source_gate_job_id=gate_id,
     )
     job_id = out.get("job_id") or ""
     if out.get("ok"):
-        scope_note = f"\n• 同步范围：已限制在 {hints.get('module') or '目标模块'} 相关路径" if scope else ""
+        scope_note = (
+            f"\n• 同步范围：已限制在 {len(scope)} 个门禁相关路径"
+            if from_gate and scope
+            else (f"\n• 同步范围：已限制在 {hints.get('module') or '目标模块'} 相关路径" if scope else "")
+        )
+        next_hint = (
+            "\n\n修复成功后会自动打开提交确认卡（仍须您确认后才会 commit/push）。"
+            if from_gate
+            else ""
+        )
         reply = (
             f"已按您的确认启动本机写码任务 **{job_id}**。\n\n"
             f"• 工程：`{ws}`\n"
             f"• 目标模块：{hints.get('module') or '（请自行核对）'}\n"
-            f"• 需求：{req[:300]}{scope_note}\n\n"
+            + (f"• 来源门禁：`{gate_id}`\n" if gate_id else "")
+            + f"• 需求：{req[:300]}{scope_note}\n\n"
             "可用 `code-dev-job` / `mes_code_dev_job` 查询进度；成功后同步回目录（不会自动 commit）。"
+            + next_hint
         )
     else:
         reply = f"启动失败：{out.get('detail') or out.get('reply') or '未知错误'}"
@@ -269,4 +318,8 @@ def confirm_and_start(
         "job": out.get("job"),
         "data_source": "code_dev",
         "validation": validation,
+        "source_gate_job_id": gate_id or None,
+        "from_gate_fix": from_gate,
+        "resume_commit": from_gate,
+        "workspace": ws,
     }

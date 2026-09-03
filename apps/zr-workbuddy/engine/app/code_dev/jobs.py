@@ -54,6 +54,8 @@ def create_job(
     file_paths: list[str] | None = None,
     brief: dict[str, Any] | None = None,
     target_hints: dict[str, Any] | None = None,
+    resume_commit: bool = False,
+    source_gate_job_id: str = "",
 ) -> dict[str, Any]:
     now = int(time.time())
     rt = (runtime or "cursor_local").strip() or "cursor_local"
@@ -63,6 +65,9 @@ def create_job(
 
     scope = normalize_write_scope(write_scope)
     paths = [str(p).strip() for p in (file_paths or []) if str(p).strip()][:8]
+    notes = list((brief or {}).get("notes") or []) if isinstance(brief, dict) else []
+    gate_from_notes = any("source=code_commit_gate" in str(n) for n in notes)
+    resume = bool(resume_commit) or gate_from_notes or bool(scope)
     job: dict[str, Any] = {
         "id": new_job_id(),
         "user_id": "" if user_id is None else str(user_id),
@@ -95,6 +100,8 @@ def create_job(
         "brief": brief or {},
         "target_hints": target_hints or {},
         "sync_mismatch": None,
+        "resume_commit": resume,
+        "source_gate_job_id": (source_gate_job_id or "").strip() or None,
         "created_at": now,
         "updated_at": now,
     }

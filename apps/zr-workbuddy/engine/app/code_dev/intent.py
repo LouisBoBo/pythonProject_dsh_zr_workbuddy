@@ -28,6 +28,13 @@ _NOT_CODE = re.compile(
     re.I,
 )
 
+# 本机审码话术（交给 code-review；禁止当写码需求收集）
+_CODE_REVIEW_HIT = re.compile(
+    r"(审码|审核代码|审查代码|代码审查|代码审核|code\s*review|"
+    r"审一下代码|审下代码|检查一下代码|检查代码|本机审码|目录审码)",
+    re.I,
+)
+
 _PATH_RE = re.compile(
     r"(/(?:Users|home|opt|var/www|data)[^\s，。；;]+|"
     r"[A-Za-z]:\\[^\s，。；;]+)",
@@ -42,6 +49,9 @@ def is_code_dev_question(text: str) -> bool:
     if raw.startswith("【写码需求选项已确认】") or raw.startswith("【写码确认】"):
         return True
     if len(raw) < 4:
+        return False
+    # 「审核代码」等审码意图：即使夹带「功能/界面」字样也不进写码顾问
+    if _CODE_REVIEW_HIT.search(raw):
         return False
     if not _CODE_DEV_HIT.search(raw):
         return False

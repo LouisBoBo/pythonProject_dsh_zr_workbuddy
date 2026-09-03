@@ -61,12 +61,11 @@ OFFLINE_HINT = (
 
 FEATURE_ID = "mes-pcb"
 
-DISABLED_HINT = (
-    "PCB 制造专家功能（mes-pcb）当前已停用，因此不会提供工艺专家答疑。\n\n"
-    "重新开启：\n"
-    "`scripts/plugin.sh --app zr-workbuddy enable mes-pcb`\n\n"
-    "约 1 秒内热加载，无需重启 DSH。"
-)
+
+def disabled_hint() -> str:
+    from . import plugins_store
+
+    return plugins_store.disabled_hint(FEATURE_ID, capability="PCB 制造专家答疑")
 
 
 def feature_enabled() -> bool:
@@ -187,9 +186,10 @@ async def pcb_ask(text: str) -> dict:
         return {"ok": False, "detail": "问题不能为空"}
 
     if not feature_enabled():
+        hint = disabled_hint()
         return {
             "ok": True,
-            "reply": DISABLED_HINT,
+            "reply": hint,
             "thinking": "",
             "source": "disabled",
             "domain": "pcb",
@@ -233,11 +233,12 @@ async def pcb_ask_stream(text: str) -> AsyncIterator[Dict[str, Any]]:
         return
 
     if not feature_enabled():
-        yield {"type": "reply", "delta": DISABLED_HINT}
+        hint = disabled_hint()
+        yield {"type": "reply", "delta": hint}
         yield {
             "type": "done",
             "ok": True,
-            "reply": DISABLED_HINT,
+            "reply": hint,
             "thinking": "",
             "source": "disabled",
             "domain": "pcb",

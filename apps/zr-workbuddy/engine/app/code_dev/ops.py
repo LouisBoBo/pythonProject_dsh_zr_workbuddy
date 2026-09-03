@@ -52,6 +52,8 @@ def start(
     sync: bool = False,
     brief: dict[str, Any] | None = None,
     target_hints: dict[str, Any] | None = None,
+    resume_commit: bool = False,
+    source_gate_job_id: str = "",
 ) -> dict[str, Any]:
     """创建并启动 Job。sync=True 时前台跑完（测试用）；默认后台。"""
     cfg = get_config()
@@ -105,6 +107,8 @@ def start(
         write_scope=write_scope or [],
         brief=brief,
         target_hints=target_hints,
+        resume_commit=resume_commit,
+        source_gate_job_id=source_gate_job_id,
     )
     job_id = str(job["id"])
     if sync:

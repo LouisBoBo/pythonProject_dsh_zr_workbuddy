@@ -38,3 +38,14 @@ code_review:
   max_file_bytes: 120000
   max_total_bytes: 800000
   default_workspace: ""
+
+# P0-2 人触发提交（功能插件 code-commit 须启用；此处 enabled 默认 true）
+code_commit:
+  enabled: true
+  default_workspace: ""
+  work_branch: ""          # 空则按用户名自动生成；禁止 main/master
+  remote_name: origin
+  default_push: true       # 确认卡默认勾选推送
+  use_skill_review: true
+  allow_blocked: false     # 调试用：强制允许带阻断项提交
+  max_files: 80

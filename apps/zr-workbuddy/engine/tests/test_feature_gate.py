@@ -71,6 +71,75 @@ class FeatureGateTests(unittest.TestCase):
         done = next(e for e in events if e.get("type") == "done")
         self.assertEqual(done.get("source"), "disabled")
         self.assertIn("mes-ask", done.get("reply") or "")
+        self.assertIn("功能插件", done.get("reply") or "")
+        self.assertNotIn("plugin.sh", done.get("reply") or "")
+
+    def test_chat_blocks_code_review_when_disabled(self):
+        """停用 code-review 后说「审核代码」须提示启停，不得弹出写码选项卡。"""
+        from app import cli_ops
+        from app import plugins_store
+
+        async def _run():
+            with mock.patch.object(
+                plugins_store,
+                "is_enabled",
+                side_effect=lambda fid: fid in ("mes-ask", "code-dev", "mes-pcb"),
+            ):
+                return await cli_ops.chat("审核代码")
+
+        out = asyncio.run(_run())
+        self.assertTrue(out.get("ok"))
+        self.assertEqual(out.get("source"), "disabled")
+        self.assertIn("code-review", out.get("reply") or "")
+        self.assertIn("功能插件", out.get("reply") or "")
+        self.assertNotIn("plugin.sh", out.get("reply") or "")
+        self.assertIsNone(out.get("code_dev_ui"))
+        self.assertIsNone(out.get("code_review_ui"))
+
+    def test_chat_stream_blocks_code_review_when_disabled(self):
+        from app import cli_ops
+        from app import plugins_store
+
+        async def _run():
+            events = []
+            with mock.patch.object(
+                plugins_store,
+                "is_enabled",
+                side_effect=lambda fid: fid in ("mes-ask", "code-dev"),
+            ):
+                async for ev in cli_ops.chat_stream("审核代码"):
+                    events.append(ev)
+            return events
+
+        events = asyncio.run(_run())
+        done = next(e for e in events if e.get("type") == "done")
+        self.assertEqual(done.get("source"), "disabled")
+        self.assertIn("code-review", done.get("reply") or "")
+        self.assertIn("功能插件", done.get("reply") or "")
+        self.assertNotIn("plugin.sh", done.get("reply") or "")
+        self.assertIsNone(done.get("code_dev_ui"))
+        self.assertNotIn("写码确认", done.get("reply") or "")
+
+    def test_chat_blocks_code_commit_when_disabled(self):
+        """停用 code-commit 后说「提交代码」须提示启停，不得自动 commit。"""
+        from app import cli_ops
+        from app import plugins_store
+
+        async def _run():
+            with mock.patch.object(
+                plugins_store,
+                "is_enabled",
+                side_effect=lambda fid: fid in ("mes-ask", "code-dev", "code-review", "mes-pcb"),
+            ):
+                return await cli_ops.chat("提交代码")
+
+        out = asyncio.run(_run())
+        self.assertTrue(out.get("ok"))
+        self.assertEqual(out.get("source"), "disabled")
+        self.assertIn("code-commit", out.get("reply") or "")
+        self.assertIn("功能插件", out.get("reply") or "")
+        self.assertIsNone(out.get("code_commit_ui"))
+        self.assertIsNone(out.get("code_dev_ui"))
 
 
 if __name__ == "__main__":

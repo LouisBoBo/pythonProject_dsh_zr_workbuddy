@@ -220,6 +220,7 @@ window.__ModuleLoader__.load({
       if (ds === "pcb_expert") return "PCB 专家";
       if (ds === "code_dev") return "本机写码";
       if (ds === "code_review") return "本机审码";
+      if (ds === "code_commit") return "人触发提交";
       return "演示数据";
     }
     function srcLabel(ev) {
@@ -227,17 +228,19 @@ window.__ModuleLoader__.load({
       if (ev && ev.source === "offline") return "离线提示";
       if (ev && ev.source === "code_dev") return "写码顾问";
       if (ev && ev.source === "code_review") return "审码顾问";
+      if (ev && ev.source === "code_commit") return "提交顾问";
       if (ev && ev.source === "disabled") return "已停用";
       return "规则引擎";
     }
     function formatChatMeta(ev) {
       var srcTxt = srcLabel(ev);
       var ds = dataSourceLabel(ev && ev.data_source);
-      var metricMap = { options: "需求选项", propose: "写码确认", code_dev: "本机写码", code_review: "本机审码", need_path: "待填路径", pick: "选目录确认", done: "审码完成", run: "本机审码" };
+      var metricMap = { options: "需求选项", propose: "写码确认", code_dev: "本机写码", code_review: "本机审码", code_commit: "人触发提交", need_path: "待填路径", pick: "选目录确认", confirm: "确认提交", done: "审码完成", run: "本机审码", disabled: "已停用" };
       var it = (ev && ev.intent) || {};
-      var intentTxt = it.type === "code_review" ? "本机审码" : "本机写码";
+      var intentTxt = it.type === "code_review" ? "本机审码" : it.type === "code_commit" ? "人触发提交" : "本机写码";
       if (it.type === "code_dev" && it.metric) intentTxt = metricMap[it.metric] || String(it.metric);
       else if (it.type === "code_review" && it.metric) intentTxt = metricMap[it.metric] || "本机审码";
+      else if (it.type === "code_commit" && it.metric) intentTxt = metricMap[it.metric] || "人触发提交";
       else if (it.type) intentTxt = metricMap[it.type] || String(it.type);
       return "来源：" + srcTxt + " · 数据源：" + ds + " · 意图：" + intentTxt;
     }
@@ -389,6 +392,482 @@ window.__ModuleLoader__.load({
       if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
       else hostEl.appendChild(card);
     }
+    function mountCodeCommitUi(hostEl, ui, beforeMetaEl, hooks) {
+      if (!hostEl || !ui || !ui.kind) return;
+      var old = hostEl.querySelector(".cd-card.cc-card");
+      if (old) old.remove();
+      var card = document.createElement("div");
+      card.className = "cd-card cc-card";
+      hooks = hooks || {};
+      if (ui.kind === "pick") renderCcPick(card, ui, hooks);
+      else if (ui.kind === "confirm") renderCcConfirm(card, ui, hooks);
+      else if (ui.kind === "blocked") renderCcBlocked(card, ui, hooks);
+      else return;
+      if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
+      else hostEl.appendChild(card);
+    }
+    function ccFindingsHtml(findings, limit) {
+      var list = Array.isArray(findings) ? findings : [];
+      if (!list.length) return '<p class="cd-desc">无 findings</p>';
+      var html = '<ul class="cd-findings" style="margin:8px 0;padding-left:18px;font-size:13px;">';
+      list.slice(0, limit || 12).forEach(function (f) {
+        html +=
+          "<li><b>[" +
+          esc(f.severity || "?") +
+          "]</b> " +
+          esc(f.path || "") +
+          " — " +
+          esc(f.message || "") +
+          "</li>";
+      });
+      html += "</ul>";
+      return html;
+    }
+    function renderCcBlocked(card, ui, hooks) {
+      hooks = hooks || {};
+      var files = Array.isArray(ui.files) ? ui.files : [];
+      var html =
+        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交阻断</span><span class="cd-hint">请先修复</span></div>' +
+        '<p class="cd-summary">' + esc(ui.summary || "门禁未通过，禁止提交") + "</p></div>";
+      html += '<div class="cd-chosen"><div class="cd-chosen-row"><span class="cd-k">路径</span><span class="cd-v">' + esc(ui.workspace || "") + "</span></div>";
+      if (ui.work_branch) {
+        html += '<div class="cd-chosen-row"><span class="cd-k">分支</span><span class="cd-v">' + esc(ui.work_branch) + "</span></div>";
+      }
+      html += '<div class="cd-chosen-row"><span class="cd-k">阻断</span><span class="cd-v">' + esc(String(ui.blocking_count || 0)) + " 条</span></div></div>";
+      if (files.length) {
+        html += '<p class="cd-desc" style="padding:0 12px;">待提交文件 ' + files.length + " 个</p>";
+      }
+      html += '<div style="padding:0 12px 12px">' + ccFindingsHtml(ui.findings, 15) + "</div>";
+      html +=
+        '<div class="cd-done-banner err" style="margin:0 12px 8px"><span class="cd-done-icon">!</span><div><strong>不可提交</strong> · 可点下方用写码修复，或在输入框说「修复这些问题」</div></div>';
+      html +=
+        '<div class="cd-actions" style="padding:0 12px 12px">' +
+        '<button type="button" class="cd-btn confirm cd-fix">用写码修复这些问题</button></div>';
+      card.className = "cd-card cc-card done";
+      card.innerHTML = html;
+      var fixBtn = card.querySelector(".cd-fix");
+      if (fixBtn) {
+        fixBtn.onclick = function () {
+          var msg = "【门禁阻断修复】请按提交门禁结果修复问题代码";
+          if (ui.job_id) msg += " job_id=" + ui.job_id;
+          if (ui.workspace) msg += "\n工程：" + ui.workspace;
+          if (typeof hooks.send === "function") {
+            hooks.send(msg);
+            return;
+          }
+          fixBtn.disabled = true;
+          fixBtn.textContent = "准备修复卡…";
+          fetch(engineBase() + "/api/code-commit/prepare-fix", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ workspace: ui.workspace || "", job_id: ui.job_id || "" }),
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (!d.ok || !d.code_dev_ui) {
+                fixBtn.disabled = false;
+                fixBtn.textContent = "用写码修复这些问题";
+                alert(d.detail || d.reply || "无法生成修复确认卡");
+                return;
+              }
+              renderCdPropose(card, d.code_dev_ui, hooks);
+              var host = card.closest(".assist") || card.parentElement;
+              var replyEl = host ? host.querySelector(".reply") : null;
+              if (replyEl) replyEl.innerHTML = md(d.reply || "请确认后写码修复");
+            })
+            .catch(function (e) {
+              fixBtn.disabled = false;
+              fixBtn.textContent = "用写码修复这些问题";
+              alert("请求失败：" + e.message);
+            });
+        };
+      }
+    }
+    function renderCcPushRetryCard(card, d, hooks) {
+      hooks = hooks || {};
+      var cr = d.commit_result || {};
+      var push = cr.push || {};
+      var jobId = d.job_id || "";
+      var html =
+        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">推送失败</span>' +
+        '<span class="cd-hint" style="color:#b91c1c">本地已提交，可重试推送</span></div>' +
+        '<p class="cd-summary">' + esc(d.reply || d.detail || "本地已提交，但推送失败") + "</p></div>";
+      html +=
+        '<div class="cd-chosen">' +
+        '<div class="cd-chosen-row"><span class="cd-k">分支</span><span class="cd-v">' + esc(cr.branch || "") + "</span></div>" +
+        '<div class="cd-chosen-row"><span class="cd-k">本地 commit</span><span class="cd-v">' + esc(cr.commit || "") + "</span></div>" +
+        '<div class="cd-chosen-row"><span class="cd-k">待推送</span><span class="cd-v">仅 push（不重新 commit）</span></div></div>';
+      if (push.error || push.raw_error) {
+        html +=
+          '<p class="cd-desc" style="padding:0 12px;color:#991b1b"><code>' +
+          esc(String(push.error || push.raw_error || "").slice(0, 280)) +
+          "</code></p>";
+      }
+      html +=
+        '<p class="cd-error" style="display:none"></p>' +
+        '<div class="cd-actions" style="padding:0 12px 12px">' +
+        '<button type="button" class="cd-btn confirm cd-push-retry">重试推送</button></div>';
+      card.className = "cd-card cc-card";
+      card.innerHTML = html;
+      var errEl = card.querySelector(".cd-error");
+      var btn = card.querySelector(".cd-push-retry");
+      btn.onclick = function () {
+        btn.disabled = true;
+        btn.textContent = "推送中…";
+        errEl.style.display = "none";
+        fetch(engineBase() + "/api/code-commit/push-retry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_id: jobId }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (out) {
+            var host = card.closest(".assist") || card.parentElement;
+            var replyEl = host ? host.querySelector(".reply") : null;
+            if (!out.ok) {
+              errEl.style.display = "";
+              errEl.textContent = out.detail || out.reply || "重试推送失败";
+              btn.disabled = false;
+              btn.textContent = "重试推送";
+              if (replyEl) replyEl.innerHTML = md(out.reply || out.detail || "重试推送失败");
+              return;
+            }
+            card.className = "cd-card cc-card done";
+            card.innerHTML =
+              '<div class="cd-done-banner ok" style="margin:12px"><span class="cd-done-icon">✓</span>' +
+              "<div><strong>已推送到远程</strong> · " + esc(cr.branch || "") +
+              (cr.commit ? " · " + esc(cr.commit) : "") +
+              "</div></div>";
+            if (replyEl) replyEl.innerHTML = md(out.reply || "已重新推送到远程");
+            if (typeof hooks.onCommitted === "function") hooks.onCommitted(out);
+          })
+          .catch(function (e) {
+            errEl.style.display = "";
+            errEl.textContent = "请求失败：" + e.message;
+            btn.disabled = false;
+            btn.textContent = "重试推送";
+          });
+      };
+    }
+    function renderCcConfirm(card, ui, hooks) {
+      hooks = hooks || {};
+      var files = Array.isArray(ui.files) ? ui.files : [];
+      var pushOn = ui.push !== false;
+      var html =
+        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">确认提交</span><span class="cd-hint">' +
+        esc(ui.hint || "确认后才会 git commit / push") +
+        '</span></div><p class="cd-summary">' +
+        esc(ui.summary || "门禁已通过") +
+        '</p><p class="cd-desc">' +
+        esc(ui.desc || "填写中文提交说明；默认推送到远程。") +
+        "</p></div>";
+      html +=
+        '<div class="cd-chosen">' +
+        '<div class="cd-chosen-row"><span class="cd-k">路径</span><span class="cd-v">' + esc(ui.workspace || "") + "</span></div>" +
+        '<div class="cd-chosen-row"><span class="cd-k">分支</span><span class="cd-v">' + esc(ui.work_branch || "") + "</span></div>" +
+        '<div class="cd-chosen-row"><span class="cd-k">文件</span><span class="cd-v">' + files.length + " 个</span></div></div>";
+      if (files.length) {
+        html += '<p class="cd-desc" style="padding:0 12px;"><code>' + esc(files.slice(0, 12).join(", ")) + (files.length > 12 ? "…" : "") + "</code></p>";
+      }
+      if ((ui.findings || []).length) {
+        html += '<div style="padding:0 12px">' + ccFindingsHtml(ui.findings, 8) + "</div>";
+      }
+      html +=
+        '<label class="cd-field"><span class="cd-label">中文提交说明</span>' +
+        '<input class="cd-input cd-msg" value="' + esc(ui.message || "") + '" placeholder="概括本次修改"></label>';
+      html +=
+        '<label class="cd-field" style="flex-direction:row;align-items:center;gap:8px;">' +
+        '<input type="checkbox" class="cd-push"' + (pushOn ? " checked" : "") + ">" +
+        "<span>推送到远程</span></label>";
+      html +=
+        '<p class="cd-error" style="display:none"></p><div class="cd-actions">' +
+        '<button type="button" class="cd-btn cd-cancel">取消</button>' +
+        '<button type="button" class="cd-btn confirm cd-go">确认提交并推送</button></div>';
+      card.innerHTML = html;
+      var errEl = card.querySelector(".cd-error");
+      var goBtn = card.querySelector(".cd-go");
+      function syncGoLabel() {
+        var push = card.querySelector(".cd-push").checked;
+        goBtn.textContent = push ? "确认提交并推送" : "确认仅本地提交";
+      }
+      card.querySelector(".cd-push").onchange = syncGoLabel;
+      syncGoLabel();
+      card.querySelector(".cd-cancel").onclick = function () {
+        fetch(engineBase() + "/api/code-commit/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_id: ui.job_id, decision: "reject" }),
+        }).catch(function () {});
+        card.className = "cd-card cc-card done";
+        card.innerHTML =
+          '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交代码</span></div>' +
+          '<p class="cd-summary">已取消，未执行 commit</p></div>';
+      };
+      goBtn.onclick = function () {
+        var message = (card.querySelector(".cd-msg").value || "").trim();
+        var push = card.querySelector(".cd-push").checked;
+        if (!message) {
+          errEl.style.display = "";
+          errEl.textContent = "请填写中文提交说明";
+          return;
+        }
+        goBtn.disabled = true;
+        goBtn.textContent = "提交中…";
+        errEl.style.display = "none";
+        fetch(engineBase() + "/api/code-commit/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_id: ui.job_id, message: message, push: push, decision: "approve" }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            var host = card.closest(".assist") || card.parentElement;
+            var replyEl = host ? host.querySelector(".reply") : null;
+            if (d.push_retry_needed || (d.commit_result && d.commit_result.commit && d.commit_result.push && !d.commit_result.push.ok)) {
+              renderCcPushRetryCard(card, d, hooks);
+              if (replyEl) replyEl.innerHTML = md(d.reply || d.detail || "本地已提交，推送失败");
+              return;
+            }
+            card.className = "cd-card cc-card done";
+            if (!d.ok) {
+              card.innerHTML =
+                '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交失败</span></div>' +
+                '<p class="cd-summary">' + esc(d.detail || d.reply || "失败") + "</p></div>";
+              if (replyEl) replyEl.innerHTML = md(d.reply || d.detail || "提交失败");
+              return;
+            }
+            var cr = d.commit_result || {};
+            card.innerHTML =
+              '<div class="cd-done-banner ok" style="margin:12px"><span class="cd-done-icon">✓</span>' +
+              "<div><strong>已提交</strong> · " + esc(cr.branch || "") +
+              (cr.commit ? " · " + esc(cr.commit) : "") +
+              (push ? (cr.push && cr.push.ok ? " · 已推送" : " · 未推送") : " · 未推送") +
+              "</div></div>";
+            if (replyEl) replyEl.innerHTML = md(d.reply || "提交完成");
+            if (typeof hooks.onCommitted === "function") hooks.onCommitted(d);
+          })
+          .catch(function (e) {
+            errEl.style.display = "";
+            errEl.textContent = "请求失败：" + e.message;
+            goBtn.disabled = false;
+            syncGoLabel();
+          });
+      };
+    }
+    function renderCcPick(card, ui, hooks) {
+      hooks = hooks || {};
+      var ws0 = ui.workspace || "";
+      var br0 = ui.work_branch || "";
+      var brHint0 = ui.branch_hint || "";
+      var suggestions = Array.isArray(ui.suggestions) ? ui.suggestions : [];
+      var html =
+        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交代码</span><span class="cd-hint">' +
+        esc(ui.hint || "选择目录 · 开始门禁审核") +
+        '</span></div><p class="cd-summary">' +
+        esc(ui.summary || "请确认要提交的本机 Git 工程") +
+        '</p><p class="cd-desc">' +
+        esc(ui.desc || "") +
+        "</p></div>";
+      html +=
+        '<label class="cd-field"><span class="cd-label">本机 Git 工程目录</span><div class="cd-path-row">' +
+        '<input class="cd-input cd-ws" value="' + esc(ws0) + '" placeholder="/Users/你/项目" autocomplete="off">' +
+        '<button type="button" class="cd-btn browse cd-browse">浏览…</button></div></label>';
+      html +=
+        '<label class="cd-field"><span class="cd-label">提交分支</span>' +
+        '<input class="cd-input cd-branch" value="' + esc(br0) + '" placeholder="如 feature/xxx（当前分支 → 配置中心 → 手填）" autocomplete="off">' +
+        '<p class="cd-desc cd-branch-hint" style="margin:4px 0 0;padding:0;">' + esc(brHint0) + "</p></label>";
+      if (suggestions.length) {
+        html += '<p class="cd-suggest">常用：';
+        suggestions.forEach(function (s) {
+          var p = typeof s === "string" ? s : (s && s.path) || "";
+          var lab = (typeof s === "object" && s.label) ? s.label + " · " : "";
+          if (!p) return;
+          html += '<button type="button" class="cd-chip" data-path="' + esc(p) + '" title="' + esc(p) + '">' + esc(lab + p) + "</button>";
+        });
+        html += "</p>";
+      }
+      html +=
+        '<p class="cd-error" style="display:none"></p><div class="cd-actions">' +
+        '<button type="button" class="cd-btn cd-cancel">取消</button>' +
+        '<button type="button" class="cd-btn confirm cd-go">开始门禁审核</button></div>';
+      card.innerHTML = html;
+      var errEl = card.querySelector(".cd-error");
+      var wsEl = card.querySelector(".cd-ws");
+      var brEl = card.querySelector(".cd-branch");
+      var hintEl = card.querySelector(".cd-branch-hint");
+      var refreshTimer = null;
+      function applyBranchInfo(d) {
+        if (!d) return;
+        brEl.value = d.work_branch || "";
+        hintEl.textContent = d.branch_hint || (d.need_user_branch ? "请填写要提交的分支" : "") || "";
+      }
+      function refreshBranch() {
+        var workspace = (wsEl.value || "").trim();
+        if (!workspace) {
+          brEl.value = "";
+          hintEl.textContent = "请先选择工程目录；分支将自动填入当前分支或配置中心分支。";
+          return;
+        }
+        hintEl.textContent = "正在识别分支…";
+        fetch(engineBase() + "/api/code-commit/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace: workspace }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d.ok) {
+              brEl.value = "";
+              hintEl.textContent = d.detail || d.reply || "路径不可用，无法识别分支";
+              return;
+            }
+            applyBranchInfo(d);
+          })
+          .catch(function () {
+            hintEl.textContent = "分支识别失败，请手动填写";
+          });
+      }
+      function scheduleRefreshBranch() {
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(refreshBranch, 350);
+      }
+      Array.prototype.forEach.call(card.querySelectorAll(".cd-chip"), function (btn) {
+        btn.onclick = function () {
+          wsEl.value = btn.getAttribute("data-path") || "";
+          refreshBranch();
+        };
+      });
+      wsEl.addEventListener("change", refreshBranch);
+      wsEl.addEventListener("blur", refreshBranch);
+      wsEl.addEventListener("input", scheduleRefreshBranch);
+      card.querySelector(".cd-browse").onclick = function () {
+        var browseBtn = card.querySelector(".cd-browse");
+        browseBtn.disabled = true;
+        browseBtn.textContent = "选择中…";
+        errEl.style.display = "";
+        errEl.textContent = "请在弹出的系统对话框中选择目录（若看不到，请看 Dock / 其它窗口后面）";
+        var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+        var timer = setTimeout(function () {
+          try {
+            if (ctrl) ctrl.abort();
+          } catch (e0) {}
+        }, 120000);
+        fetch(engineBase() + "/api/pick-folder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: "选择要提交的 Git 工程目录" }),
+          signal: ctrl ? ctrl.signal : undefined,
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            errEl.style.display = "none";
+            if (d.ok && d.path) {
+              wsEl.value = d.path;
+              refreshBranch();
+            } else if (d.error && d.error !== "已取消选择") {
+              errEl.style.display = "";
+              errEl.textContent = d.error || "选文件夹失败";
+            } else {
+              errEl.style.display = "none";
+            }
+          })
+          .catch(function (e) {
+            errEl.style.display = "";
+            errEl.textContent =
+              e && e.name === "AbortError"
+                ? "选择超时：请点击「常用」路径或手动粘贴目录，也可再点「浏览…」"
+                : "浏览失败：" + e.message;
+          })
+          .finally(function () {
+            clearTimeout(timer);
+            browseBtn.disabled = false;
+            browseBtn.textContent = "浏览…";
+          });
+      };
+      card.querySelector(".cd-cancel").onclick = function () {
+        card.className = "cd-card cc-card done";
+        card.innerHTML =
+          '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交代码</span></div>' +
+          '<p class="cd-summary">已取消，未开始门禁</p></div>';
+      };
+      card.querySelector(".cd-go").onclick = function () {
+        var workspace = (wsEl.value || "").trim();
+        var work_branch = (brEl.value || "").trim();
+        if (!workspace) {
+          errEl.style.display = "";
+          errEl.textContent = "请填写或浏览选择本机 Git 工程目录";
+          return;
+        }
+        if (!work_branch) {
+          errEl.style.display = "";
+          errEl.textContent = "请填写要提交的分支（当前分支与配置中心均不可用时须手填）";
+          return;
+        }
+        var goBtn = card.querySelector(".cd-go");
+        goBtn.disabled = true;
+        goBtn.textContent = "门禁审核中…";
+        errEl.style.display = "none";
+        fetch(engineBase() + "/api/code-commit/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace: workspace, work_branch: work_branch }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d.ok && !d.job_id) {
+              errEl.style.display = "";
+              errEl.textContent = d.detail || d.reply || "门禁失败";
+              goBtn.disabled = false;
+              goBtn.textContent = "开始门禁审核";
+              if (d.need_user_branch) {
+                hintEl.textContent = d.branch_hint || d.detail || "请填写要提交的分支";
+              }
+              return;
+            }
+            var host = card.closest(".assist") || card.parentElement;
+            var replyEl = host ? host.querySelector(".reply") : null;
+            if (!d.can_commit) {
+              var blockN = d.blocking_count || 0;
+              var warnN = d.warning_count || 0;
+              var blockedSummary =
+                blockN > 0
+                  ? ("提交批审：" + blockN + " 条阻断、" + warnN + " 条警告 —— 禁止提交")
+                  : (d.summary || d.reply || "门禁未通过，禁止提交");
+              renderCcBlocked(card, {
+                kind: "blocked",
+                workspace: workspace,
+                job_id: d.job_id,
+                files: d.files || [],
+                findings: d.findings || [],
+                summary: blockedSummary,
+                blocking_count: blockN,
+                work_branch: d.work_branch || work_branch,
+              }, hooks);
+              if (replyEl) replyEl.innerHTML = md(d.reply || blockedSummary);
+              return;
+            }
+            var confirmUi = d.code_commit_ui || {
+              kind: "confirm",
+              job_id: d.job_id,
+              workspace: workspace,
+              files: d.files || [],
+              work_branch: d.work_branch || work_branch,
+              message: d.draft_message || "",
+              push: d.default_push !== false,
+              findings: d.findings || [],
+              summary: d.summary || "",
+            };
+            renderCcConfirm(card, confirmUi, hooks);
+            if (replyEl) replyEl.innerHTML = md(d.reply || "门禁通过，请确认后提交。");
+          })
+          .catch(function (e) {
+            errEl.style.display = "";
+            errEl.textContent = "请求失败：" + e.message;
+            goBtn.disabled = false;
+            goBtn.textContent = "开始门禁审核";
+          });
+      };
+    }
     function renderCrPick(card, ui, hooks) {
       hooks = hooks || {};
       var ws0 = ui.workspace || "";
@@ -438,25 +917,40 @@ window.__ModuleLoader__.load({
         var browseBtn = card.querySelector(".cd-browse");
         browseBtn.disabled = true;
         browseBtn.textContent = "选择中…";
-        errEl.style.display = "none";
+        errEl.style.display = "";
+        errEl.textContent = "请在弹出的系统对话框中选择目录（若看不到，请看 Dock / 其它窗口后面）";
+        var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+        var timer = setTimeout(function () {
+          try {
+            if (ctrl) ctrl.abort();
+          } catch (e0) {}
+        }, 120000);
         fetch(engineBase() + "/api/pick-folder", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt: "选择要审核的工程目录" }),
+          signal: ctrl ? ctrl.signal : undefined,
         })
           .then(function (r) { return r.json(); })
           .then(function (d) {
+            errEl.style.display = "none";
             if (d.ok && d.path) wsEl.value = d.path;
             else if (d.error && d.error !== "已取消选择") {
               errEl.style.display = "";
               errEl.textContent = d.error || "选文件夹失败";
+            } else {
+              errEl.style.display = "none";
             }
           })
           .catch(function (e) {
             errEl.style.display = "";
-            errEl.textContent = "浏览失败：" + e.message;
+            errEl.textContent =
+              e && e.name === "AbortError"
+                ? "选择超时：请点击「常用」路径或手动粘贴目录，也可再点「浏览…」"
+                : "浏览失败：" + e.message;
           })
           .finally(function () {
+            clearTimeout(timer);
             browseBtn.disabled = false;
             browseBtn.textContent = "浏览…";
           });
@@ -877,10 +1371,17 @@ window.__ModuleLoader__.load({
         btn.textContent = "启动中…";
         errEl.style.display = "none";
         var briefPayload = (typeof hooks.getBrief === "function" ? hooks.getBrief() : null) || ui.brief || null;
+        var payload = {
+          workspace: workspace,
+          requirement: requirement,
+          code_dev_brief: briefPayload,
+        };
+        if (ui.write_scope && ui.write_scope.length) payload.write_scope = ui.write_scope;
+        if (ui.source_gate_job_id) payload.source_gate_job_id = ui.source_gate_job_id;
         fetch(engineBase() + "/api/code-dev/confirm", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workspace: workspace, requirement: requirement, code_dev_brief: briefPayload }),
+          body: JSON.stringify(payload),
         })
           .then(function (r) { return r.json(); })
           .then(function (d) {
@@ -897,7 +1398,10 @@ window.__ModuleLoader__.load({
               '<div class="cd-chosen"><div class="cd-chosen-row"><span class="cd-k">任务</span><span class="cd-v">' + esc(d.job_id || "") +
               '</span></div><div class="cd-chosen-row"><span class="cd-k">工程</span><span class="cd-v">' + esc(workspace) + "</span></div></div>";
             if (typeof hooks.onStarted === "function") hooks.onStarted(d);
-            else startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")));
+            else startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")), {
+              workspace: workspace,
+              resumeCommit: !!(d.resume_commit || d.from_gate_fix || ui.source_gate_job_id || (ui.write_scope && ui.write_scope.length)),
+            });
           })
           .catch(function (e) {
             errEl.style.display = "";
@@ -1015,7 +1519,12 @@ window.__ModuleLoader__.load({
         return div;
       }
 
-      function startCodeDevJobWatch(jobId, startReply, workspace) {
+      function startCodeDevJobWatch(jobId, startReply, opts) {
+        opts = opts || {};
+        // 兼容旧调用：第三参为 workspace 字符串
+        if (typeof opts === "string") opts = { workspace: opts };
+        var workspaceHint = opts.workspace || "";
+        var resumeCommit = !!opts.resumeCommit;
         if (!jobId) {
           renderMsg("assistant", startReply || "已启动", null, null,
             "来源：写码顾问 · 数据源：本机写码 · 意图：本机写码", true, "");
@@ -1050,6 +1559,32 @@ window.__ModuleLoader__.load({
           durationText = formatDuration((Date.now() - startedAt) / 1000);
           paintPlan();
         }, 1000);
+        function openCommitPick(ws) {
+          var workspace = (ws || workspaceHint || "").trim();
+          fetch(engineBase() + "/api/code-commit/pick-ui", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ workspace: workspace }),
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (!d.ok || !d.code_commit_ui) return;
+              var host = document.createElement("div");
+              host.className = "assist";
+              host.innerHTML =
+                '<div class="reply">' +
+                md("修复已同步到本机。请确认下方**提交目录与分支**，开始门禁；通过后再点确认才会 commit/push。") +
+                "</div>" +
+                '<div class="meta">来源：提交顾问 · 数据源：人触发提交 · 意图：修复后继续提交</div>';
+              msgs.appendChild(host);
+              mountCodeCommitUi(host, d.code_commit_ui, host.querySelector(".meta"), {
+                send: send,
+                getBrief: getCodeDevBrief,
+              });
+              msgs.scrollTop = msgs.scrollHeight;
+            })
+            .catch(function () {});
+        }
         function finish(ev) {
           if (finished) return;
           finished = true;
@@ -1062,6 +1597,13 @@ window.__ModuleLoader__.load({
           paintPlan();
           var synced = (ev && ev.synced_files) || (ev && ev.job && ev.job.synced_files) || [];
           var n = synced.length;
+          var job = (ev && ev.job) || {};
+          var shouldResume =
+            resumeCommit ||
+            !!job.resume_commit ||
+            !!job.source_gate_job_id ||
+            !!(job.write_scope && job.write_scope.length);
+          var wsDone = workspaceHint || job.workspace || "";
           bannerEl.style.display = "";
           bannerEl.className = "cd-done-banner " + (ok ? "ok" : "err");
           bannerEl.innerHTML =
@@ -1070,7 +1612,24 @@ window.__ModuleLoader__.load({
             (ok ? " · 已同步 " + n + " 个文件到本机（未自动 commit）" : " · " + esc(mismatch || (ev && ev.error) || "失败")) +
             (n && ok ? '<div class="cd-synced">' + esc(synced.slice(0, 8).join("、")) + (n > 8 ? " …" : "") + "</div>" : "") +
             (mismatch ? '<div class="cd-warn-box" style="margin-top:8px">' + esc(mismatch) + "</div>" : "") +
+            (ok ? '<div class="cd-desc" style="margin-top:8px">' +
+              (shouldResume
+                ? "下一步：正在打开提交确认卡（须您确认后才会 commit/push）。"
+                : "下一步：可点「继续提交代码」对本工程重新门禁并确认提交。") +
+              "</div>" : "") +
             "</div>";
+          if (ok) {
+            var nextRow = document.createElement("div");
+            nextRow.className = "cd-actions";
+            nextRow.style.cssText = "margin-top:8px;padding:0;";
+            nextRow.innerHTML = '<button type="button" class="cd-btn confirm cd-resubmit">继续提交代码</button>';
+            bannerEl.appendChild(nextRow);
+            var rs = nextRow.querySelector(".cd-resubmit");
+            if (rs) {
+              rs.onclick = function () { openCommitPick(wsDone); };
+            }
+            if (shouldResume) openCommitPick(wsDone);
+          }
           var body = extractCodeDevResultBody((ev && ev.reply) || "");
           if (body) {
             detailsEl.style.display = "";
@@ -1131,21 +1690,16 @@ window.__ModuleLoader__.load({
                 pending += decoder.decode(res.value, { stream: true });
                 var parts = pending.split("\n\n");
                 pending = parts.pop() || "";
-                parts.forEach(function (block) {
-                  block.split("\n").forEach(function (line) {
-                    if (line.indexOf("data:") !== 0) return;
-                    var raw = line.slice(5).trim();
-                    if (!raw) return;
-                    try {
-                      var ev = JSON.parse(raw);
-                      onStreamEvent(ev);
-                      if (ev.type === "done" || ev.type === "error") terminal = true;
-                    } catch (e) {}
-                  });
+                parts.forEach(function (chunk) {
+                  var line = chunk.split("\n").filter(function (l) { return l.indexOf("data:") === 0; }).map(function (l) { return l.slice(5).trim(); }).join("");
+                  if (!line) return;
+                  try {
+                    var ev = JSON.parse(line);
+                    if (ev.type === "done" || ev.type === "error") terminal = true;
+                    onStreamEvent(ev);
+                  } catch (e1) {}
                 });
-                msgs.scrollTop = msgs.scrollHeight;
-                if (terminal) return;
-                return pump();
+                if (!terminal) return pump();
               });
             }
             return pump();
@@ -1303,7 +1857,10 @@ window.__ModuleLoader__.load({
                     send: send,
                     getBrief: getCodeDevBrief,
                     onStarted: function (d) {
-                      startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")));
+                      startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")), {
+                        workspace: (d.workspace || (d.job && d.job.workspace) || "") || undefined,
+                        resumeCommit: !!(d.resume_commit || d.from_gate_fix || (d.job && d.job.resume_commit)),
+                      });
                     },
                   });
                 } else {
@@ -1313,7 +1870,10 @@ window.__ModuleLoader__.load({
                       send: send,
                       getBrief: getCodeDevBrief,
                       onStarted: function (d) {
-                        startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")));
+                        startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")), {
+                          workspace: (d.workspace || (d.job && d.job.workspace) || "") || undefined,
+                          resumeCommit: !!(d.resume_commit || d.from_gate_fix || (d.job && d.job.resume_commit)),
+                        });
                       },
                     });
                   }
@@ -1321,6 +1881,19 @@ window.__ModuleLoader__.load({
                 if (ev.code_review_ui) {
                   mountCodeReviewUi(bubble.el, ev.code_review_ui, bubble.meta, {
                     renderMsg: renderMsg,
+                  });
+                }
+                if (ev.code_commit_ui) {
+                  mountCodeCommitUi(bubble.el, ev.code_commit_ui, bubble.meta, {
+                    renderMsg: renderMsg,
+                    send: send,
+                    getBrief: getCodeDevBrief,
+                    onStarted: function (d) {
+                      startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")), {
+                        workspace: (d.workspace || (d.job && d.job.workspace) || "") || undefined,
+                        resumeCommit: !!(d.resume_commit || d.from_gate_fix || (d.job && d.job.resume_commit)),
+                      });
+                    },
                   });
                 }
                 if (ev.code_dev_brief && cur) {

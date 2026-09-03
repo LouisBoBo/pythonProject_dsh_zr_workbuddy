@@ -4,6 +4,7 @@
     "mes-pcb",
     "mes-ask",
     "code-dev",
-    "code-review"
+    "code-review",
+    "code-commit"
   ]
 }

@@ -34,12 +34,19 @@ def _normalize_path(raw: str) -> str:
 
 def _pick_macos(prompt: str) -> dict[str, Any]:
     safe = prompt.replace("\\", "\\\\").replace('"', '\\"')
-    script = f'POSIX path of (choose folder with prompt "{safe}")'
+    # activate Finder，避免对话框被 DSH/浏览器挡在后面导致一直「选择中…」
+    script = (
+        'tell application "Finder"\n'
+        "  activate\n"
+        f'  set _p to POSIX path of (choose folder with prompt "{safe}")\n'
+        "end tell\n"
+        "return _p"
+    )
     proc = subprocess.run(
         ["osascript", "-e", script],
         capture_output=True,
         text=True,
-        timeout=600,
+        timeout=180,
         check=False,
     )
     if proc.returncode != 0:

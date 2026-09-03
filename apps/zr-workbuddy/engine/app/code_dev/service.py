@@ -73,6 +73,7 @@ def run_job(
             raise RuntimeError("任务已取消")
 
         step("准备沙箱", sid="sandbox-prep")
+        scope_for_copy = list(job.get("write_scope") or [])
         meta = prepare_sandbox(
             data_dir,
             job_id,
@@ -80,10 +81,21 @@ def run_job(
             empty_target=empty_target,
             cfg=cfg,
             on_progress=lambda t: step(t, sid="sandbox-prep"),
+            include_rels=scope_for_copy or None,
         )
         sandbox_path = Path(meta["sandbox"])
-        job_store.update_job(data_dir, job_id, sandbox_path=str(sandbox_path))
-        step("沙箱就绪", sid="sandbox-prep", state="done")
+        job_store.update_job(
+            data_dir,
+            job_id,
+            sandbox_path=str(sandbox_path),
+            sandbox_mode=meta.get("mode"),
+            sandbox_copied_files=meta.get("copied_files"),
+        )
+        step(
+            f"沙箱就绪（{meta.get('mode') or 'copy'} · {meta.get('copied_files') or 0} 文件）",
+            sid="sandbox-prep",
+            state="done",
+        )
 
         requirement = ""
         for m in reversed(job.get("messages") or []):

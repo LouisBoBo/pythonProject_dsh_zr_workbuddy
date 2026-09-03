@@ -99,6 +99,17 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "max_total_bytes": 800000,
         "default_workspace": "",
     },
+    # P0-2 人触发提交（参数在配置中心；总开关以功能插件 code-commit 为准，此处默认开以免双关找不到）
+    "code_commit": {
+        "enabled": True,
+        "default_workspace": "",
+        "work_branch": "",
+        "remote_name": "origin",
+        "default_push": True,
+        "use_skill_review": True,
+        "allow_blocked": False,
+        "max_files": 80,
+    },
 }
 
 

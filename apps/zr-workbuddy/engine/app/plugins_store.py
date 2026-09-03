@@ -171,14 +171,24 @@ def is_enabled(feature_id: str) -> bool:
 
 
 def disabled_hint(feature_id: str, *, capability: str = "") -> str:
-    """统一的功能停用提示（面板 / CLI / Agent 共用）。"""
+    """统一的功能停用提示（面板 / CLI / Agent 共用）——优先引导「功能插件」页开关。"""
     fid = (feature_id or "").strip() or "unknown"
-    cap = (capability or "").strip() or "相关能力"
+    cap = (capability or "").strip()
+    display = fid
+    try:
+        for m in list_available():
+            if m.get("id") == fid:
+                display = (m.get("name") or "").strip() or fid
+                break
+    except Exception:  # noqa: BLE001
+        pass
+    title = cap or display
+    # 名称与 id 不同时带上 id，方便在列表里对号
+    name_part = display if display == fid else f"{display}（{fid}）"
     return (
-        f"「{cap}」对应的功能插件（{fid}）当前已停用，因此不可用。\n\n"
-        f"重新开启：\n"
-        f"`scripts/plugin.sh --app zr-workbuddy enable {fid}`\n\n"
-        "约 1 秒内热加载，无需重启 DSH。"
+        f"「{title}」对应的功能插件当前已停用，因此不可用。\n\n"
+        f"请打开工作助手左侧 **功能插件**，找到「{name_part}」，打开开关即可。\n"
+        "约 1 秒内生效，无需重启。"
     )
 
 

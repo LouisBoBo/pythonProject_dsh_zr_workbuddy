@@ -25,6 +25,9 @@ COPY_SKIP_DIR_NAMES = frozenset(
         ".vite",
         ".dev-logs",
         ".cursor-sdk-store",
+        # 写码沙箱自身与运行时产物，勿再拷入沙箱
+        "local_dev",
+        "sandboxes",
     }
 )
 

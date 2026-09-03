@@ -8,7 +8,7 @@ import httpx
 from fastapi import FastAPI, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # 沙箱 DNS 兜底（getaddrinfo 失败时用公共 DNS 解析），必须在任何网络调用前安装
 from . import dns_fix
@@ -180,9 +180,14 @@ async def api_chat_stream(body: ChatBody):
 
 
 class CodeDevConfirmBody(BaseModel):
-    workspace: str
-    requirement: str
-    code_dev_brief: dict | None = None
+    workspace: str = Field(..., description="本机工程绝对路径")
+    requirement: str = Field(..., description="写码需求摘要")
+    code_dev_brief: dict | None = Field(None, description="跨轮次写码简报（可选）")
+    write_scope: list[str] | None = Field(
+        None,
+        description="可选：限制同步/优先改动的相对路径（如来自提交门禁 findings）",
+    )
+    source_gate_job_id: str = Field("", description="可选：来源提交门禁任务 id（cc-…）")
 
 
 @app.post(
@@ -204,6 +209,8 @@ def api_code_dev_confirm(body: CodeDevConfirmBody):
         workspace=body.workspace or "",
         requirement=body.requirement or "",
         client_brief=body.code_dev_brief,
+        write_scope=body.write_scope,
+        source_gate_job_id=body.source_gate_job_id or "",
     )
     if not out.get("ok"):
         return JSONResponse(out, status_code=400)
@@ -486,6 +493,245 @@ def api_code_review_report(report_id: str):
     out = get_report(report_id)
     if not out.get("ok"):
         return JSONResponse(out, status_code=404)
+    return out
+
+
+class CodeCommitPathBody(BaseModel):
+    workspace: str = Field("", description="本机 Git 工程绝对路径")
+    files: list[str] | None = Field(None, description="可选：限定待提交相对路径列表")
+    work_branch: str = Field(
+        "",
+        description="要提交的工作分支；空则按「当前分支 → 配置中心 → 需手填」解析",
+    )
+
+
+class CodeCommitConfirmBody(BaseModel):
+    job_id: str
+    message: str = ""
+    push: bool | None = None
+    decision: str = "approve"
+
+
+@app.get(
+    "/api/code-commit/status",
+    tags=["人触发提交"],
+    summary="提交车道就绪状态",
+    description="返回提交车道是否开启、默认是否推送、工作分支与远程名等配置。",
+)
+def api_code_commit_status():
+    from . import plugins_store
+    from .code_commit import status as code_commit_status
+    from .code_commit.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="人触发提交")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    return code_commit_status()
+
+
+@app.post(
+    "/api/code-commit/check",
+    tags=["人触发提交"],
+    summary="校验本机 Git 工程路径",
+    description="校验绝对路径是否为可读的 git 仓库目录，并返回提交分支预览"
+    "（当前分支 → 配置中心 → 需手填）；不执行 commit。",
+)
+def api_code_commit_check(body: CodeCommitPathBody):
+    from . import plugins_store
+    from .code_commit import check_path
+    from .code_commit.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="人触发提交")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    return check_path(body.workspace or "")
+
+
+@app.post(
+    "/api/code-commit/prepare",
+    tags=["人触发提交"],
+    summary="列出待提交业务源码",
+    description="优先取 Git dirty ∩ 写码同步池，回落为 Git 工作区业务改动；不跑门禁、不 commit。",
+)
+def api_code_commit_prepare(body: CodeCommitPathBody):
+    from . import plugins_store
+    from .code_commit import prepare
+    from .code_commit.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="人触发提交")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    return prepare(body.workspace or "", files=body.files, work_branch=body.work_branch or "")
+
+
+@app.post(
+    "/api/code-commit/start",
+    tags=["人触发提交"],
+    summary="启动提交门禁审核",
+    description="列出待提交文件并跑门禁（P0/P1 阻断）；可传 work_branch。"
+    "返回 findings 列表与 job_id。阻断则不可确认；通过后须再调 /api/code-commit/confirm。"
+    "不输出全量审码报告。",
+)
+def api_code_commit_start(body: CodeCommitPathBody):
+    from . import plugins_store
+    from .code_commit import start_gate
+    from .code_commit.config import get_config
+    from .code_commit.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="人触发提交")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    cfg = get_config()
+    if not cfg.enabled:
+        return JSONResponse(
+            {"ok": False, "detail": "提交车道未开启", "reply": "请到配置中心开启提交车道", "can_commit": False},
+            status_code=400,
+        )
+    out = start_gate(
+        body.workspace or "",
+        files=body.files,
+        work_branch=body.work_branch or "",
+    )
+    if not out.get("ok") and not out.get("job_id"):
+        return JSONResponse(out, status_code=400)
+    return out
+
+
+@app.post(
+    "/api/code-commit/confirm",
+    tags=["人触发提交"],
+    summary="人确认后执行 git commit/push",
+    description="仅 HITL：用户在确认卡点确认后调用；才会在工作分支 commit，并可 push。"
+    "decision=reject 则跳过。模型不得代调本接口完成提交。",
+)
+def api_code_commit_confirm(body: CodeCommitConfirmBody):
+    from . import plugins_store
+    from .code_commit import confirm
+    from .code_commit.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="人触发提交")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    out = confirm(
+        body.job_id or "",
+        message=body.message or "",
+        push=body.push,
+        decision=body.decision or "approve",
+    )
+    if not out.get("ok"):
+        # 本地已 commit、仅 push 失败：200 + push_retry_needed，供 UI 出「重试推送」
+        if out.get("push_retry_needed"):
+            return JSONResponse(out, status_code=200)
+        return JSONResponse(out, status_code=400)
+    return out
+
+
+@app.get(
+    "/api/code-commit/jobs/{job_id}",
+    tags=["人触发提交"],
+    summary="查询提交任务",
+    description="按 job_id（cc- 前缀）读取门禁结果、文件列表与 commit 结果。",
+)
+def api_code_commit_job(job_id: str):
+    from . import plugins_store
+    from .code_commit import get_job
+    from .code_commit.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="人触发提交")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    out = get_job(job_id)
+    if not out.get("ok"):
+        return JSONResponse(out, status_code=404)
+    return out
+
+
+class CodeCommitFixBody(BaseModel):
+    workspace: str = Field("", description="可选：限定工程路径，默认取最近阻断任务")
+    job_id: str = Field("", description="可选：指定门禁任务 id（cc-…）")
+
+
+@app.post(
+    "/api/code-commit/pick-ui",
+    tags=["人触发提交"],
+    summary="生成提交选目录确认卡",
+    description="按工程路径返回 code_commit_ui（pick），用于写码修复成功后继续提交闭环；不跑门禁、不 commit。",
+)
+def api_code_commit_pick_ui(body: CodeCommitFixBody):
+    from . import plugins_store
+    from .code_commit.chat_bridge import build_pick_ui
+    from .code_commit.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="人触发提交")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    ui = build_pick_ui(workspace=body.workspace or "")
+    return {
+        "ok": True,
+        "code_commit_ui": ui,
+        "reply": "请确认工程目录与提交分支后开始门禁审核。",
+        "detail": ui.get("workspace") or "",
+    }
+
+
+@app.post(
+    "/api/code-commit/latest-blocked",
+    tags=["人触发提交"],
+    summary="查询最近一次阻断门禁",
+    description="返回最近 status=blocked 的提交任务及 findings 路径，供「修复这些问题」闭环使用。",
+)
+def api_code_commit_latest_blocked(body: CodeCommitFixBody):
+    from . import plugins_store
+    from .code_commit import latest_blocked
+    from .code_commit.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="人触发提交")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    out = latest_blocked(workspace=body.workspace or "", job_id=body.job_id or "")
+    if not out.get("ok"):
+        return JSONResponse(out, status_code=404)
+    return out
+
+
+@app.post(
+    "/api/code-commit/prepare-fix",
+    tags=["人触发提交"],
+    summary="按门禁阻断生成写码确认卡",
+    description="读取最近（或指定）阻断任务，生成 code_dev_ui 确认卡数据；不自动启动 Cursor。"
+    "用户确认后走 POST /api/code-dev/confirm。",
+)
+def api_code_commit_prepare_fix(body: CodeCommitFixBody):
+    from . import plugins_store
+    from .code_commit import prepare_fix_from_gate
+    from .code_commit.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="人触发提交")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    out = prepare_fix_from_gate(workspace=body.workspace or "", job_id=body.job_id or "")
+    if not out.get("ok"):
+        return JSONResponse(out, status_code=400)
+    return out
+
+
+@app.post(
+    "/api/code-commit/push-retry",
+    tags=["人触发提交"],
+    summary="重试推送（不重新 commit）",
+    description="本地已 commit 但 push 失败时，仅重试推送到远程。",
+)
+def api_code_commit_push_retry(body: CodeCommitConfirmBody):
+    from . import plugins_store
+    from .code_commit import push_retry
+    from .code_commit.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="人触发提交")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    out = push_retry(body.job_id or "")
+    if not out.get("ok"):
+        return JSONResponse(out, status_code=400)
     return out
 
 

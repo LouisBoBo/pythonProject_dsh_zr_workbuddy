@@ -17,6 +17,7 @@ FEATURE_CONFIG = "mes-config"
 FEATURE_PCB = "mes-pcb"
 FEATURE_CODE_DEV = "code-dev"
 FEATURE_CODE_REVIEW = "code-review"
+FEATURE_CODE_COMMIT = "code-commit"
 
 
 def _ask_disabled_chat_response() -> dict:
@@ -46,6 +47,39 @@ async def chat_stream(text: str, *, code_dev_brief: dict | None = None):
     from .pcb_expert import feature_enabled, is_pcb_question, pcb_ask_stream
     from .code_dev import handle_chat_code_dev, is_code_dev_question
     from .code_review import handle_chat_code_review, is_code_review_question
+    from .code_commit import (
+        handle_chat_code_commit,
+        handle_chat_fix_from_gate,
+        is_code_commit_question,
+        is_fix_from_gate_question,
+    )
+    def _emit_code_commit(out: dict):
+        thinking = out.get("thinking") or ""
+        events = []
+        if thinking:
+            events.append({"type": "thinking", "text": thinking})
+        if out.get("reply"):
+            events.append({"type": "reply", "delta": out["reply"]})
+        events.append(
+            {
+                "type": "done",
+                "ok": bool(out.get("ok", True)),
+                "reply": out.get("reply") or "",
+                "thinking": thinking,
+                "chart": None,
+                "table": None,
+                "note": out.get("note"),
+                "source": out.get("source") or "code_commit",
+                "data_source": out.get("data_source") or "code_commit",
+                "intent": out.get("intent") or {"type": "code_commit", "metric": "", "dim": None, "chart": None},
+                "job_id": out.get("job_id"),
+                "findings": out.get("findings"),
+                "code_commit_ui": out.get("code_commit_ui"),
+                "code_dev_ui": out.get("code_dev_ui"),
+                "code_dev_brief": out.get("code_dev_brief"),
+            }
+        )
+        return events
 
     def _emit_code_review(out: dict):
         thinking = out.get("thinking") or ""
@@ -103,17 +137,42 @@ async def chat_stream(text: str, *, code_dev_brief: dict | None = None):
         )
         return events
 
-    # 本机审码：对话触发确认卡（在写码之前；点确认后才 run）
-    if is_code_review_question(text) and plugins_store.is_enabled(FEATURE_CODE_REVIEW):
-        yield {"type": "status", "detail": "请选择要审核的本机工程目录…"}
+    # 门禁阻断 → 写码修复闭环（先于「提交代码」选目录）
+    if is_fix_from_gate_question(text):
+        if plugins_store.is_enabled(FEATURE_CODE_COMMIT):
+            yield {"type": "status", "detail": "正在根据提交门禁整理修复确认卡…"}
+        out = await handle_chat_fix_from_gate(text)
+        # 有写码确认卡时按写码事件透传，保证面板挂 code_dev_ui
+        if out.get("code_dev_ui"):
+            for ev in _emit_code_dev(out):
+                yield ev
+        else:
+            for ev in _emit_code_commit(out):
+                yield ev
+        return
+
+    # 人触发提交：先于审码/写码（「提交代码」勿误入审码）
+    if is_code_commit_question(text):
+        if plugins_store.is_enabled(FEATURE_CODE_COMMIT):
+            yield {"type": "status", "detail": "请选择要提交的本机 Git 工程…"}
+        out = await handle_chat_code_commit(text)
+        for ev in _emit_code_commit(out):
+            yield ev
+        return
+
+    # 本机审码：先识别意图；未启用则明确提示，禁止落入写码/MES（停插件后 LLM 易把「审核代码」误判成写码）
+    if is_code_review_question(text):
+        if plugins_store.is_enabled(FEATURE_CODE_REVIEW):
+            yield {"type": "status", "detail": "请选择要审核的本机工程目录…"}
         out = await handle_chat_code_review(text)
         for ev in _emit_code_review(out):
             yield ev
         return
 
-    # 写码意图：需求收集 → 思考 + 选项/确认卡（确认后才开工，绝不在此 start）
-    if is_code_dev_question(text) and plugins_store.is_enabled(FEATURE_CODE_DEV):
-        yield {"type": "status", "detail": "正在梳理写码需求…"}
+    # 写码意图：未启用同样先提示，不落入查数/LLM 二次分流
+    if is_code_dev_question(text):
+        if plugins_store.is_enabled(FEATURE_CODE_DEV):
+            yield {"type": "status", "detail": "正在梳理写码需求…"}
         out = await handle_chat_code_dev(text, client_brief=code_dev_brief)
         for ev in _emit_code_dev(out):
             yield ev
@@ -135,13 +194,14 @@ async def chat_stream(text: str, *, code_dev_brief: dict | None = None):
 
     # PCB 问题但 feature 已停用：明确提示（不误走 MES 查数、也不偷偷调专家）
     if is_pcb_question(text) and not feature_enabled():
-        from .pcb_expert import DISABLED_HINT
+        from .pcb_expert import disabled_hint
 
-        yield {"type": "reply", "delta": DISABLED_HINT}
+        hint = disabled_hint()
+        yield {"type": "reply", "delta": hint}
         yield {
             "type": "done",
             "ok": True,
-            "reply": DISABLED_HINT,
+            "reply": hint,
             "thinking": "",
             "source": "disabled",
             "data_source": "pcb_expert",
@@ -213,12 +273,25 @@ async def chat(text: str, *, code_dev_brief: dict | None = None) -> dict:
 
     from .code_dev import handle_chat_code_dev, is_code_dev_question
     from .code_review import handle_chat_code_review, is_code_review_question
+    from .code_commit import (
+        handle_chat_code_commit,
+        handle_chat_fix_from_gate,
+        is_code_commit_question,
+        is_fix_from_gate_question,
+    )
     from .pcb_expert import chat_response, is_pcb_question, pcb_ask
 
-    if is_code_review_question(text) and plugins_store.is_enabled(FEATURE_CODE_REVIEW):
+    # 提交 / 审码 / 写码：意图命中即入对应 handler（handler 内处理未启用提示），禁止再走 LLM 误分流
+    if is_fix_from_gate_question(text):
+        return await handle_chat_fix_from_gate(text)
+
+    if is_code_commit_question(text):
+        return await handle_chat_code_commit(text)
+
+    if is_code_review_question(text):
         return await handle_chat_code_review(text)
 
-    if is_code_dev_question(text) and plugins_store.is_enabled(FEATURE_CODE_DEV):
+    if is_code_dev_question(text):
         return await handle_chat_code_dev(text, client_brief=code_dev_brief)
 
     # PCB 工艺问题：仅当 mes-pcb feature 已启用才走专家（热插拔真相源 = plugins.json）
@@ -465,4 +538,113 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
             return blocked
         from .code_review import get_report as code_review_report
         return code_review_report(rest[0] if rest else "")
+    if cmd == "code-commit-status":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
+        if blocked:
+            return blocked
+        from .code_commit import status as code_commit_status
+        return code_commit_status()
+    if cmd == "code-commit-check":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
+        if blocked:
+            return blocked
+        from .code_commit import check_path as code_commit_check
+        return code_commit_check(" ".join(rest) if rest else "")
+    if cmd == "code-commit-prepare":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
+        if blocked:
+            return blocked
+        from .code_commit import prepare as code_commit_prepare
+        workspace = rest[0] if rest else ""
+        work_branch = ""
+        for arg in rest[1:]:
+            if arg.startswith("work_branch="):
+                work_branch = arg[12:]
+        return code_commit_prepare(workspace, work_branch=work_branch)
+    if cmd == "code-commit-start":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
+        if blocked:
+            return blocked
+        from .code_commit import start_gate as code_commit_start
+        if not rest:
+            return {
+                "ok": False,
+                "detail": "用法: code-commit-start <workspace绝对路径> [work_branch=分支名]",
+            }
+        work_branch = ""
+        for arg in rest[1:]:
+            if arg.startswith("work_branch="):
+                work_branch = arg[12:]
+        return code_commit_start(rest[0], work_branch=work_branch)
+    if cmd == "code-commit-confirm":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
+        if blocked:
+            return blocked
+        from .code_commit import confirm as code_commit_confirm
+        # args: <job_id> [message=…] [push=true|false] [decision=approve|reject]
+        if not rest:
+            return {
+                "ok": False,
+                "detail": "用法: code-commit-confirm <job_id> [message=中文说明] [push=true] [decision=approve]",
+            }
+        job_id = rest[0]
+        message = ""
+        push = None
+        decision = "approve"
+        for arg in rest[1:]:
+            if arg.startswith("message="):
+                message = arg[8:]
+            elif arg.startswith("push="):
+                push = arg[5:].lower() in {"1", "true", "yes", "y"}
+            elif arg.startswith("decision="):
+                decision = arg[9:]
+            elif not message and not arg.startswith(("push=", "decision=")):
+                message = arg
+        return code_commit_confirm(job_id, message=message, push=push, decision=decision)
+    if cmd == "code-commit-job":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
+        if blocked:
+            return blocked
+        from .code_commit import get_job as code_commit_get_job
+        return code_commit_get_job(rest[0] if rest else "")
+    if cmd == "code-commit-latest-blocked":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
+        if blocked:
+            return blocked
+        from .code_commit import latest_blocked as code_commit_latest_blocked
+        workspace = ""
+        job_id = ""
+        for arg in rest:
+            if arg.startswith("workspace="):
+                workspace = arg[10:]
+            elif arg.startswith("job_id="):
+                job_id = arg[7:]
+            elif arg.startswith("cc-") and not job_id:
+                job_id = arg
+            elif not workspace and arg.startswith("/"):
+                workspace = arg
+        return code_commit_latest_blocked(workspace=workspace, job_id=job_id)
+    if cmd == "code-commit-prepare-fix":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
+        if blocked:
+            return blocked
+        from .code_commit import prepare_fix_from_gate as code_commit_prepare_fix
+        workspace = ""
+        job_id = ""
+        for arg in rest:
+            if arg.startswith("workspace="):
+                workspace = arg[10:]
+            elif arg.startswith("job_id="):
+                job_id = arg[7:]
+            elif arg.startswith("cc-") and not job_id:
+                job_id = arg
+            elif not workspace and arg.startswith("/"):
+                workspace = arg
+        return code_commit_prepare_fix(workspace=workspace, job_id=job_id)
+    if cmd == "code-commit-push-retry":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
+        if blocked:
+            return blocked
+        from .code_commit import push_retry as code_commit_push_retry
+        return code_commit_push_retry(rest[0] if rest else "")
     return {"ok": False, "detail": f"未知命令: {cmd}"}

@@ -1,0 +1,5 @@
+{
+  "id": "code-commit",
+  "name": "人触发提交",
+  "purpose": "注册 mes_code_commit_*：选目录 → 阻断式门禁 → 人确认后本机 git commit/push（模型不执行 git）"
+}
