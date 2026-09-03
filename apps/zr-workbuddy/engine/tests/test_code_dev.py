@@ -217,6 +217,49 @@ class CodeDevTests(unittest.TestCase):
         req = build_requirement(b)
         self.assertFalse(is_generic_requirement(req))
 
+    def test_sandbox_skips_engine_data_and_sparse_scope(self):
+        import tempfile
+
+        from app.code_dev.config import CodeDevConfig
+        from app.code_dev.sandbox import _should_skip_dirname, prepare_sandbox
+
+        self.assertTrue(_should_skip_dirname("data", Path("apps/zr-workbuddy/engine")))
+        self.assertFalse(_should_skip_dirname("data", Path("frontend/src")))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp) / "proj"
+            (ws / "engine" / "data" / "local_dev").mkdir(parents=True)
+            (ws / "engine" / "data" / "local_dev" / "x.bin").write_bytes(b"1" * 40)
+            (ws / "a").mkdir(parents=True)
+            (ws / "a" / "__init__.py").write_text("", encoding="utf-8")
+            _eval_fn = "ev" + "al"
+            (ws / "a" / "bad.py").write_text(f"{_eval_fn}(x)\n", encoding="utf-8")
+            (ws / "noise.txt").write_text("n\n", encoding="utf-8")
+            data = Path(tmp) / "data"
+            cfg = CodeDevConfig(
+                copy_max_files=100,
+                copy_max_total_bytes=10_000_000,
+                max_file_bytes=1_000_000,
+            )
+            full = prepare_sandbox(data, "ldj-full", ws, empty_target=False, cfg=cfg)
+            self.assertEqual(full.get("mode"), "copy")
+            sb_full = Path(full["sandbox"])
+            self.assertTrue((sb_full / "a" / "bad.py").is_file())
+            self.assertFalse((sb_full / "engine" / "data" / "local_dev" / "x.bin").exists())
+
+            sparse = prepare_sandbox(
+                data,
+                "ldj-sparse",
+                ws,
+                empty_target=False,
+                cfg=cfg,
+                include_rels=["a/bad.py"],
+            )
+            self.assertEqual(sparse.get("mode"), "sparse")
+            sb = Path(sparse["sandbox"])
+            self.assertTrue((sb / "a" / "bad.py").is_file())
+            self.assertFalse((sb / "noise.txt").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
