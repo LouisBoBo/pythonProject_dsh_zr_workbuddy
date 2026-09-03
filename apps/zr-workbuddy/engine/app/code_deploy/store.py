@@ -97,21 +97,46 @@ def claim_job(
             fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
 
-def get_last_deploy_sha(data_dir: Path, env: str) -> str:
+def get_last_deploy_record(data_dir: Path, env: str) -> dict[str, Any]:
+    """读取某环境上次成功部署：sha + 脏文件内容指纹（兼容旧版纯字符串）。"""
     path = _meta_path(data_dir)
+    empty = {"sha": "", "dirty_fingerprints": {}, "updated_at": ""}
     if not path.is_file():
-        return ""
+        return dict(empty)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return ""
+        return dict(empty)
     envs = data.get("envs") if isinstance(data, dict) else None
     if not isinstance(envs, dict):
-        return ""
-    return str(envs.get(env) or "").strip()
+        return dict(empty)
+    raw = envs.get(env)
+    if isinstance(raw, str):
+        return {"sha": raw.strip(), "dirty_fingerprints": {}, "updated_at": str(data.get("updated_at") or "")}
+    if isinstance(raw, dict):
+        fps = raw.get("dirty_fingerprints") or {}
+        if not isinstance(fps, dict):
+            fps = {}
+        return {
+            "sha": str(raw.get("sha") or "").strip(),
+            "dirty_fingerprints": {str(k): str(v) for k, v in fps.items() if k and v},
+            "updated_at": str(raw.get("updated_at") or data.get("updated_at") or ""),
+        }
+    return dict(empty)
 
 
-def set_last_deploy_sha(data_dir: Path, env: str, sha: str) -> None:
+def get_last_deploy_sha(data_dir: Path, env: str) -> str:
+    return str(get_last_deploy_record(data_dir, env).get("sha") or "").strip()
+
+
+def set_last_deploy_sha(
+    data_dir: Path,
+    env: str,
+    sha: str,
+    *,
+    dirty_fingerprints: dict[str, str] | None = None,
+) -> None:
+    """写入上次成功部署基线；可附带当时工作区脏文件内容指纹，避免同内容反复强制全量。"""
     path = _meta_path(data_dir)
     lock = _lock_path(data_dir)
     with open(lock, "a+", encoding="utf-8") as lf:
@@ -128,9 +153,19 @@ def set_last_deploy_sha(data_dir: Path, env: str, sha: str) -> None:
             envs = data.get("envs")
             if not isinstance(envs, dict):
                 envs = {}
-            envs[str(env)] = str(sha or "").strip()
+            now = datetime.now(timezone.utc).isoformat()
+            fps = {
+                str(k).replace("\\", "/"): str(v)
+                for k, v in (dirty_fingerprints or {}).items()
+                if k and v
+            }
+            envs[str(env)] = {
+                "sha": str(sha or "").strip(),
+                "dirty_fingerprints": fps,
+                "updated_at": now,
+            }
             data["envs"] = envs
-            data["updated_at"] = datetime.now(timezone.utc).isoformat()
+            data["updated_at"] = now
             tmp = path.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             os.replace(tmp, path)

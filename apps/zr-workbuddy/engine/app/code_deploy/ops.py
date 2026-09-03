@@ -9,6 +9,7 @@ from .diff_map import resolve_units_from_ids, units_from_diff
 from .ssh_sync import deploy_units_ssh
 from .store import (
     claim_job,
+    get_last_deploy_record,
     get_last_deploy_sha,
     load_job,
     new_job_id,
@@ -106,7 +107,9 @@ def prepare(
             "can_deploy": False,
         }
 
-    last_sha = get_last_deploy_sha(default_data_dir(), target_env)
+    last_rec = get_last_deploy_record(default_data_dir(), target_env)
+    last_sha = str(last_rec.get("sha") or "").strip()
+    known_dirty_fps = dict(last_rec.get("dirty_fingerprints") or {})
     first_deploy = not bool(last_sha)
     head = (head_ref or "").strip() or cfg.default_ref or "HEAD"
     # 基线：显式 base > 上次成功 SHA；无记录时不做「假增量」对比
@@ -131,6 +134,7 @@ def prepare(
             "ok": True,
             "paths": [],
             "dirty_paths": [],
+            "dirty_skipped_same_as_last": [],
             "unit_objs": [],
             "units": [],
             "skipped_paths": [],
@@ -140,39 +144,48 @@ def prepare(
             "head_sha": "",
             "base_resolved": False,
         }
-        # 仍解析 HEAD sha 供成功后落盘
-        from .diff_map import list_changed_paths
+        from .diff_map import filter_unchanged_dirty_paths, list_changed_paths, list_dirty_paths
+        from .units import map_paths_to_units
 
         tip = list_changed_paths(root, base_ref="HEAD", head_ref="HEAD")
         if tip.get("ok"):
             mapped["head_ref"] = tip.get("head_ref") or head
             mapped["head_sha"] = tip.get("head_sha") or ""
-            # 拉 dirty 以便策略提示
-            from .diff_map import list_dirty_paths
-            from .units import map_paths_to_units
-
             dirty = list_dirty_paths(root)
-            dirty_paths = list(dirty.get("paths") or []) if dirty.get("ok") else []
+            raw_dirty = list(dirty.get("paths") or []) if dirty.get("ok") else []
+            dirty_paths, dirty_skipped = filter_unchanged_dirty_paths(
+                root, raw_dirty, known_dirty_fps
+            )
             mapped["dirty_paths"] = dirty_paths
+            mapped["dirty_skipped_same_as_last"] = dirty_skipped
             mapped["paths"] = list(dirty_paths)
             mapped["unit_objs"] = map_paths_to_units(dirty_paths)
             mapped["units"] = [u.to_dict() for u in mapped["unit_objs"]]
         base_resolved = False
     else:
-        mapped = units_from_diff(root, base_ref=base, head_ref=head, include_dirty=True)
+        mapped = units_from_diff(
+            root,
+            base_ref=base,
+            head_ref=head,
+            include_dirty=True,
+            known_dirty_fingerprints=known_dirty_fps,
+        )
         if not mapped.get("ok"):
-            # 基线坏了 → 强制全量路径，仍给确认卡
             base_resolved = False
-            from .diff_map import list_changed_paths, list_dirty_paths
+            from .diff_map import filter_unchanged_dirty_paths, list_changed_paths, list_dirty_paths
             from .units import map_paths_to_units
 
             tip = list_changed_paths(root, base_ref="HEAD", head_ref=head)
             dirty = list_dirty_paths(root)
-            dirty_paths = list(dirty.get("paths") or []) if dirty.get("ok") else []
+            raw_dirty = list(dirty.get("paths") or []) if dirty.get("ok") else []
+            dirty_paths, dirty_skipped = filter_unchanged_dirty_paths(
+                root, raw_dirty, known_dirty_fps
+            )
             mapped = {
                 "ok": True,
                 "paths": dirty_paths,
                 "dirty_paths": dirty_paths,
+                "dirty_skipped_same_as_last": dirty_skipped,
                 "unit_objs": map_paths_to_units(dirty_paths),
                 "units": [],
                 "skipped_paths": [],
@@ -479,9 +492,31 @@ def confirm(
     result = deploy_units_ssh(job["workspace"], selected, cfg, log=_log)
     mode_label = "全量" if deploy_mode == "full" else "增量"
     if result.get("ok"):
-        sha = str(job.get("head_sha") or "").strip()
+        # 成功时刻重读 HEAD + 脏文件指纹，避免同内容未提交文件下次再锁全量
+        from .diff_map import fingerprint_paths, list_changed_paths, list_dirty_paths
+
+        ws = Path(str(job.get("workspace") or ".")).expanduser()
+        tip = list_changed_paths(ws, base_ref="HEAD", head_ref="HEAD")
+        sha = str(
+            (tip.get("head_sha") if tip.get("ok") else "") or job.get("head_sha") or ""
+        ).strip()
+        dirty_now = list_dirty_paths(ws)
+        dirty_list = list(dirty_now.get("paths") or []) if dirty_now.get("ok") else []
+        fps = fingerprint_paths(ws, dirty_list)
+        if deploy_mode != "full":
+            prev = get_last_deploy_record(
+                default_data_dir(), str(job.get("env") or cfg.default_env)
+            )
+            merged = dict(prev.get("dirty_fingerprints") or {})
+            merged.update(fps)
+            fps = merged
         if sha:
-            set_last_deploy_sha(default_data_dir(), str(job.get("env") or cfg.default_env), sha)
+            set_last_deploy_sha(
+                default_data_dir(),
+                str(job.get("env") or cfg.default_env),
+                sha,
+                dirty_fingerprints=fps,
+            )
         update_job(
             default_data_dir(),
             job_id,
@@ -511,7 +546,7 @@ def confirm(
             f"- 单元（{len(unit_ids)}）：{ids}",
             f"- 动作：{'；'.join(actions)}",
         ]
-        head_sha = str(job.get("head_sha") or "").strip()
+        head_sha = sha or str(job.get("head_sha") or "").strip()
         if head_sha:
             reply_lines.append(f"- 基线 SHA：`{head_sha[:12]}`")
         if isinstance(health, dict) and health.get("ok") is not None:

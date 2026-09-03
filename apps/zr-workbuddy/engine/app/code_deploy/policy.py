@@ -7,7 +7,9 @@ from typing import Any
 
 from .units import DeployUnit, path_to_unit_id
 
-# 触及即强制全量（脚手架 / 依赖 / 宿主）
+# 触及即强制全量（整仓脚手架 / 宿主依赖）。
+# 注意：engine/requirements.txt、runtime.yaml、bridge 源码等已映射到 engine/bridge 单元，
+# 由对应单元增量同步 + 引擎重启/远端 venv 安装即可，禁止因此锁死「全仓全量」。
 _FORCE_FULL_PATH_RE = re.compile(
     r"("
     r"^scripts/"
@@ -15,11 +17,6 @@ _FORCE_FULL_PATH_RE = re.compile(
     r"|^AGENTS\.md$"
     r"|^package\.json$"
     r"|^pnpm-lock\.yaml$"
-    r"|^apps/zr-workbuddy/plugins/mes-bridge/package\.json$"
-    r"|^apps/zr-workbuddy/plugins/mes-runtime/package\.json$"
-    r"|^apps/zr-workbuddy/engine/requirements\.txt$"
-    r"|^apps/zr-workbuddy/engine/config/runtime\.yaml$"
-    r"|^apps/zr-workbuddy/engine/config/config\.example\.yaml$"
     r"|^\.dsh/profiles/"
     r"|cordis\.patch"
     r")",
@@ -101,7 +98,7 @@ def decide_deploy_mode(
     """根据上次部署 SHA 对比结果自动判定。
 
     - 无记录 / 基线失效 / 远端空 / 触及脚手架或未映射关键路径 → 强制全量
-    - 变更面过大或 engine+bridge 同改 → 默认全量并提示（可覆盖）
+    - 变更面过大 → 默认全量并提示（可覆盖）
     - 否则增量，单元 = diff 命中集合（自动全选）
     """
     reasons: list[str] = []
@@ -152,8 +149,9 @@ def decide_deploy_mode(
             f"命中部署单元 {unit_n} 个（≥{_FORCE_FULL_UNIT_COUNT}），强制全量降低漏配风险"
         )
     elif unit_n >= _RECOMMEND_FULL_UNIT_COUNT or (
-        "engine" in kinds and "bridge" in kinds
-    ) or (feature_n >= 3 and ("engine" in kinds or "bridge" in kinds)):
+        feature_n >= 3 and ("engine" in kinds or "bridge" in kinds)
+    ):
+        # engine+bridge 同改不再默认全量：两单元增量即可，避免「已部署过仍锁全量」
         recommend = True
         reasons.append(
             f"变更面较大（单元 {unit_n}，feature {feature_n}，含 "
@@ -162,7 +160,8 @@ def decide_deploy_mode(
 
     if dirty:
         warnings.append(
-            f"工作区有 {len(dirty)} 个未提交变更已纳入对比；建议先提交再部署，避免环境漂移"
+            f"工作区有 {len(dirty)} 个未提交变更已纳入对比；"
+            "与上次成功部署内容相同的脏文件会被自动忽略"
         )
         dirty_unmapped = collect_unmapped_critical(dirty)
         if dirty_unmapped and not force:

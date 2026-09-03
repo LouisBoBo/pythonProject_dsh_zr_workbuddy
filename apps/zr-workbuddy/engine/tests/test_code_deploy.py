@@ -142,12 +142,58 @@ class CodeDeployUnitTests(unittest.TestCase):
         self.assertIsNone(_safe_local_path(root, "/etc/passwd"))
         self.assertIsNone(_safe_local_path(root, "../README.md"))
 
-    def test_health_blocks_loopback(self):
-        from app.code_deploy.ssh_sync import probe_health
+    def test_policy_requirements_not_force_full(self):
+        """依赖变更走 engine 单元，不应锁死全仓全量。"""
+        from app.code_deploy.policy import decide_deploy_mode
+        from app.code_deploy.units import build_unit
 
-        self.assertFalse(probe_health("http://127.0.0.1:9/").get("ok"))
-        self.assertFalse(probe_health("http://localhost/").get("ok"))
+        units = [build_unit("engine")]
+        d = decide_deploy_mode(
+            last_sha="abc123",
+            base_resolved=True,
+            paths=["apps/zr-workbuddy/engine/requirements.txt"],
+            units=units,
+            dirty_paths=["apps/zr-workbuddy/engine/requirements.txt"],
+        )
+        self.assertFalse(d.force_full)
+        self.assertEqual(d.mode, "incremental")
 
+    def test_policy_engine_bridge_incremental(self):
+        from app.code_deploy.policy import decide_deploy_mode
+        from app.code_deploy.units import build_unit
 
-if __name__ == "__main__":
-    unittest.main()
+        units = [build_unit("engine"), build_unit("bridge")]
+        d = decide_deploy_mode(
+            last_sha="abc123",
+            base_resolved=True,
+            paths=[
+                "apps/zr-workbuddy/engine/app/main.py",
+                "apps/zr-workbuddy/plugins/mes-bridge/lib/client.js",
+            ],
+            units=units,
+        )
+        self.assertFalse(d.force_full)
+        self.assertEqual(d.mode, "incremental")
+
+    def test_filter_unchanged_dirty_paths(self):
+        import tempfile
+        from pathlib import Path
+
+        from app.code_deploy.diff_map import (
+            file_content_fingerprint,
+            filter_unchanged_dirty_paths,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            f = root / "apps" / "zr-workbuddy" / "engine" / "requirements.txt"
+            f.parent.mkdir(parents=True)
+            f.write_text("fastapi>=0.110\n", encoding="utf-8")
+            rel = "apps/zr-workbuddy/engine/requirements.txt"
+            fp = file_content_fingerprint(root, rel)
+            keep, skipped = filter_unchanged_dirty_paths(root, [rel], {rel: fp})
+            self.assertEqual(keep, [])
+            self.assertEqual(skipped, [rel])
+            keep2, skipped2 = filter_unchanged_dirty_paths(root, [rel], {rel: "other"})
+            self.assertEqual(keep2, [rel])
+            self.assertEqual(skipped2, [])

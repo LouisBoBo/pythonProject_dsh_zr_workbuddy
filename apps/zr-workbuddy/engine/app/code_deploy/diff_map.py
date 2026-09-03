@@ -86,24 +86,93 @@ def list_changed_paths(
 def list_dirty_paths(workspace: Path | str) -> dict[str, Any]:
     """工作区未提交路径（含未跟踪），供策略纳入对比。"""
     root = Path(workspace).expanduser().resolve()
-    code, out, err = _run_git(root, "status", "--porcelain", "-u")
+    # -z：路径不转义，避免中文被解析成 \345\212… 乱码路径
+    code, out, err = _run_git(root, "status", "--porcelain", "-z", "-u")
     if code != 0:
         return {"ok": False, "paths": [], "error": err or "git status 失败"}
     paths: list[str] = []
-    for line in (out or "").splitlines():
-        if len(line) < 4:
+    # 条目形如：XY<space>path\0 或 R/C 时 XY<space>old\0new\0
+    raw = out or ""
+    i = 0
+    entries = raw.split("\0")
+    while i < len(entries):
+        ent = entries[i]
+        i += 1
+        if not ent:
             continue
-        # XY PATH or XY ORIG -> PATH
-        rest = line[3:].strip()
-        if " -> " in rest:
-            rest = rest.split(" -> ", 1)[-1].strip()
-        # quoted paths
-        if rest.startswith('"') and rest.endswith('"'):
-            rest = rest[1:-1]
+        if len(ent) < 3:
+            continue
+        xy, rest = ent[:2], ent[2:]
+        if rest.startswith(" "):
+            rest = rest[1:]
+        # rename/copy：当前段是旧路径，下一段是新路径
+        if xy[0] in {"R", "C"} or xy[1] in {"R", "C"}:
+            new_path = entries[i] if i < len(entries) else ""
+            i += 1
+            rest = new_path or rest
         p = rest.replace("\\", "/").strip()
         if p:
             paths.append(p)
     return {"ok": True, "paths": paths, "error": ""}
+
+
+def file_content_fingerprint(workspace: Path | str, rel: str) -> str:
+    """工作区文件内容指纹；目录或不存在返回空。"""
+    import hashlib
+
+    root = Path(workspace).expanduser().resolve()
+    rel_n = (rel or "").replace("\\", "/").strip().lstrip("./")
+    if not rel_n or ".." in rel_n.split("/"):
+        return ""
+    path = (root / rel_n).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return ""
+    if not path.is_file():
+        return ""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def fingerprint_paths(workspace: Path | str, paths: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for raw in paths or []:
+        p = (raw or "").replace("\\", "/").strip().lstrip("./")
+        if not p:
+            continue
+        fp = file_content_fingerprint(workspace, p)
+        if fp:
+            out[p] = fp
+    return out
+
+
+def filter_unchanged_dirty_paths(
+    workspace: Path | str,
+    dirty_paths: list[str],
+    known_fingerprints: dict[str, str] | None,
+) -> tuple[list[str], list[str]]:
+    """去掉与上次成功部署时内容完全相同的脏文件。
+
+    返回 (仍需纳入对比的 dirty, 已忽略的路径)。
+    """
+    known = known_fingerprints or {}
+    keep: list[str] = []
+    skipped: list[str] = []
+    for raw in dirty_paths or []:
+        p = (raw or "").replace("\\", "/").strip().lstrip("./")
+        if not p:
+            continue
+        prev = known.get(p) or ""
+        if prev:
+            cur = file_content_fingerprint(workspace, p)
+            if cur and cur == prev:
+                skipped.append(p)
+                continue
+        keep.append(p)
+    return keep, skipped
 
 
 def units_from_diff(
@@ -112,16 +181,29 @@ def units_from_diff(
     base_ref: str,
     head_ref: str = "HEAD",
     include_dirty: bool = True,
+    known_dirty_fingerprints: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     diff = list_changed_paths(workspace, base_ref=base_ref, head_ref=head_ref)
     if not diff.get("ok"):
-        return {**diff, "units": [], "skipped_paths": [], "dirty_paths": []}
-    paths = list(diff.get("paths") or [])
+        return {
+            **diff,
+            "units": [],
+            "skipped_paths": [],
+            "dirty_paths": [],
+            "dirty_skipped_same_as_last": [],
+        }
+    # 已提交变更（不含工作区脏文件）
+    committed = list(diff.get("paths") or [])
+    paths = list(committed)
     dirty_paths: list[str] = []
+    dirty_skipped: list[str] = []
     if include_dirty:
         dirty = list_dirty_paths(workspace)
         if dirty.get("ok"):
-            dirty_paths = list(dirty.get("paths") or [])
+            raw_dirty = list(dirty.get("paths") or [])
+            dirty_paths, dirty_skipped = filter_unchanged_dirty_paths(
+                workspace, raw_dirty, known_dirty_fingerprints
+            )
             for p in dirty_paths:
                 if p not in paths:
                     paths.append(p)
@@ -135,7 +217,9 @@ def units_from_diff(
     return {
         **diff,
         "paths": paths,
+        "committed_paths": committed,
         "dirty_paths": dirty_paths,
+        "dirty_skipped_same_as_last": dirty_skipped,
         "units": [u.to_dict() for u in units],
         "unit_objs": units,
         "skipped_paths": skipped[:80],
