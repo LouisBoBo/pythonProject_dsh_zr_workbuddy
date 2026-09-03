@@ -420,24 +420,50 @@ window.__ModuleLoader__.load({
       else hostEl.appendChild(card);
     }
     function renderCdDeployConfirm(card, ui) {
-      const fullUnits = Array.isArray(ui.units_full) ? ui.units_full : [];
-      const incrUnits = Array.isArray(ui.units_incremental) ? ui.units_incremental : (Array.isArray(ui.units) ? ui.units : []);
-      const forceFull = !!ui.force_full;
-      const allowOverride = ui.allow_mode_override !== false && !forceFull;
-      let mode = ui.mode === "incremental" && !forceFull ? "incremental" : "full";
-      if (forceFull) mode = "full";
-      const reasons = Array.isArray(ui.reasons) ? ui.reasons : ((ui.policy && ui.policy.reasons) || []);
-      const warnings = Array.isArray(ui.warnings) ? ui.warnings : ((ui.policy && ui.policy.warnings) || []);
-      const changed = Array.isArray(ui.changed_paths) ? ui.changed_paths : [];
+      var fullUnits = Array.isArray(ui.units_full) ? ui.units_full : [];
+      var incrUnits = Array.isArray(ui.units_incremental)
+        ? ui.units_incremental
+        : Array.isArray(ui.units)
+          ? ui.units
+          : [];
+      var policy = ui.policy && typeof ui.policy === "object" ? ui.policy : {};
+      // 多信号锁定：强制全量时绝不展示可改增量
+      var forceFull = !!(
+        ui.force_full ||
+        policy.force_full ||
+        ui.locked_mode === "full" ||
+        (String(ui.summary || "").indexOf("强制全量") === 0)
+      );
+      var allowOverride = !forceFull && ui.allow_mode_override === true;
+      var mode = "full";
+      if (!forceFull && ui.mode === "incremental") mode = "incremental";
+      var reasons = Array.isArray(ui.reasons)
+        ? ui.reasons
+        : Array.isArray(policy.reasons)
+          ? policy.reasons
+          : [];
+      var warnings = Array.isArray(ui.warnings)
+        ? ui.warnings
+        : Array.isArray(policy.warnings)
+          ? policy.warnings
+          : [];
+      var changed = Array.isArray(ui.changed_paths) ? ui.changed_paths : [];
 
       function unitsFor(m) {
         return m === "full" ? fullUnits : incrUnits;
       }
       function paint() {
-        const units = unitsFor(mode);
-        const badge = forceFull ? "强制全量" : (mode === "full" ? (ui.recommend_full ? "建议全量" : "全量部署") : "增量部署");
-        const goLabel = mode === "full" ? "确认全量部署" : "确认增量部署";
-        let html =
+        if (forceFull) mode = "full";
+        var units = unitsFor(mode);
+        var badge = forceFull
+          ? "强制全量"
+          : mode === "full"
+            ? ui.recommend_full
+              ? "建议全量"
+              : "全量部署"
+            : "增量部署";
+        var goLabel = mode === "full" ? "确认全量部署" : "确认增量部署";
+        var html =
           '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">' +
           badge +
           '</span><span class="cd-hint">' +
@@ -448,139 +474,204 @@ window.__ModuleLoader__.load({
           esc(ui.desc || "") +
           "</p></div>";
         if (reasons.length) {
-          html += '<div class="cd-label" style="padding:0 14px 4px">判定原因</div><ul style="margin:0 14px 8px;padding-left:18px;font-size:12px;color:#374151">';
-          reasons.slice(0, 6).forEach((r) => { html += "<li>" + esc(r) + "</li>"; });
+          html +=
+            '<div class="cd-label" style="padding:0 14px 4px">判定原因</div><ul style="margin:0 14px 8px;padding-left:18px;font-size:12px;color:#374151">';
+          reasons.slice(0, 6).forEach(function (r) {
+            html += "<li>" + esc(r) + "</li>";
+          });
           html += "</ul>";
         }
         if (warnings.length) {
-          html += '<p class="cd-desc" style="padding:0 14px 8px;color:#b45309">' + esc(warnings.slice(0, 3).join("；")) + "</p>";
+          html +=
+            '<p class="cd-desc" style="padding:0 14px 8px;color:#b45309">' +
+            esc(warnings.slice(0, 3).join("；")) +
+            "</p>";
         }
         html += '<div class="cd-label" style="padding:0 14px 4px">部署方式</div>';
-        if (forceFull) {
-          html += '<p class="cd-desc" style="padding:0 14px 8px">已<strong>强制全量</strong>，不可改选增量（防漏发）。</p>';
+        if (forceFull || !allowOverride) {
+          // 强制或不允许覆盖：只展示锁定结果，不出现可点的增量选项
+          html +=
+            '<p class="cd-desc" style="padding:0 14px 8px"><strong>' +
+            (mode === "full" ? "全量部署（已锁定）" : "增量部署（已锁定）") +
+            "</strong>" +
+            (forceFull ? " — 不可改选增量，防止漏发。" : "。") +
+            "</p>";
         } else {
           html +=
-            '<div class="radio-row" style="padding:0 14px 8px;display:flex;gap:16px;flex-wrap:wrap">' +
-            '<label style="font-size:13px"><input type="radio" name="cdp-mode" value="full"' +
+            '<div style="padding:0 14px 8px;display:flex;gap:16px;flex-wrap:wrap">' +
+            '<label style="font-size:13px"><input type="radio" name="cdp-mode-' +
+            esc(ui.job_id || "x") +
+            '" value="full"' +
             (mode === "full" ? " checked" : "") +
-            (allowOverride ? "" : " disabled") +
             "> 全量部署</label>" +
-            '<label style="font-size:13px"><input type="radio" name="cdp-mode" value="incremental"' +
+            '<label style="font-size:13px"><input type="radio" name="cdp-mode-' +
+            esc(ui.job_id || "x") +
+            '" value="incremental"' +
             (mode === "incremental" ? " checked" : "") +
-            (allowOverride ? "" : " disabled") +
             "> 增量部署</label></div>";
           if (ui.recommend_full && mode === "full") {
-            html += '<p class="cd-desc" style="padding:0 14px 8px">策略建议全量；改增量需自担漏发风险。</p>';
+            html +=
+              '<p class="cd-desc" style="padding:0 14px 8px">策略建议全量；改增量需自担漏发风险。</p>';
           }
         }
         html +=
           '<div class="cd-chosen">' +
-          '<div class="cd-chosen-row"><span class="cd-k">环境</span><span class="cd-v">' + esc(ui.env || "") + "</span></div>" +
-          '<div class="cd-chosen-row"><span class="cd-k">主机</span><span class="cd-v">' + esc(ui.ssh_host || "") + "</span></div>" +
-          '<div class="cd-chosen-row"><span class="cd-k">远端</span><span class="cd-v">' + esc(ui.ssh_app_path || "") + "</span></div>" +
+          '<div class="cd-chosen-row"><span class="cd-k">环境</span><span class="cd-v">' +
+          esc(ui.env || "") +
+          "</span></div>" +
+          '<div class="cd-chosen-row"><span class="cd-k">主机</span><span class="cd-v">' +
+          esc(ui.ssh_host || "") +
+          "</span></div>" +
+          '<div class="cd-chosen-row"><span class="cd-k">远端</span><span class="cd-v">' +
+          esc(ui.ssh_app_path || "") +
+          "</span></div>" +
           '<div class="cd-chosen-row"><span class="cd-k">对比</span><span class="cd-v">' +
-          esc((ui.last_deploy_sha ? ui.last_deploy_sha.slice(0, 10) : (ui.base_ref || "?")) + " → " + (ui.head_ref || "HEAD")) +
+          esc(
+            (ui.last_deploy_sha ? String(ui.last_deploy_sha).slice(0, 10) : ui.base_ref || "?") +
+              " → " +
+              (ui.head_ref || "HEAD")
+          ) +
           "</span></div></div>";
         if (changed.length && mode === "incremental") {
-          html += '<div class="cd-label" style="padding:0 14px">变更文件（节选）</div><div style="padding:4px 14px 8px;max-height:100px;overflow:auto;font-size:11px;color:#6b7280">';
-          changed.slice(0, 20).forEach((p) => { html += "<div>" + esc(p) + "</div>"; });
+          html +=
+            '<div class="cd-label" style="padding:0 14px">变更文件（节选）</div><div style="padding:4px 14px 8px;max-height:100px;overflow:auto;font-size:11px;color:#6b7280">';
+          changed.slice(0, 20).forEach(function (p) {
+            html += "<div>" + esc(p) + "</div>";
+          });
           if (changed.length > 20) html += "<div>…共 " + changed.length + " 个</div>";
           html += "</div>";
         }
         if (mode === "full") {
-          html += '<div class="cd-label" style="padding:0 14px">将同步全部单元（' + units.length + "）</div>";
-          html += '<div class="cdp-units" style="padding:4px 14px 8px;max-height:160px;overflow:auto">';
-          units.forEach((u) => {
-            html += '<div style="font-size:12px;margin:3px 0"><b>' + esc(u.id || "") + "</b> · " + esc(u.label || "") + "</div>";
+          html +=
+            '<div class="cd-label" style="padding:0 14px">将同步全部单元（' +
+            units.length +
+            "）</div>";
+          html +=
+            '<div class="cdp-units" style="padding:4px 14px 8px;max-height:160px;overflow:auto">';
+          units.forEach(function (u) {
+            html +=
+              '<div style="font-size:12px;margin:3px 0"><b>' +
+              esc(u.id || "") +
+              "</b> · " +
+              esc(u.label || "") +
+              "</div>";
           });
           html += "</div>";
         } else {
           html += '<div class="cd-label" style="padding:0 14px">自动选中的增量单元</div>';
           if (!units.length) {
-            html += '<p class="cd-desc" style="padding:0 14px">无增量单元；确认不会 rsync，或改选全量</p>';
+            html +=
+              '<p class="cd-desc" style="padding:0 14px">无增量单元；确认不会 rsync</p>';
           } else {
             html += '<div class="cdp-units" style="padding:4px 14px 8px">';
-            units.forEach((u) => {
+            units.forEach(function (u) {
               html +=
-                '<label style="display:flex;gap:8px;align-items:flex-start;margin:4px 0;font-size:12px">' +
-                '<input type="checkbox" class="cdp-unit" data-id="' + esc(u.id || "") + '" checked disabled>' +
-                "<span><b>" + esc(u.id || "") + "</b> · " + esc(u.label || "") +
-                "<br><span class=\"cd-hint\">" + esc(u.action_hint || u.action || "") + "</span></span></label>";
+                '<div style="font-size:12px;margin:4px 0"><b>' +
+                esc(u.id || "") +
+                "</b> · " +
+                esc(u.label || "") +
+                "<br><span class=\"cd-hint\">" +
+                esc(u.action_hint || u.action || "") +
+                "</span></div>";
             });
             html += "</div>";
           }
         }
-        const canGo = ui.can_deploy !== false && (mode === "full" ? fullUnits.length > 0 : units.length > 0);
+        var canGo =
+          ui.can_deploy !== false &&
+          (mode === "full" ? fullUnits.length > 0 : units.length > 0);
         html +=
           '<p class="cd-error" style="display:none"></p><div class="cd-actions">' +
           '<button type="button" class="cd-btn cd-cancel">取消</button>' +
-          '<button type="button" class="cd-btn confirm cd-go"' + (canGo ? "" : " disabled") + ">" + goLabel + "</button></div>";
+          '<button type="button" class="cd-btn confirm cd-go"' +
+          (canGo ? "" : " disabled") +
+          ">" +
+          goLabel +
+          "</button></div>";
         card.innerHTML = html;
         bind();
       }
       function bind() {
-        const errEl = card.querySelector(".cd-error");
-        const goBtn = card.querySelector(".cd-go");
-        card.querySelectorAll('input[name="cdp-mode"]').forEach((el) => {
-          el.onchange = () => {
-            if (el.checked && allowOverride) {
-              mode = el.value === "full" ? "full" : "incremental";
-              paint();
-            }
-          };
-        });
-        card.querySelector(".cd-cancel").onclick = async () => {
+        var errEl = card.querySelector(".cd-error");
+        var goBtn = card.querySelector(".cd-go");
+        var radioName = "cdp-mode-" + (ui.job_id || "x");
+        Array.prototype.forEach.call(
+          card.querySelectorAll('input[name="' + radioName + '"]'),
+          function (el) {
+            el.onchange = function () {
+              if (el.checked && allowOverride && !forceFull) {
+                mode = el.value === "full" ? "full" : "incremental";
+                paint();
+              }
+            };
+          }
+        );
+        card.querySelector(".cd-cancel").onclick = async function () {
           try {
-            fetch(engineBase() + "/api/code-deploy/confirm", {
+            await fetch(engineBase() + "/api/code-deploy/confirm", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ job_id: ui.job_id, decision: "reject" }),
             });
           } catch (_) {}
-          card.classList.add("done");
+          card.className = "cd-card cdp-card done";
           card.innerHTML =
             '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">部署</span></div>' +
             '<p class="cd-summary">已取消，未执行同步</p></div>';
         };
-        goBtn.onclick = async () => {
-          const ids = mode === "full"
-            ? fullUnits.map((u) => u.id).filter(Boolean)
-            : incrUnits.map((u) => u.id).filter(Boolean);
+        goBtn.onclick = async function () {
+          var sendMode = forceFull ? "full" : mode;
+          var ids =
+            sendMode === "full"
+              ? fullUnits.map(function (u) { return u.id; }).filter(Boolean)
+              : incrUnits.map(function (u) { return u.id; }).filter(Boolean);
           if (!ids.length) {
             errEl.style.display = "";
-            errEl.textContent = mode === "full" ? "全量目录为空" : "无增量单元可部署";
+            errEl.textContent =
+              sendMode === "full" ? "全量目录为空" : "无增量单元可部署";
             return;
           }
           goBtn.disabled = true;
           goBtn.textContent = "部署中…";
           errEl.style.display = "none";
           try {
-            const r = await fetch(engineBase() + "/api/code-deploy/confirm", {
+            var r = await fetch(engineBase() + "/api/code-deploy/confirm", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ job_id: ui.job_id, decision: "approve", mode, unit_ids: ids }),
+              body: JSON.stringify({
+                job_id: ui.job_id,
+                decision: "approve",
+                mode: sendMode,
+                unit_ids: ids,
+              }),
             });
-            const d = await r.json();
-            const host = card.closest(".assist") || card.parentElement;
-            const replyEl = host && host.querySelector(".reply");
-            card.classList.add("done");
+            var d = await r.json();
+            var host = card.closest(".assist") || card.parentElement;
+            var replyEl = host && host.querySelector(".reply");
+            card.className = "cd-card cdp-card done";
             if (!d.ok) {
               card.innerHTML =
                 '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">部署失败</span></div>' +
-                '<p class="cd-summary">' + esc(d.detail || d.reply || "失败") + "</p></div>";
+                '<p class="cd-summary">' +
+                esc(d.detail || d.reply || "失败") +
+                "</p></div>";
               if (replyEl) replyEl.innerHTML = md(d.reply || d.detail || "部署失败");
               return;
             }
-            const doneMode = d.mode === "full" || mode === "full" ? "全量" : "增量";
+            var doneMode = d.mode === "full" || sendMode === "full" ? "全量" : "增量";
             card.innerHTML =
               '<div class="cd-done-banner ok" style="margin:12px"><span class="cd-done-icon">✓</span>' +
-              "<div><strong>" + doneMode + "部署完成</strong> · " + esc((d.units || ids).join("、")) + "</div></div>";
+              "<div><strong>" +
+              doneMode +
+              "部署完成</strong> · " +
+              esc((d.units || ids).join("、")) +
+              "</div></div>";
             if (replyEl) replyEl.innerHTML = md(d.reply || "部署完成");
           } catch (e) {
             errEl.style.display = "";
             errEl.textContent = "请求失败：" + e.message;
             goBtn.disabled = false;
-            goBtn.textContent = mode === "full" ? "确认全量部署" : "确认增量部署";
+            goBtn.textContent = sendMode === "full" ? "确认全量部署" : "确认增量部署";
           }
         };
       }
