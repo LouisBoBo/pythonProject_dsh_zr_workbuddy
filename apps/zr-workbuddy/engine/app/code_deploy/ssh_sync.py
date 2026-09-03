@@ -174,26 +174,66 @@ def deploy_units_ssh(
             if unit.action == "sync_engine_restart":
                 need_engine = True
             elif unit.action == "sync_bridge_reinstall":
-                need_bridge = True
+                # 共享机默认只 rsync bridge 文件，绝不自动重装/重启 DSH
+                if getattr(cfg, "auto_restart_bridge", False):
+                    need_bridge = True
+                else:
+                    urec["logs"].append(
+                        "已同步 bridge；跳过 DSH 重装（auto_restart_bridge=false）"
+                    )
         results.append(urec)
         if not urec["ok"]:
             return {"ok": False, "error": f"单元 {unit.id} 失败：{urec.get('error')}", "results": results}
 
-    if need_engine:
+    # 远端运行时隔离：专用端口 + venv，禁止抢占/误杀已有服务
+    prep = _ensure_remote_engine_runtime(ssh, app, cfg, log=_log)
+    if not prep.get("ok"):
+        return {
+            "ok": False,
+            "error": prep.get("error") or "远端运行时准备失败",
+            "results": results,
+            "engine_restart": False,
+        }
+    results.append({"id": "_remote_runtime", "ok": True, "logs": prep.get("logs") or []})
+
+    if need_engine and getattr(cfg, "auto_restart_engine", True):
         remote = f"cd {shlex.quote(app)} && scripts/engine.sh zr-workbuddy restart"
-        _log("远端重启引擎 …")
-        c3, o3, e3 = _run(ssh + [f"bash -lc {shlex.quote(remote)}"], timeout=180)
+        _log(f"远端重启本应用引擎（端口 {prep.get('port')}，不影响其它服务）…")
+        c3, o3, e3 = _run(ssh + [f"bash -lc {shlex.quote(remote)}"], timeout=240)
         if c3 != 0:
             return {
                 "ok": False,
-                "error": f"引擎重启失败：{(e3 or o3)[:300]}",
+                "error": f"引擎重启失败：{(e3 or o3)[:400]}",
                 "results": results,
                 "engine_restart": False,
             }
         results.append({"id": "_engine_restart", "ok": True, "logs": ["engine restart ok"]})
+    elif need_engine:
+        _log("已同步引擎文件；按配置跳过远端引擎重启（auto_restart_engine=false）")
+        results.append({"id": "_engine_restart", "ok": True, "logs": ["skipped by config"]})
 
-    if need_bridge:
-        remote = f"cd {shlex.quote(app)} && scripts/plugin.sh --app zr-workbuddy install bridge --restart"
+    if need_bridge and getattr(cfg, "auto_restart_bridge", False):
+        # 二次保险：远端没有完整 DSH profile 时禁止 install（避免半残 .dsh / 误伤）
+        prof_check = (
+            "test -f \"$HOME/.dsh/profiles/web/package.json\" "
+            "&& echo dsh_ok || echo dsh_missing"
+        )
+        _c_p, o_p, _e_p = _run(ssh + [prof_check], timeout=30)
+        if "dsh_ok" not in (o_p or ""):
+            return {
+                "ok": False,
+                "error": (
+                    "已拒绝远端 bridge 重装：未找到 "
+                    "~/.dsh/profiles/web/package.json。"
+                    "共享机请保持 auto_restart_bridge=false，只同步文件+重启本应用引擎。"
+                ),
+                "results": results,
+                "bridge_restart": False,
+            }
+        remote = (
+            f"cd {shlex.quote(app)} && "
+            "scripts/plugin.sh --app zr-workbuddy install bridge --restart"
+        )
         _log("远端重装 bridge / 重启 DSH …")
         c4, o4, e4 = _run(ssh + [f"bash -lc {shlex.quote(remote)}"], timeout=300)
         if c4 != 0:
@@ -204,6 +244,12 @@ def deploy_units_ssh(
                 "bridge_restart": False,
             }
         results.append({"id": "_bridge_restart", "ok": True, "logs": ["bridge reinstall ok"]})
+    elif need_bridge:
+        _log(
+            "已同步 bridge 文件；共享机默认不重启 DSH（auto_restart_bridge=false），"
+            "以免影响其它服务"
+        )
+        results.append({"id": "_bridge_restart", "ok": True, "logs": ["skipped by config"]})
 
     health: dict[str, Any] | None = None
     if (cfg.health_url or "").strip():
@@ -214,11 +260,106 @@ def deploy_units_ssh(
         "ok": True,
         "error": "",
         "results": results,
-        "engine_restart": need_engine,
-        "bridge_restart": need_bridge,
+        "engine_restart": bool(need_engine and getattr(cfg, "auto_restart_engine", True)),
+        "bridge_restart": bool(need_bridge and getattr(cfg, "auto_restart_bridge", False)),
         "health": health,
         "units": [u.id for u in units],
+        "remote_engine_port": prep.get("port"),
     }
+
+
+def _resolve_remote_port(cfg: CodeDeployConfig) -> int:
+    port = int(getattr(cfg, "remote_engine_port", None) or 8091)
+    u = (cfg.health_url or "").strip()
+    if u.startswith(("http://", "https://")):
+        try:
+            from urllib.parse import urlparse
+
+            p = urlparse(u).port
+            if p:
+                port = int(p)
+        except Exception:  # noqa: BLE001
+            pass
+    if port in {80, 443, 22, 3306, 8000, 8009, 888, 8888}:
+        return 8091
+    return port
+
+
+def _ensure_remote_engine_runtime(
+    ssh: list[str],
+    app: str,
+    cfg: CodeDeployConfig,
+    *,
+    log: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """在远端准备独立 runtime.yaml + venv；不触碰其它项目目录与端口。"""
+
+    def _log(msg: str) -> None:
+        if log:
+            log(msg)
+
+    port = _resolve_remote_port(cfg)
+    logs: list[str] = []
+    eng = f"{app.rstrip('/')}/apps/zr-workbuddy/engine"
+    venv_py = f"{eng}/.venv/bin/python"
+    req = f"{eng}/requirements.txt"
+    runtime = f"{eng}/config/runtime.yaml"
+
+    runtime_body = (
+        "# 远端专用（由 code-deploy 生成，勿与本机 8000 混用）\n"
+        "server:\n"
+        "  host: 127.0.0.1\n"
+        f"  port: {port}\n"
+        f"python: {eng}/.venv/bin/python\n"
+    )
+    write_rt = (
+        f"mkdir -p {shlex.quote(eng + '/config')} {shlex.quote(eng + '/data')} && "
+        f"cat > {shlex.quote(runtime)} <<'EOF'\n{runtime_body}EOF"
+    )
+    _log(f"写入远端 runtime.yaml → 127.0.0.1:{port}")
+    c1, o1, e1 = _run(ssh + [write_rt], timeout=40)
+    if c1 != 0:
+        return {"ok": False, "error": f"写 runtime 失败：{(e1 or o1)[:200]}", "logs": logs}
+    logs.append(f"runtime port={port}")
+
+    precheck = (
+        f"pid=$(lsof -tiTCP:{port} -sTCP:LISTEN 2>/dev/null | head -1); "
+        f"if [ -n \"$pid\" ]; then cmd=$(ps -p \"$pid\" -o args= 2>/dev/null || true); "
+        f"case \"$cmd\" in *\"{eng}\"*|*\"/apps/zr-workbuddy/engine\"*) echo ours ;; "
+        f"*) echo foreign:$pid:$cmd ;; esac; else echo free; fi"
+    )
+    c2, o2, _e2 = _run(ssh + [precheck], timeout=40)
+    token = (o2 or "").strip().splitlines()[-1] if (o2 or "").strip() else ""
+    if token.startswith("foreign:"):
+        return {
+            "ok": False,
+            "error": (
+                f"远端端口 {port} 已被其它服务占用（{token}）。"
+                "请改 code_deploy.remote_engine_port / health_url，禁止抢占。"
+            ),
+            "logs": logs,
+        }
+    logs.append(f"port precheck={token or 'unknown'}")
+
+    setup = (
+        f"set -e; "
+        f"if [ ! -x {shlex.quote(venv_py)} ]; then "
+        f"python3 -m venv {shlex.quote(eng + '/.venv')}; fi; "
+        f"{shlex.quote(venv_py)} -m pip install -q -U pip; "
+        f"if [ -f {shlex.quote(req)} ]; then "
+        f"{shlex.quote(venv_py)} -m pip install -q -r {shlex.quote(req)}; fi; "
+        f"{shlex.quote(venv_py)} -c 'import fastapi,uvicorn'"
+    )
+    _log("远端准备独立 .venv 并安装依赖 …")
+    c3, o3, e3 = _run(ssh + [f"bash -lc {shlex.quote(setup)}"], timeout=600)
+    if c3 != 0:
+        return {
+            "ok": False,
+            "error": f"远端 venv/依赖失败：{(e3 or o3)[:400]}",
+            "logs": logs,
+        }
+    logs.append("venv ok")
+    return {"ok": True, "port": port, "logs": logs, "error": ""}
 
 
 def _is_blocked_health_host(host: str) -> bool:

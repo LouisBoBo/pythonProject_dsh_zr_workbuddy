@@ -30,6 +30,11 @@ class CodeDeployConfig:
     ssh_app_path: str = ""  # 远端仓库根（与本仓布局一致）
     health_url: str = ""
     health_timeout_sec: int = 8
+    # 远端引擎端口：必须避开服务器已有服务（如本机 8000 常被其它项目占用）
+    remote_engine_port: int = 8091
+    auto_restart_engine: bool = True
+    # 共享机默认不重装/重启 DSH，避免影响其它面板与服务
+    auto_restart_bridge: bool = False
     rsync_excludes: list[str] = field(
         default_factory=lambda: [
             "__pycache__",
@@ -83,6 +88,9 @@ def get_config() -> CodeDeployConfig:
         ssh_app_path=str(raw.get("ssh_app_path") or "").strip(),
         health_url=str(raw.get("health_url") or "").strip(),
         health_timeout_sec=max(2, min(int(raw.get("health_timeout_sec") or 8), 60)),
+        remote_engine_port=max(1, min(int(raw.get("remote_engine_port") or 8091), 65535)),
+        auto_restart_engine=bool(raw.get("auto_restart_engine", True)),
+        auto_restart_bridge=bool(raw.get("auto_restart_bridge", False)),
     )
     if isinstance(excludes, list) and excludes:
         cfg.rsync_excludes = [str(x).strip() for x in excludes if str(x).strip()]

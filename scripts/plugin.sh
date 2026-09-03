@@ -406,6 +406,12 @@ PY
 
   install)
     [ $# -ge 1 ] || { echo "用法: plugin.sh --app $APP install bridge|all [--restart]"; exit 1; }
+    # 无完整 DSH profile 时拒绝：避免在共享机造半残 ~/.dsh 或误改其它服务环境
+    if [ ! -f "$PROFILE/package.json" ]; then
+      echo "拒绝安装：缺少 DSH profile → $PROFILE/package.json" >&2
+      echo "本机请先按 DSH 文档初始化 profiles/web；共享部署机请勿跑 install bridge。" >&2
+      exit 1
+    fi
     backup_profile
     for id in $(resolve_ids "$@"); do
       install_one "$id"

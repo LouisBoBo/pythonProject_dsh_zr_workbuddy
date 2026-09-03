@@ -44,6 +44,80 @@ listening_pid() {
   lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true
 }
 
+# uvicorn 常不带 ENGINE 绝对路径，用进程 cwd 二次确认（macOS lsof / Linux pwdx）
+proc_cwd() {
+  local pid="$1"
+  if command -v pwdx >/dev/null 2>&1; then
+    pwdx "$pid" 2>/dev/null | awk '{print $2; exit}'
+  else
+    lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
+  fi
+}
+
+# 是否为本应用引擎进程（禁止把同机其它服务当成本应用）
+is_our_engine_pid() {
+  local pid="$1" cmd cwd
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  cmd="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+  case "$cmd" in
+    *"$ENGINE"*|*"/apps/$APP/engine"*) return 0 ;;
+  esac
+  # 典型：Python -m uvicorn app.main:app --host … --port …
+  case "$cmd" in
+    *uvicorn*app.main:app*)
+      cwd="$(proc_cwd "$pid")"
+      [ -n "$cwd" ] || return 1
+      case "$cwd" in
+        "$ENGINE"|"$ENGINE"/*) return 0 ;;
+      esac
+      ;;
+  esac
+  return 1
+}
+
+# 本应用引擎 PID：优先 pid 文件，再扫监听端口
+our_engine_pid() {
+  local pid
+  if [ -f "$PID_FILE" ]; then
+    pid="$(tr -d ' \n' <"$PID_FILE" 2>/dev/null || true)"
+    if is_our_engine_pid "$pid"; then
+      echo "$pid"
+      return 0
+    fi
+  fi
+  for pid in $(listening_pid); do
+    if is_our_engine_pid "$pid"; then
+      echo "$pid"
+      return 0
+    fi
+  done
+  return 1
+}
+
+port_holder_is_ours() {
+  local pid
+  pid="$(listening_pid)"
+  [ -n "$pid" ] || return 1
+  for p in $pid; do
+    is_our_engine_pid "$p" && return 0
+  done
+  return 1
+}
+
+foreign_port_holder() {
+  local pid
+  pid="$(listening_pid)"
+  [ -n "$pid" ] || return 1
+  for p in $pid; do
+    if ! is_our_engine_pid "$p"; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
 sync_bridge_client() {
   local CLIENT="$ROOT/apps/$APP/plugins/mes-bridge/lib/client.js"
   [ -f "$CLIENT" ] || CLIENT="$ROOT/apps/$APP/plugins/${APP}-bridge/lib/client.js"
@@ -85,39 +159,59 @@ do_status() {
 }
 
 do_stop() {
-  local pid left
-  pid="$(listening_pid)"
-  if [ -z "$pid" ]; then
-    echo "引擎未在监听 :$PORT"
-    rm -f "$PID_FILE"
-    return 0
+  local pid left foreign
+  foreign="$(foreign_port_holder || true)"
+  if [ -n "$foreign" ] && ! port_holder_is_ours; then
+    echo "拒绝停止：端口 $PORT 被其它服务占用 PID=$foreign（cmdline 非本应用引擎）。" >&2
+    echo "请改 runtime.yaml 端口，勿杀已有服务。" >&2
+    return 1
   fi
-  echo "停止引擎 PID=$pid (:$PORT)…"
+  pid="$(our_engine_pid || true)"
+  if [ -z "$pid" ]; then
+    pid="$(listening_pid)"
+    if [ -n "$pid" ] && port_holder_is_ours; then
+      :
+    else
+      echo "引擎未在监听 :$PORT（或监听者非本应用）"
+      rm -f "$PID_FILE"
+      return 0
+    fi
+  fi
+  echo "停止本应用引擎 PID=$pid (:$PORT)…"
   kill $pid 2>/dev/null || true
   for _ in 1 2 3 4 5; do
     sleep 0.4
-    [ -z "$(listening_pid)" ] && break
+    our_engine_pid >/dev/null 2>&1 || break
   done
-  left="$(listening_pid)"
-  if [ -n "$left" ]; then
+  if our_engine_pid >/dev/null 2>&1; then
+    left="$(our_engine_pid)"
     echo "优雅退出失败，强制 kill -9 PID=$left…"
     kill -9 $left 2>/dev/null || true
     sleep 0.5
   fi
-  left="$(listening_pid)"
   rm -f "$PID_FILE"
-  if [ -n "$left" ]; then
-    echo "停止失败：端口 $PORT 仍被 PID=$left 占用（可能无权限杀进程）" >&2
+  if our_engine_pid >/dev/null 2>&1; then
+    echo "停止失败：本应用引擎仍在运行" >&2
     return 1
   fi
-  echo "已停止"
+  foreign="$(foreign_port_holder || true)"
+  if [ -n "$foreign" ]; then
+    echo "已停止本应用引擎；端口 $PORT 仍被其它服务 PID=$foreign 占用（未触碰）。"
+  else
+    echo "已停止"
+  fi
 }
 
 do_start_fg() {
   sync_bridge_client
-  if [ -n "$(listening_pid)" ]; then
-    echo "端口 $PORT 已在监听 → http://$HOST:$PORT"
+  if port_holder_is_ours && health_ok; then
+    echo "引擎已就绪 → http://$HOST:$PORT"
     exit 0
+  fi
+  foreign="$(foreign_port_holder || true)"
+  if [ -n "$foreign" ]; then
+    echo "拒绝启动：端口 $PORT 已被其它服务占用 PID=$foreign。请改 runtime.yaml，勿抢占。" >&2
+    exit 1
   fi
   mkdir -p "$ENGINE/data"
   cd "$ENGINE"
@@ -127,13 +221,18 @@ do_start_fg() {
 
 do_start_bg() {
   sync_bridge_client
-  if health_ok; then
+  if port_holder_is_ours && health_ok; then
     echo "引擎已就绪 → http://$HOST:$PORT"
     return 0
   fi
-  if [ -n "$(listening_pid)" ]; then
-    echo "端口占用但健康检查失败，尝试重启…"
-    do_stop
+  foreign="$(foreign_port_holder || true)"
+  if [ -n "$foreign" ]; then
+    echo "拒绝启动：端口 $PORT 已被其它服务占用 PID=$foreign。请改 runtime.yaml，勿抢占。" >&2
+    return 1
+  fi
+  if [ -n "$(listening_pid)" ] && port_holder_is_ours; then
+    echo "端口占用但健康检查失败，尝试重启本应用引擎…"
+    do_stop || true
   fi
   mkdir -p "$ENGINE/data"
   cd "$ENGINE"
@@ -141,10 +240,10 @@ do_start_bg() {
   nohup "$PYTHON" -m uvicorn app.main:app --host "$HOST" --port "$PORT" \
     >>"$LOG_FILE" 2>&1 &
   echo $! >"$PID_FILE"
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    sleep 0.4
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    sleep 0.5
     if health_ok; then
-      echo "引擎就绪 PID=$(listening_pid)"
+      echo "引擎就绪 PID=$(our_engine_pid || listening_pid)"
       return 0
     fi
   done

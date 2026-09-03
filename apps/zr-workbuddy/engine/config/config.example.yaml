@@ -56,13 +56,16 @@ code_deploy:
   enabled: false
   provider: local_ssh
   default_ref: HEAD              # 默认分支 / tag
-  health_url: ""                 # 部署后探活，如 http://主机:端口/
+  health_url: ""                 # 部署后探活，如 http://主机:8091/
   default_workspace: ""          # 本地项目路径（git 根）
   ssh_host: ""
   ssh_user: ""
   ssh_key_path: ""               # 如 ~/.ssh/id_ed25519（只填路径）
   ssh_app_path: ""               # 远端目录，如 /www/wwwroot/DSH-ZR-WorkBuddy
   ssh_port: 22
+  remote_engine_port: 8091       # 远端引擎端口，禁止用 8000（易与其它项目冲突）
+  auto_restart_engine: true      # 仅重启本应用引擎（校验 PID/cmdline）
+  auto_restart_bridge: false     # 共享机默认 false，避免重启整台 DSH 影响其它服务
   # 以下有默认值，界面不展示
   default_env: staging
   env_whitelist: [staging]
