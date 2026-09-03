@@ -144,3 +144,14 @@ def latest_blocked_job(
         if jws_n == ws_norm or jws == ws:
             return row
     return None
+
+
+def latest_done_workspace(data_dir: Path) -> str:
+    """最近一次成功提交（status=done）的工程路径。"""
+    for row in list_jobs(data_dir, limit=40):
+        if row.get("status") != "done":
+            continue
+        ws = str(row.get("workspace") or "").strip()
+        if ws:
+            return ws
+    return ""

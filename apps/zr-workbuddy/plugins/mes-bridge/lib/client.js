@@ -118,6 +118,8 @@ window.__ModuleLoader__.load({
       "#dshMesMsgs .cd-chosen{padding:6px 12px 10px;font-size:12px}" +
       "#dshMesMsgs .cd-chosen-row{display:flex;gap:8px;margin:3px 0}" +
       "#dshMesMsgs .cd-k{color:#9ca3af;min-width:56px;flex:none}" +
+      "#dshMesMsgs .cc-ok-files{margin:0;padding:0 12px 10px 28px;max-height:200px;overflow:auto;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#374151}" +
+      "#dshMesMsgs .cc-ok-files li{margin:2px 0;word-break:break-all}" +
       "#dshMesMsgs .cd-path-row{display:flex;gap:8px;align-items:stretch}" +
       "#dshMesMsgs .cd-path-row .cd-input{flex:1;min-width:0}" +
       "#dshMesMsgs .cd-btn.browse{flex:none;white-space:nowrap}" +
@@ -549,6 +551,58 @@ window.__ModuleLoader__.load({
           });
       };
     }
+    function ccSuccessCardHtml(info) {
+      info = info || {};
+      var ws = info.workspace || "";
+      var proj = String(ws).replace(/\\/g, "/").replace(/\/+$/, "");
+      var slash = proj.lastIndexOf("/");
+      proj = slash >= 0 ? proj.slice(slash + 1) : proj || "—";
+      var files = Array.isArray(info.files) ? info.files : [];
+      var title = info.title || "已提交";
+      var html =
+        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交完成</span></div>' +
+        '<p class="cd-summary">' +
+        esc(title) +
+        "</p></div>" +
+        '<div class="cd-done-banner ok" style="margin:0 12px 8px"><span class="cd-done-icon">✓</span><div><strong>' +
+        esc(title) +
+        "</strong></div></div>" +
+        '<div class="cd-chosen">' +
+        '<div class="cd-chosen-row"><span class="cd-k">项目</span><span class="cd-v">' +
+        esc(proj) +
+        "</span></div>" +
+        '<div class="cd-chosen-row"><span class="cd-k">路径</span><span class="cd-v">' +
+        esc(ws) +
+        "</span></div>" +
+        '<div class="cd-chosen-row"><span class="cd-k">分支</span><span class="cd-v">' +
+        esc(info.branch || "—") +
+        "</span></div>" +
+        '<div class="cd-chosen-row"><span class="cd-k">Commit</span><span class="cd-v">' +
+        esc(info.commit || "—") +
+        "</span></div>" +
+        '<div class="cd-chosen-row"><span class="cd-k">远程</span><span class="cd-v">' +
+        esc(info.remote || "—") +
+        "</span></div>" +
+        '<div class="cd-chosen-row"><span class="cd-k">文件</span><span class="cd-v">' +
+        files.length +
+        " 个</span></div>";
+      if (info.message) {
+        html +=
+          '<div class="cd-chosen-row"><span class="cd-k">说明</span><span class="cd-v">' +
+          esc(info.message) +
+          "</span></div>";
+      }
+      html += "</div>";
+      if (files.length) {
+        html += '<div class="cd-label" style="padding:0 12px 4px">本批文件</div><ul class="cc-ok-files">';
+        for (var i = 0; i < Math.min(files.length, 30); i++) {
+          html += "<li>" + esc(String(files[i])) + "</li>";
+        }
+        if (files.length > 30) html += "<li>…另有 " + (files.length - 30) + " 个</li>";
+        html += "</ul>";
+      }
+      return html;
+    }
     function renderCcConfirm(card, ui, hooks) {
       hooks = hooks || {};
       var files = Array.isArray(ui.files) ? ui.files : [];
@@ -637,13 +691,39 @@ window.__ModuleLoader__.load({
               return;
             }
             var cr = d.commit_result || {};
-            card.innerHTML =
-              '<div class="cd-done-banner ok" style="margin:12px"><span class="cd-done-icon">✓</span>' +
-              "<div><strong>已提交</strong> · " + esc(cr.branch || "") +
-              (cr.commit ? " · " + esc(cr.commit) : "") +
-              (push ? (cr.push && cr.push.ok ? " · 已推送" : " · 未推送") : " · 未推送") +
-              "</div></div>";
-            if (replyEl) replyEl.innerHTML = md(d.reply || "提交完成");
+            var remoteLabel = !push
+              ? "仅本地提交"
+              : cr.push && cr.push.ok
+                ? "已推送"
+                : "未推送";
+            var title = push && cr.push && cr.push.ok ? "已提交并推送" : "已提交";
+            card.innerHTML = ccSuccessCardHtml({
+              title: title,
+              workspace: ui.workspace || "",
+              branch: cr.branch || ui.work_branch || "",
+              commit: cr.commit || "",
+              remote: remoteLabel,
+              files: Array.isArray(cr.files) && cr.files.length ? cr.files : files,
+              message: message,
+            });
+            if (replyEl) {
+              replyEl.innerHTML = md(
+                "**" +
+                  title +
+                  "** · `" +
+                  (cr.branch || ui.work_branch || "") +
+                  "`\n- 项目：`" +
+                  String(ui.workspace || "")
+                    .replace(/\\/g, "/")
+                    .split("/")
+                    .filter(Boolean)
+                    .pop() +
+                  "`\n- 文件：" +
+                  (Array.isArray(cr.files) && cr.files.length ? cr.files.length : files.length) +
+                  " 个 · " +
+                  remoteLabel
+              );
+            }
             if (typeof hooks.onCommitted === "function") hooks.onCommitted(d);
           })
           .catch(function (e) {

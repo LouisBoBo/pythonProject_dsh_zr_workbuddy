@@ -37,6 +37,16 @@ def _base(**extra: Any) -> dict[str, Any]:
     return out
 
 
+def _last_commit_workspace() -> str:
+    try:
+        from .ops import default_data_dir
+        from .store import latest_done_workspace
+
+        return latest_done_workspace(default_data_dir()) or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _suggestions(cfg_default: str) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -48,6 +58,7 @@ def _suggestions(cfg_default: str) -> list[dict[str, str]]:
         seen.add(p)
         out.append({"path": p, "label": label})
 
+    add(_last_commit_workspace(), "上次提交")
     add(cfg_default, "提交常用")
     try:
         from ..code_dev.config import get_config as get_code_dev_config
@@ -66,7 +77,8 @@ def _suggestions(cfg_default: str) -> list[dict[str, str]]:
 
 def build_pick_ui(*, workspace: str = "") -> dict[str, Any]:
     cfg = get_config()
-    ws = (workspace or "").strip() or (cfg.default_workspace or "").strip()
+    last_ws = _last_commit_workspace()
+    ws = (workspace or "").strip() or last_ws or (cfg.default_workspace or "").strip()
     br = preview_commit_branch(ws)
     return {
         "kind": "pick",

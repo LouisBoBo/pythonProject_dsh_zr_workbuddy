@@ -167,6 +167,8 @@
   .cd-chosen-row { display: flex; gap: 10px; margin: 4px 0; }
   .cd-k { color: var(--text-2); min-width: 72px; flex: none; }
   .cd-v { word-break: break-word; }
+  .cc-ok-files { margin: 0; padding: 0 14px 12px 30px; max-height: 200px; overflow: auto; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .cc-ok-files li { margin: 2px 0; word-break: break-all; }
   .cd-path-row { display: flex; gap: 8px; align-items: stretch; }
   .cd-path-row .cd-input { flex: 1; min-width: 0; }
   .cd-btn.browse { flex: none; white-space: nowrap; }
@@ -1529,6 +1531,58 @@ function renderCcBlocked(card, ui) {
     };
   }
 }
+function ccSuccessCardHtml(info) {
+  info = info || {};
+  const ws = info.workspace || "";
+  let proj = String(ws).replace(/\\/g, "/").replace(/\/+$/, "");
+  const slash = proj.lastIndexOf("/");
+  proj = slash >= 0 ? proj.slice(slash + 1) : proj || "—";
+  const files = Array.isArray(info.files) ? info.files : [];
+  const title = info.title || "已提交";
+  let html =
+    '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交完成</span></div>' +
+    '<p class="cd-summary">' +
+    esc(title) +
+    "</p></div>" +
+    '<div class="cd-done-banner ok" style="margin:0 14px 8px"><span class="cd-done-icon">✓</span><div><strong>' +
+    esc(title) +
+    "</strong></div></div>" +
+    '<div class="cd-chosen">' +
+    '<div class="cd-chosen-row"><span class="cd-k">项目</span><span class="cd-v">' +
+    esc(proj) +
+    "</span></div>" +
+    '<div class="cd-chosen-row"><span class="cd-k">路径</span><span class="cd-v">' +
+    esc(ws) +
+    "</span></div>" +
+    '<div class="cd-chosen-row"><span class="cd-k">分支</span><span class="cd-v">' +
+    esc(info.branch || "—") +
+    "</span></div>" +
+    '<div class="cd-chosen-row"><span class="cd-k">Commit</span><span class="cd-v">' +
+    esc(info.commit || "—") +
+    "</span></div>" +
+    '<div class="cd-chosen-row"><span class="cd-k">远程</span><span class="cd-v">' +
+    esc(info.remote || "—") +
+    "</span></div>" +
+    '<div class="cd-chosen-row"><span class="cd-k">文件</span><span class="cd-v">' +
+    files.length +
+    " 个</span></div>";
+  if (info.message) {
+    html +=
+      '<div class="cd-chosen-row"><span class="cd-k">说明</span><span class="cd-v">' +
+      esc(info.message) +
+      "</span></div>";
+  }
+  html += "</div>";
+  if (files.length) {
+    html += '<div class="cd-label" style="padding:0 14px 4px">本批文件</div><ul class="cc-ok-files">';
+    for (let i = 0; i < Math.min(files.length, 30); i++) {
+      html += "<li>" + esc(String(files[i])) + "</li>";
+    }
+    if (files.length > 30) html += "<li>…另有 " + (files.length - 30) + " 个</li>";
+    html += "</ul>";
+  }
+  return html;
+}
 function renderCcPushRetryCard(card, d) {
   const cr = d.commit_result || {};
   const push = cr.push || {};
@@ -1681,13 +1735,29 @@ function renderCcConfirm(card, ui) {
         return;
       }
       const cr = d.commit_result || {};
-      card.innerHTML =
-        '<div class="cd-done-banner ok" style="margin:12px"><span class="cd-done-icon">✓</span>' +
-        "<div><strong>已提交</strong> · " + esc(cr.branch || "") +
-        (cr.commit ? " · " + esc(cr.commit) : "") +
-        (push ? (cr.push && cr.push.ok ? " · 已推送" : " · 未推送") : " · 未推送") +
-        "</div></div>";
-      if (replyEl) replyEl.innerHTML = md(d.reply || "提交完成");
+      const remoteLabel = !push ? "仅本地提交" : cr.push && cr.push.ok ? "已推送" : "未推送";
+      const title = push && cr.push && cr.push.ok ? "已提交并推送" : "已提交";
+      const fileList = Array.isArray(cr.files) && cr.files.length ? cr.files : files;
+      card.innerHTML = ccSuccessCardHtml({
+        title,
+        workspace: ui.workspace || "",
+        branch: cr.branch || ui.work_branch || "",
+        commit: cr.commit || "",
+        remote: remoteLabel,
+        files: fileList,
+        message,
+      });
+      if (replyEl) {
+        const proj =
+          String(ui.workspace || "")
+            .replace(/\\/g, "/")
+            .split("/")
+            .filter(Boolean)
+            .pop() || "—";
+        replyEl.innerHTML = md(
+          `**${title}** · \`${cr.branch || ui.work_branch || ""}\`\n- 项目：\`${proj}\`\n- 文件：${fileList.length} 个 · ${remoteLabel}`
+        );
+      }
     } catch (e) {
       errEl.style.display = "";
       errEl.textContent = "请求失败：" + e.message;
