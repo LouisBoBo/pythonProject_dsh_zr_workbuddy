@@ -244,6 +244,7 @@ def prepare(
         "skipped_paths": mapped.get("skipped_paths") or [],
         "ssh_host": cfg.ssh_host,
         "ssh_app_path": cfg.ssh_app_path,
+        "health_url": (cfg.health_url or "").strip(),
         "provider": cfg.provider,
         "can_deploy": can_deploy,
         "gate_detail": avail.get("detail") or "",
@@ -346,6 +347,8 @@ def _build_confirm_ui(job: dict[str, Any]) -> dict[str, Any]:
         "warnings": warnings,
         "ssh_host": job.get("ssh_host") or "",
         "ssh_app_path": job.get("ssh_app_path") or "",
+        "health_url": job.get("health_url") or "",
+        "access_url": job.get("health_url") or "",
         "can_deploy": bool(job.get("can_deploy")),
         "hint": "系统已按上次部署记录自动判定；人只确认触发",
         "summary": f"{badge} · {job.get('env')}",
@@ -486,19 +489,68 @@ def confirm(
             deploy_result=result,
             logs=logs[-80:],
         )
-        ids = "、".join(u.id for u in selected)
-        reply = f"已{mode_label}部署：**{ids}** → `{cfg.ssh_host}:{cfg.ssh_app_path}`"
+        unit_ids = [u.id for u in selected]
+        ids = "、".join(unit_ids)
+        access = (cfg.health_url or "").strip() or str(job.get("health_url") or "").strip()
+        remote = f"{cfg.ssh_host}:{cfg.ssh_app_path}"
+        engine_port = result.get("remote_engine_port")
+        health = result.get("health") or {}
+        actions: list[str] = []
         if result.get("engine_restart"):
-            reply += "；已重启引擎"
+            actions.append("已重启引擎" + (f"（:{engine_port}）" if engine_port else ""))
         if result.get("bridge_restart"):
-            reply += "；已重装 bridge"
+            actions.append("已重装 bridge")
+        if not actions:
+            actions.append("仅同步文件（未重启 DSH）")
+        title = f"{mode_label}部署完成"
+        reply_lines = [
+            f"**{title}**",
+            f"- 访问地址：{access or '（未配置 health_url）'}",
+            f"- 远端：`{remote}`",
+            f"- 环境：`{job.get('env') or cfg.default_env}`",
+            f"- 单元（{len(unit_ids)}）：{ids}",
+            f"- 动作：{'；'.join(actions)}",
+        ]
+        head_sha = str(job.get("head_sha") or "").strip()
+        if head_sha:
+            reply_lines.append(f"- 基线 SHA：`{head_sha[:12]}`")
+        if isinstance(health, dict) and health.get("ok") is not None:
+            reply_lines.append(
+                f"- 探活：{'通过' if health.get('ok') else '未通过'}（{health.get('status') or health.get('detail') or ''}）"
+            )
+        reply = "\n".join(reply_lines)
+        success = {
+            "title": title,
+            "mode": deploy_mode,
+            "mode_label": mode_label,
+            "env": job.get("env") or cfg.default_env,
+            "ssh_host": cfg.ssh_host,
+            "ssh_app_path": cfg.ssh_app_path,
+            "remote": remote,
+            "access_url": access,
+            "health_url": access,
+            "units": unit_ids,
+            "engine_restart": bool(result.get("engine_restart")),
+            "bridge_restart": bool(result.get("bridge_restart")),
+            "remote_engine_port": engine_port,
+            "head_sha": head_sha,
+            "actions": actions,
+            "health": health if isinstance(health, dict) else None,
+        }
         return {
             "ok": True,
             "job_id": job_id,
             "status": "done",
             "mode": deploy_mode,
             "deploy_result": result,
-            "units": [u.id for u in selected],
+            "deploy_success": success,
+            "units": unit_ids,
+            "access_url": access,
+            "health_url": access,
+            "ssh_host": cfg.ssh_host,
+            "ssh_app_path": cfg.ssh_app_path,
+            "env": success["env"],
+            "head_sha": head_sha,
             "reply": reply,
             "detail": reply,
             "logs": logs[-40:],

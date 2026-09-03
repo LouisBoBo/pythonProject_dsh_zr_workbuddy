@@ -1557,14 +1557,43 @@ function renderCdDeployConfirm(card, ui) {
           return;
         }
         var doneMode = d.mode === "full" || sendMode === "full" ? "全量" : "增量";
-        card.innerHTML =
-          '<div class="cd-done-banner ok" style="margin:12px"><span class="cd-done-icon">✓</span>' +
-          "<div><strong>" +
-          doneMode +
-          "部署完成</strong> · " +
-          esc((d.units || ids).join("、")) +
-          "</div></div>";
-        if (replyEl) replyEl.innerHTML = md(d.reply || "部署完成");
+        var succ = d.deploy_success || {};
+        var unitList = Array.isArray(d.units)
+          ? d.units
+          : Array.isArray(succ.units)
+            ? succ.units
+            : ids;
+        card.innerHTML = cdpSuccessCardHtml({
+          title: succ.title || doneMode + "部署完成",
+          mode: d.mode || sendMode,
+          mode_label: succ.mode_label || doneMode,
+          env: succ.env || d.env || ui.env || "",
+          ssh_host: succ.ssh_host || d.ssh_host || ui.ssh_host || "",
+          ssh_app_path: succ.ssh_app_path || d.ssh_app_path || ui.ssh_app_path || "",
+          remote: succ.remote || "",
+          access_url:
+            succ.access_url ||
+            d.access_url ||
+            d.health_url ||
+            ui.access_url ||
+            ui.health_url ||
+            "",
+          units: unitList,
+          engine_restart: !!(succ.engine_restart != null
+            ? succ.engine_restart
+            : (d.deploy_result && d.deploy_result.engine_restart)),
+          bridge_restart: !!(succ.bridge_restart != null
+            ? succ.bridge_restart
+            : (d.deploy_result && d.deploy_result.bridge_restart)),
+          remote_engine_port:
+            succ.remote_engine_port ||
+            (d.deploy_result && d.deploy_result.remote_engine_port) ||
+            "",
+          head_sha: succ.head_sha || d.head_sha || ui.head_sha || "",
+          actions: succ.actions || [],
+          health: succ.health || (d.deploy_result && d.deploy_result.health) || null,
+        });
+        if (replyEl) replyEl.innerHTML = md(d.reply || succ.title || "部署完成");
       } catch (e) {
         errEl.style.display = "";
         errEl.textContent = "请求失败：" + e.message;
@@ -1912,6 +1941,94 @@ function ccSuccessCardHtml(info) {
       html += "<li>" + esc(String(files[i])) + "</li>";
     }
     if (files.length > 30) html += "<li>…另有 " + (files.length - 30) + " 个</li>";
+    html += "</ul>";
+  }
+  return html;
+}
+function cdpAccessLinkHtml(url) {
+  const u = String(url || "").trim();
+  if (!u) return esc("（未配置访问地址）");
+  if (/^https?:\/\//i.test(u)) {
+    return (
+      '<a href="' +
+      esc(u) +
+      '" target="_blank" rel="noopener noreferrer" style="color:#047857;text-decoration:underline;word-break:break-all">' +
+      esc(u) +
+      "</a>"
+    );
+  }
+  return esc(u);
+}
+function cdpSuccessCardHtml(info) {
+  info = info || {};
+  const units = Array.isArray(info.units) ? info.units : [];
+  const title = info.title || ((info.mode_label || "部署") + "完成");
+  const remote =
+    info.remote ||
+    ((info.ssh_host || "") + (info.ssh_app_path ? ":" + info.ssh_app_path : ""));
+  const access = info.access_url || info.health_url || "";
+  let actions = Array.isArray(info.actions) ? info.actions.slice() : [];
+  if (!actions.length) {
+    if (info.engine_restart) {
+      actions.push(
+        "已重启引擎" +
+          (info.remote_engine_port ? "（:" + info.remote_engine_port + "）" : "")
+      );
+    }
+    if (info.bridge_restart) actions.push("已重装 bridge");
+    if (!actions.length) actions.push("仅同步文件（未重启 DSH）");
+  }
+  const health = info.health || null;
+  let html =
+    '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">部署完成</span></div>' +
+    '<p class="cd-summary">' +
+    esc(title) +
+    "</p></div>" +
+    '<div class="cd-done-banner ok" style="margin:0 14px 8px"><span class="cd-done-icon">✓</span><div><strong>' +
+    esc(title) +
+    "</strong></div></div>" +
+    '<div class="cd-chosen">' +
+    '<div class="cd-chosen-row"><span class="cd-k">访问地址</span><span class="cd-v">' +
+    cdpAccessLinkHtml(access) +
+    "</span></div>" +
+    '<div class="cd-chosen-row"><span class="cd-k">远端</span><span class="cd-v">' +
+    esc(remote || "—") +
+    "</span></div>" +
+    '<div class="cd-chosen-row"><span class="cd-k">环境</span><span class="cd-v">' +
+    esc(info.env || "—") +
+    "</span></div>" +
+    '<div class="cd-chosen-row"><span class="cd-k">方式</span><span class="cd-v">' +
+    esc(info.mode_label || (info.mode === "full" ? "全量" : "增量")) +
+    "</span></div>" +
+    '<div class="cd-chosen-row"><span class="cd-k">动作</span><span class="cd-v">' +
+    esc(actions.join("；")) +
+    "</span></div>";
+  if (info.head_sha) {
+    html +=
+      '<div class="cd-chosen-row"><span class="cd-k">基线 SHA</span><span class="cd-v">' +
+      esc(String(info.head_sha).slice(0, 12)) +
+      "</span></div>";
+  }
+  if (health && health.ok != null) {
+    html +=
+      '<div class="cd-chosen-row"><span class="cd-k">探活</span><span class="cd-v">' +
+      esc(
+        (health.ok ? "通过" : "未通过") +
+          (health.status != null ? " · HTTP " + health.status : "")
+      ) +
+      "</span></div>";
+  }
+  html +=
+    '<div class="cd-chosen-row"><span class="cd-k">单元</span><span class="cd-v">' +
+    units.length +
+    " 个</span></div></div>";
+  if (units.length) {
+    html +=
+      '<div class="cd-label" style="padding:0 14px 4px">已部署单元</div><ul class="cc-ok-files">';
+    for (let i = 0; i < Math.min(units.length, 40); i++) {
+      html += "<li>" + esc(String(units[i])) + "</li>";
+    }
+    if (units.length > 40) html += "<li>…另有 " + (units.length - 40) + " 个</li>";
     html += "</ul>";
   }
   return html;
