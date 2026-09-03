@@ -49,3 +49,22 @@ code_commit:
   use_skill_review: true
   allow_blocked: false     # 调试用：强制允许带阻断项提交
   max_files: 80
+
+# P1 自动化部署（仅本机 SSH；境外 Git 不用 Actions）
+# 功能插件 code-deploy 须启用；界面只暴露下列核心项
+code_deploy:
+  enabled: false
+  provider: local_ssh
+  default_ref: HEAD              # 默认分支 / tag
+  health_url: ""                 # 部署后探活，如 http://主机:端口/
+  default_workspace: ""          # 本地项目路径（git 根）
+  ssh_host: ""
+  ssh_user: ""
+  ssh_key_path: ""               # 如 ~/.ssh/id_ed25519（只填路径）
+  ssh_app_path: ""               # 远端目录，如 /www/wwwroot/DSH-ZR-WorkBuddy
+  ssh_port: 22
+  # 以下有默认值，界面不展示
+  default_env: staging
+  env_whitelist: [staging]
+  allow_production: false
+  health_timeout_sec: 8

@@ -735,6 +735,125 @@ def api_code_commit_push_retry(body: CodeCommitConfirmBody):
     return out
 
 
+class CodeDeployPrepareBody(BaseModel):
+    workspace: str = Field("", description="本机 Git 仓库根；空则用配置 default_workspace")
+    env: str = Field("", description="环境名，默认 staging")
+    base_ref: str = Field("", description="对比基线；空则上次成功部署 SHA 或 HEAD~1")
+    head_ref: str = Field("HEAD", description="对比终点，默认 HEAD")
+    mode: str = Field(
+        "auto",
+        description="auto|full|incremental；auto=无上次部署记录则全量，否则增量",
+    )
+    unit_ids: list[str] | None = Field(
+        None,
+        description="强制指定单元，如 feature:code-commit、feature:code-dev、engine、bridge",
+    )
+
+
+class CodeDeployConfirmBody(BaseModel):
+    job_id: str = Field(..., description="prepare 返回的 job_id")
+    decision: str = Field("approve", description="approve|reject")
+    mode: str = Field(
+        "",
+        description="full|incremental；空则用 prepare 时默认（首次多为 full）",
+    )
+    unit_ids: list[str] | None = Field(
+        None,
+        description="确认时勾选的单元；全量且不传则同步全部目录单元",
+    )
+
+
+@app.get(
+    "/api/code-deploy/status",
+    tags=["按插件增量部署"],
+    summary="部署车道就绪状态",
+    description="返回部署开关、环境白名单、SSH 是否配齐等；不执行同步。",
+)
+def api_code_deploy_status():
+    from . import plugins_store
+    from .code_deploy import status as code_deploy_status
+    from .code_deploy.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="按插件增量部署")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    return code_deploy_status()
+
+
+@app.post(
+    "/api/code-deploy/prepare",
+    tags=["按插件增量部署"],
+    summary="准备全量或增量部署确认卡",
+    description="零副作用：首次默认全量（全部插件+引擎/bridge）；增量按 git diff 映射单元。"
+    "不执行 rsync。",
+)
+def api_code_deploy_prepare(body: CodeDeployPrepareBody):
+    from . import plugins_store
+    from .code_deploy import prepare
+    from .code_deploy.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="按插件增量部署")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    out = prepare(
+        body.workspace or "",
+        env=body.env or "",
+        base_ref=body.base_ref or "",
+        head_ref=body.head_ref or "HEAD",
+        unit_ids=body.unit_ids,
+        mode=body.mode or "auto",
+    )
+    if not out.get("ok") and not out.get("job_id"):
+        return JSONResponse(out, status_code=400)
+    return out
+
+
+@app.post(
+    "/api/code-deploy/confirm",
+    tags=["按插件增量部署"],
+    summary="人确认后全量或按勾选单元 SSH/rsync",
+    description="仅 HITL：mode=full 同步目录全量单元；mode=incremental 仅同步勾选单元。"
+    "模型不得代调本接口完成部署。",
+)
+def api_code_deploy_confirm(body: CodeDeployConfirmBody):
+    from . import plugins_store
+    from .code_deploy import confirm
+    from .code_deploy.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="按插件增量部署")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    out = confirm(
+        body.job_id or "",
+        decision=body.decision or "approve",
+        unit_ids=body.unit_ids,
+        mode=(body.mode or None),
+    )
+    if not out.get("ok"):
+        return JSONResponse(out, status_code=400)
+    return out
+
+
+@app.get(
+    "/api/code-deploy/jobs/{job_id}",
+    tags=["按插件增量部署"],
+    summary="查询部署任务",
+    description="按 job_id 读取部署任务状态与结果。",
+)
+def api_code_deploy_job(job_id: str):
+    from . import plugins_store
+    from .code_deploy import get_job
+    from .code_deploy.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="按插件增量部署")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    out = get_job(job_id)
+    if not out.get("ok"):
+        return JSONResponse(out, status_code=404)
+    return out
+
+
 def _read_runtime_yaml() -> dict:
     from .runtime_conf import read_runtime
     return read_runtime()

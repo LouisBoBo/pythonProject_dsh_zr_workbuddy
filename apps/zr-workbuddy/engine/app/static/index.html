@@ -663,6 +663,67 @@
             </div>
           </div>
 
+          <div class="card">
+            <h2><span class="step">8</span> 自动化部署</h2>
+            <div class="body">
+              <div class="hint" style="margin-bottom:10px;">
+                境外 Git 无法走 Actions 时用<strong>本机 SSH</strong>：按插件增量 rsync 到预发。对话「部署到预发」→ 勾选插件 → 人确认。
+                <b>模型不会执行 SSH</b>；须保持功能插件 <b>code-deploy</b> 开启。
+              </div>
+              <div class="check-row">
+                <input type="checkbox" id="code_deploy_enabled">
+                <label for="code_deploy_enabled">开启自动化部署</label>
+              </div>
+              <div style="margin-top:12px;">
+                <label>部署执行方式</label>
+                <div class="radio-row" style="margin-top:6px;">
+                  <label><input type="radio" name="code_deploy_provider" value="local_ssh" checked> 本机 SSH</label>
+                </div>
+                <p class="hint" style="margin-top:6px;">本机按插件打包后 SSH/rsync 到预发（适合境外 Git / CI 连不上国内机）。</p>
+              </div>
+              <div class="grid" style="margin-top:12px;">
+                <div>
+                  <label>默认分支 / tag</label>
+                  <input type="text" id="code_deploy_default_ref" placeholder="示例：hebo 或 staging" autocomplete="off">
+                </div>
+                <div class="full">
+                  <label>部署后访问地址（探活）</label>
+                  <input type="text" id="code_deploy_health_url" placeholder="例如 http://主机:端口/" autocomplete="off">
+                </div>
+              </div>
+              <h3 style="margin:16px 0 8px;font-size:14px;">本机 SSH</h3>
+              <div class="grid">
+                <div class="full">
+                  <label>本地项目路径</label>
+                  <input type="text" id="code_deploy_default_workspace" placeholder="本机 git 仓库根路径" autocomplete="off">
+                </div>
+                <div>
+                  <label>主机</label>
+                  <input type="text" id="code_deploy_ssh_host" placeholder="例如 175.178.238.31" autocomplete="off">
+                </div>
+                <div>
+                  <label>用户</label>
+                  <input type="text" id="code_deploy_ssh_user" placeholder="例如 deploy" autocomplete="off">
+                </div>
+                <div class="full">
+                  <label>私钥路径</label>
+                  <input type="text" id="code_deploy_ssh_key_path" placeholder="~/.ssh/id_ed25519" autocomplete="off">
+                </div>
+                <div class="full">
+                  <label>远端目录</label>
+                  <input type="text" id="code_deploy_ssh_app_path" placeholder="/www/wwwroot/DSH-ZR-WorkBuddy" autocomplete="off">
+                </div>
+                <div>
+                  <label>SSH 端口</label>
+                  <input type="text" id="code_deploy_ssh_port" placeholder="22" autocomplete="off">
+                </div>
+              </div>
+              <div class="hint" style="margin-top:8px;">改完点「保存全部配置」。未确认前不会 rsync；按插件增量，不发整仓。</div>
+              <div style="margin-top: 12px;"><button class="btn ghost" id="btnTestCodeDeploy">测试部署就绪</button></div>
+              <div class="test-result" id="codeDeployTestResult"></div>
+            </div>
+          </div>
+
         </div>
       </div>
       <div class="save-bar">
@@ -1032,6 +1093,7 @@ function dsLabel(ds) {
   if (ds === "code_dev") return "本机写码";
   if (ds === "code_review") return "本机审码";
   if (ds === "code_commit") return "人触发提交";
+  if (ds === "code_deploy") return "按插件增量部署";
   return "演示数据";
 }
 function srcLabel(ev) {
@@ -1040,6 +1102,7 @@ function srcLabel(ev) {
   if (ev.source === "code_dev") return "写码顾问";
   if (ev.source === "code_review") return "审码顾问";
   if (ev.source === "code_commit") return "提交顾问";
+  if (ev.source === "code_deploy") return "部署顾问";
   if (ev.source === "disabled") return "已停用";
   if (ev.llm_tried) return "LLM 未连通 → 规则引擎";
   return "规则引擎";
@@ -1047,12 +1110,13 @@ function srcLabel(ev) {
 function formatChatMeta(ev) {
   const srcTxt = srcLabel(ev);
   const ds = dsLabel(ev.data_source);
-  const metricMap = { options: "需求选项", propose: "写码确认", code_dev: "本机写码", code_review: "本机审码", code_commit: "人触发提交", need_path: "待填路径", pick: "选目录确认", confirm: "确认提交", done: "审码完成", run: "本机审码", disabled: "已停用" };
+  const metricMap = { options: "需求选项", propose: "写码确认", code_dev: "本机写码", code_review: "本机审码", code_commit: "人触发提交", code_deploy: "增量部署", need_path: "待填路径", pick: "选目录确认", confirm: "确认提交", done: "审码完成", run: "本机审码", disabled: "已停用", blocked: "未就绪" };
   const it = ev.intent || {};
-  let intentTxt = it.type === "code_review" ? "本机审码" : it.type === "code_commit" ? "人触发提交" : "本机写码";
+  let intentTxt = it.type === "code_review" ? "本机审码" : it.type === "code_commit" ? "人触发提交" : it.type === "code_deploy" ? "增量部署" : "本机写码";
   if (it.type === "code_dev" && it.metric) intentTxt = metricMap[it.metric] || String(it.metric);
   else if (it.type === "code_review" && it.metric) intentTxt = metricMap[it.metric] || "本机审码";
   else if (it.type === "code_commit" && it.metric) intentTxt = metricMap[it.metric] || "人触发提交";
+  else if (it.type === "code_deploy" && it.metric) intentTxt = metricMap[it.metric] || "增量部署";
   else if (it.type) intentTxt = metricMap[it.type] || String(it.type);
   return "来源：" + srcTxt + (ev.llm_error ? "（" + ev.llm_error + "）" : "") +
     " · 数据源：" + ds + " · 意图：" + intentTxt;
@@ -1241,6 +1305,184 @@ function mountCodeCommitUi(hostEl, ui, beforeMetaEl) {
   else return;
   if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
   else hostEl.appendChild(card);
+}
+function mountCodeDeployUi(hostEl, ui, beforeMetaEl) {
+  if (!hostEl || !ui || !ui.kind) return;
+  const old = hostEl.querySelector(".cd-card.cdp-card");
+  if (old) old.remove();
+  const card = document.createElement("div");
+  card.className = "cd-card cdp-card";
+  if (ui.kind === "confirm") renderCdDeployConfirm(card, ui);
+  else return;
+  if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
+  else hostEl.appendChild(card);
+}
+function renderCdDeployConfirm(card, ui) {
+  const fullUnits = Array.isArray(ui.units_full) ? ui.units_full : [];
+  const incrUnits = Array.isArray(ui.units_incremental) ? ui.units_incremental : (Array.isArray(ui.units) ? ui.units : []);
+  const forceFull = !!ui.force_full;
+  const allowOverride = ui.allow_mode_override !== false && !forceFull;
+  let mode = ui.mode === "incremental" && !forceFull ? "incremental" : "full";
+  if (forceFull) mode = "full";
+  const reasons = Array.isArray(ui.reasons) ? ui.reasons : ((ui.policy && ui.policy.reasons) || []);
+  const warnings = Array.isArray(ui.warnings) ? ui.warnings : ((ui.policy && ui.policy.warnings) || []);
+  const changed = Array.isArray(ui.changed_paths) ? ui.changed_paths : [];
+
+  function unitsFor(m) {
+    return m === "full" ? fullUnits : incrUnits;
+  }
+  function paint() {
+    const units = unitsFor(mode);
+    const badge = forceFull ? "强制全量" : (mode === "full" ? (ui.recommend_full ? "建议全量" : "全量部署") : "增量部署");
+    const goLabel = mode === "full" ? "确认全量部署" : "确认增量部署";
+    let html =
+      '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">' +
+      badge +
+      '</span><span class="cd-hint">' +
+      esc(ui.hint || "系统已自动判定；人只确认") +
+      '</span></div><p class="cd-summary">' +
+      esc(ui.summary || "") +
+      '</p><p class="cd-desc">' +
+      esc(ui.desc || "") +
+      "</p></div>";
+    if (reasons.length) {
+      html += '<div class="cd-label" style="padding:0 14px 4px">判定原因</div><ul style="margin:0 14px 8px;padding-left:18px;font-size:12px;color:#374151">';
+      reasons.slice(0, 6).forEach((r) => { html += "<li>" + esc(r) + "</li>"; });
+      html += "</ul>";
+    }
+    if (warnings.length) {
+      html += '<p class="cd-desc" style="padding:0 14px 8px;color:#b45309">' + esc(warnings.slice(0, 3).join("；")) + "</p>";
+    }
+    html += '<div class="cd-label" style="padding:0 14px 4px">部署方式</div>';
+    if (forceFull) {
+      html += '<p class="cd-desc" style="padding:0 14px 8px">已<strong>强制全量</strong>，不可改选增量（防漏发）。</p>';
+    } else {
+      html +=
+        '<div class="radio-row" style="padding:0 14px 8px;display:flex;gap:16px;flex-wrap:wrap">' +
+        '<label style="font-size:13px"><input type="radio" name="cdp-mode" value="full"' +
+        (mode === "full" ? " checked" : "") +
+        (allowOverride ? "" : " disabled") +
+        "> 全量部署</label>" +
+        '<label style="font-size:13px"><input type="radio" name="cdp-mode" value="incremental"' +
+        (mode === "incremental" ? " checked" : "") +
+        (allowOverride ? "" : " disabled") +
+        "> 增量部署</label></div>";
+      if (ui.recommend_full && mode === "full") {
+        html += '<p class="cd-desc" style="padding:0 14px 8px">策略建议全量；改增量需自担漏发风险。</p>';
+      }
+    }
+    html +=
+      '<div class="cd-chosen">' +
+      '<div class="cd-chosen-row"><span class="cd-k">环境</span><span class="cd-v">' + esc(ui.env || "") + "</span></div>" +
+      '<div class="cd-chosen-row"><span class="cd-k">主机</span><span class="cd-v">' + esc(ui.ssh_host || "") + "</span></div>" +
+      '<div class="cd-chosen-row"><span class="cd-k">远端</span><span class="cd-v">' + esc(ui.ssh_app_path || "") + "</span></div>" +
+      '<div class="cd-chosen-row"><span class="cd-k">对比</span><span class="cd-v">' +
+      esc((ui.last_deploy_sha ? ui.last_deploy_sha.slice(0, 10) : (ui.base_ref || "?")) + " → " + (ui.head_ref || "HEAD")) +
+      "</span></div></div>";
+    if (changed.length && mode === "incremental") {
+      html += '<div class="cd-label" style="padding:0 14px">变更文件（节选）</div><div style="padding:4px 14px 8px;max-height:100px;overflow:auto;font-size:11px;color:#6b7280">';
+      changed.slice(0, 20).forEach((p) => { html += "<div>" + esc(p) + "</div>"; });
+      if (changed.length > 20) html += "<div>…共 " + changed.length + " 个</div>";
+      html += "</div>";
+    }
+    if (mode === "full") {
+      html += '<div class="cd-label" style="padding:0 14px">将同步全部单元（' + units.length + "）</div>";
+      html += '<div class="cdp-units" style="padding:4px 14px 8px;max-height:160px;overflow:auto">';
+      units.forEach((u) => {
+        html += '<div style="font-size:12px;margin:3px 0"><b>' + esc(u.id || "") + "</b> · " + esc(u.label || "") + "</div>";
+      });
+      html += "</div>";
+    } else {
+      html += '<div class="cd-label" style="padding:0 14px">自动选中的增量单元</div>';
+      if (!units.length) {
+        html += '<p class="cd-desc" style="padding:0 14px">无增量单元；确认不会 rsync，或改选全量</p>';
+      } else {
+        html += '<div class="cdp-units" style="padding:4px 14px 8px">';
+        units.forEach((u) => {
+          html +=
+            '<label style="display:flex;gap:8px;align-items:flex-start;margin:4px 0;font-size:12px">' +
+            '<input type="checkbox" class="cdp-unit" data-id="' + esc(u.id || "") + '" checked disabled>' +
+            "<span><b>" + esc(u.id || "") + "</b> · " + esc(u.label || "") +
+            "<br><span class=\"cd-hint\">" + esc(u.action_hint || u.action || "") + "</span></span></label>";
+        });
+        html += "</div>";
+      }
+    }
+    const canGo = ui.can_deploy !== false && (mode === "full" ? fullUnits.length > 0 : units.length > 0);
+    html +=
+      '<p class="cd-error" style="display:none"></p><div class="cd-actions">' +
+      '<button type="button" class="cd-btn cd-cancel">取消</button>' +
+      '<button type="button" class="cd-btn confirm cd-go"' + (canGo ? "" : " disabled") + ">" + goLabel + "</button></div>";
+    card.innerHTML = html;
+    bind();
+  }
+  function bind() {
+    const errEl = card.querySelector(".cd-error");
+    const goBtn = card.querySelector(".cd-go");
+    card.querySelectorAll('input[name="cdp-mode"]').forEach((el) => {
+      el.onchange = () => {
+        if (el.checked && allowOverride) {
+          mode = el.value === "full" ? "full" : "incremental";
+          paint();
+        }
+      };
+    });
+    card.querySelector(".cd-cancel").onclick = async () => {
+      try {
+        await fetch("/api/code-deploy/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_id: ui.job_id, decision: "reject" }),
+        });
+      } catch (_) {}
+      card.classList.add("done");
+      card.innerHTML =
+        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">部署</span></div>' +
+        '<p class="cd-summary">已取消，未执行同步</p></div>';
+    };
+    goBtn.onclick = async () => {
+      const ids = mode === "full"
+        ? fullUnits.map((u) => u.id).filter(Boolean)
+        : incrUnits.map((u) => u.id).filter(Boolean);
+      if (!ids.length) {
+        errEl.style.display = "";
+        errEl.textContent = mode === "full" ? "全量目录为空" : "无增量单元可部署";
+        return;
+      }
+      goBtn.disabled = true;
+      goBtn.textContent = "部署中…";
+      errEl.style.display = "none";
+      try {
+        const r = await fetch("/api/code-deploy/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_id: ui.job_id, decision: "approve", mode, unit_ids: ids }),
+        });
+        const d = await r.json();
+        const host = card.closest(".msg-assistant") || card.parentElement;
+        const replyEl = host && host.querySelector(".reply");
+        card.classList.add("done");
+        if (!d.ok) {
+          card.innerHTML =
+            '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">部署失败</span></div>' +
+            '<p class="cd-summary">' + esc(d.detail || d.reply || "失败") + "</p></div>";
+          if (replyEl) replyEl.innerHTML = md(d.reply || d.detail || "部署失败");
+          return;
+        }
+        const doneMode = d.mode === "full" || mode === "full" ? "全量" : "增量";
+        card.innerHTML =
+          '<div class="cd-done-banner ok" style="margin:12px"><span class="cd-done-icon">✓</span>' +
+          "<div><strong>" + doneMode + "部署完成</strong> · " + esc((d.units || ids).join("、")) + "</div></div>";
+        if (replyEl) replyEl.innerHTML = md(d.reply || "部署完成");
+      } catch (e) {
+        errEl.style.display = "";
+        errEl.textContent = "请求失败：" + e.message;
+        goBtn.disabled = false;
+        goBtn.textContent = mode === "full" ? "确认全量部署" : "确认增量部署";
+      }
+    };
+  }
+  paint();
 }
 function _ccFindingsHtml(findings, limit) {
   const list = Array.isArray(findings) ? findings : [];
@@ -2508,6 +2750,7 @@ async function send(pre) {
         }
         if (ev.code_review_ui) mountCodeReviewUi(bubble.el, ev.code_review_ui, bubble.meta);
         if (ev.code_commit_ui) mountCodeCommitUi(bubble.el, ev.code_commit_ui, bubble.meta);
+        if (ev.code_deploy_ui) mountCodeDeployUi(bubble.el, ev.code_deploy_ui, bubble.meta);
         const conv = curConv();
         if (conv && ev.code_dev_brief) conv.codeDevBrief = ev.code_dev_brief;
         if (conv) {
@@ -2517,6 +2760,7 @@ async function send(pre) {
             code_dev_ui: ev.code_dev_ui || null,
             code_review_ui: ev.code_review_ui || null,
             code_commit_ui: ev.code_commit_ui || null,
+            code_deploy_ui: ev.code_deploy_ui || null,
           });
           renderConvList();
           saveConvs();
@@ -2605,6 +2849,16 @@ function fillForm(c) {
   $("code_commit_work_branch").value = cc.work_branch || "";
   $("code_commit_remote_name").value = cc.remote_name || "origin";
   $("code_commit_default_push").checked = cc.default_push !== false;
+  const cdp = c.code_deploy || {};
+  $("code_deploy_enabled").checked = !!cdp.enabled;
+  $("code_deploy_default_ref").value = cdp.default_ref || "";
+  $("code_deploy_health_url").value = cdp.health_url || "";
+  $("code_deploy_default_workspace").value = cdp.default_workspace || "";
+  $("code_deploy_ssh_host").value = cdp.ssh_host || "";
+  $("code_deploy_ssh_user").value = cdp.ssh_user || "";
+  $("code_deploy_ssh_key_path").value = cdp.ssh_key_path || "";
+  $("code_deploy_ssh_app_path").value = cdp.ssh_app_path || "";
+  $("code_deploy_ssh_port").value = cdp.ssh_port != null ? cdp.ssh_port : 22;
   updateSummaries(c);
 }
 function syncLlmProvider() {
@@ -2677,6 +2931,22 @@ function collect() {
       use_skill_review: true,
       allow_blocked: false,
       max_files: 80,
+    },
+    code_deploy: {
+      enabled: $("code_deploy_enabled").checked,
+      provider: "local_ssh",
+      default_workspace: $("code_deploy_default_workspace").value.trim(),
+      default_ref: ($("code_deploy_default_ref").value.trim() || "HEAD"),
+      default_env: "staging",
+      env_whitelist: ["staging"],
+      allow_production: false,
+      ssh_host: $("code_deploy_ssh_host").value.trim(),
+      ssh_user: $("code_deploy_ssh_user").value.trim(),
+      ssh_port: Math.max(1, Number($("code_deploy_ssh_port").value) || 22),
+      ssh_key_path: $("code_deploy_ssh_key_path").value.trim(),
+      ssh_app_path: $("code_deploy_ssh_app_path").value.trim(),
+      health_url: $("code_deploy_health_url").value.trim(),
+      health_timeout_sec: 8,
     },
   };
 }
@@ -2881,6 +3151,23 @@ $("btnTestCodeCommit").onclick = async () => {
     el.className = "test-result " + (ready ? "ok" : "fail");
     el.textContent = (ready ? "✅ " : "⚠️ ") + (d.detail || d.reply || JSON.stringify(d));
     if (!ready) el.textContent += "（若刚改表单，请先点「保存全部配置」再测）";
+  } catch (e) {
+    el.className = "test-result fail";
+    el.textContent = "❌ 请求失败：" + e.message;
+  }
+};
+
+$("btnTestCodeDeploy").onclick = async () => {
+  const el = $("codeDeployTestResult");
+  el.className = "test-result"; el.style.display = "block";
+  el.textContent = "部署就绪检测中…";
+  try {
+    const r = await fetch("/api/code-deploy/status");
+    const d = await r.json();
+    const ready = !!(d.code_deploy && d.code_deploy.ok);
+    el.className = "test-result " + (ready ? "ok" : "fail");
+    el.textContent = (ready ? "✅ " : "⚠️ ") + (d.detail || d.reply || JSON.stringify(d));
+    if (!ready) el.textContent += "（若刚改表单，请先点「保存全部配置」并配齐 SSH 再测）";
   } catch (e) {
     el.className = "test-result fail";
     el.textContent = "❌ 请求失败：" + e.message;

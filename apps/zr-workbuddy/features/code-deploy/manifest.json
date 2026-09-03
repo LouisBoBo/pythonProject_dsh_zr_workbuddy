@@ -1,0 +1,5 @@
+{
+  "id": "code-deploy",
+  "name": "按插件增量部署",
+  "purpose": "注册 mes_code_deploy_*：Git diff → 勾选 feature/engine/bridge → 人确认后 SSH/rsync（只发改过的插件）"
+}

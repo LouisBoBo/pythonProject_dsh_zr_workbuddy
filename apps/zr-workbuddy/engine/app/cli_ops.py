@@ -18,6 +18,7 @@ FEATURE_PCB = "mes-pcb"
 FEATURE_CODE_DEV = "code-dev"
 FEATURE_CODE_REVIEW = "code-review"
 FEATURE_CODE_COMMIT = "code-commit"
+FEATURE_CODE_DEPLOY = "code-deploy"
 
 
 def _ask_disabled_chat_response() -> dict:
@@ -53,6 +54,31 @@ async def chat_stream(text: str, *, code_dev_brief: dict | None = None):
         is_code_commit_question,
         is_fix_from_gate_question,
     )
+    from .code_deploy import handle_chat_code_deploy, is_code_deploy_question
+    def _emit_code_deploy(out: dict):
+        thinking = out.get("thinking") or ""
+        events = []
+        if thinking:
+            events.append({"type": "thinking", "text": thinking})
+        if out.get("reply"):
+            events.append({"type": "reply", "delta": out["reply"]})
+        events.append(
+            {
+                "type": "done",
+                "ok": bool(out.get("ok", True)),
+                "reply": out.get("reply") or "",
+                "thinking": thinking,
+                "chart": None,
+                "table": None,
+                "note": out.get("note"),
+                "source": out.get("source") or "code_deploy",
+                "data_source": out.get("data_source") or "code_deploy",
+                "intent": out.get("intent") or {"type": "code_deploy", "metric": "", "dim": None, "chart": None},
+                "job_id": out.get("job_id"),
+                "code_deploy_ui": out.get("code_deploy_ui"),
+            }
+        )
+        return events
     def _emit_code_commit(out: dict):
         thinking = out.get("thinking") or ""
         events = []
@@ -136,6 +162,15 @@ async def chat_stream(text: str, *, code_dev_brief: dict | None = None):
             }
         )
         return events
+
+    # 按插件增量部署：优先于提交/写码（对齐 simplified）
+    if is_code_deploy_question(text):
+        if plugins_store.is_enabled(FEATURE_CODE_DEPLOY):
+            yield {"type": "status", "detail": "正在分析要部署的插件单元…"}
+        out = await handle_chat_code_deploy(text)
+        for ev in _emit_code_deploy(out):
+            yield ev
+        return
 
     # 门禁阻断 → 写码修复闭环（先于「提交代码」选目录）
     if is_fix_from_gate_question(text):
@@ -238,6 +273,14 @@ async def chat_stream(text: str, *, code_dev_brief: dict | None = None):
         yield {"type": "error", "detail": out.get("detail") or "查询失败"}
         return
     if (
+        out.get("code_deploy_ui")
+        or out.get("source") == "code_deploy"
+        or (out.get("intent") or {}).get("type") == "code_deploy"
+    ):
+        for ev in _emit_code_deploy(out):
+            yield ev
+        return
+    if (
         out.get("code_dev_ui")
         or out.get("source") == "code_dev"
         or (out.get("intent") or {}).get("type") == "code_dev"
@@ -279,7 +322,12 @@ async def chat(text: str, *, code_dev_brief: dict | None = None) -> dict:
         is_code_commit_question,
         is_fix_from_gate_question,
     )
+    from .code_deploy import handle_chat_code_deploy, is_code_deploy_question
     from .pcb_expert import chat_response, is_pcb_question, pcb_ask
+
+    # 部署优先于提交 / 审码 / 写码
+    if is_code_deploy_question(text):
+        return await handle_chat_code_deploy(text)
 
     # 提交 / 审码 / 写码：意图命中即入对应 handler（handler 内处理未启用提示），禁止再走 LLM 误分流
     if is_fix_from_gate_question(text):
@@ -314,6 +362,8 @@ async def chat(text: str, *, code_dev_brief: dict | None = None) -> dict:
         context = ("数据源：MES 实时（已连接 ERP 系统）" if mes_connected
                    else "数据源：演示数据（未连接 MES，查数据会返回演示数据）")
         r = await llm_chat(text, llm_cfg, context)
+        if r and r.get("kind") == "code_deploy":
+            return await handle_chat_code_deploy(text)
         if r and r.get("kind") == "code_dev":
             return await handle_chat_code_dev(text, client_brief=code_dev_brief)
         if r and r.get("kind") == "query" and r.get("intent"):
@@ -647,4 +697,86 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
             return blocked
         from .code_commit import push_retry as code_commit_push_retry
         return code_commit_push_retry(rest[0] if rest else "")
+    if cmd == "code-deploy-status":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_DEPLOY, capability="按插件增量部署")
+        if blocked:
+            return blocked
+        from .code_deploy import status as code_deploy_status
+        return code_deploy_status()
+    if cmd == "code-deploy-prepare":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_DEPLOY, capability="按插件增量部署")
+        if blocked:
+            return blocked
+        from .code_deploy import prepare as code_deploy_prepare
+        workspace = ""
+        env = ""
+        base_ref = ""
+        mode = "auto"
+        unit_ids: list[str] = []
+        i = 0
+        while i < len(rest):
+            a = rest[i]
+            if a == "--env" and i + 1 < len(rest):
+                env = rest[i + 1]
+                i += 2
+                continue
+            if a == "--base" and i + 1 < len(rest):
+                base_ref = rest[i + 1]
+                i += 2
+                continue
+            if a == "--mode" and i + 1 < len(rest):
+                mode = rest[i + 1]
+                i += 2
+                continue
+            if a == "--unit" and i + 1 < len(rest):
+                unit_ids.append(rest[i + 1])
+                i += 2
+                continue
+            if not workspace and not a.startswith("-"):
+                workspace = a
+            i += 1
+        return code_deploy_prepare(
+            workspace,
+            env=env,
+            base_ref=base_ref,
+            unit_ids=unit_ids or None,
+            mode=mode,
+        )
+    if cmd == "code-deploy-confirm":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_DEPLOY, capability="按插件增量部署")
+        if blocked:
+            return blocked
+        from .code_deploy import confirm as code_deploy_confirm
+        job_id = rest[0] if rest else ""
+        decision = "approve"
+        mode = ""
+        unit_ids = []
+        i = 1
+        while i < len(rest):
+            a = rest[i]
+            if a == "--decision" and i + 1 < len(rest):
+                decision = rest[i + 1]
+                i += 2
+                continue
+            if a == "--mode" and i + 1 < len(rest):
+                mode = rest[i + 1]
+                i += 2
+                continue
+            if a == "--unit" and i + 1 < len(rest):
+                unit_ids.append(rest[i + 1])
+                i += 2
+                continue
+            i += 1
+        return code_deploy_confirm(
+            job_id,
+            decision=decision,
+            unit_ids=unit_ids or None,
+            mode=mode or None,
+        )
+    if cmd == "code-deploy-job":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_DEPLOY, capability="按插件增量部署")
+        if blocked:
+            return blocked
+        from .code_deploy import get_job as code_deploy_get_job
+        return code_deploy_get_job(rest[0] if rest else "")
     return {"ok": False, "detail": f"未知命令: {cmd}"}

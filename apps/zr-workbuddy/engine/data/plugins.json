@@ -5,6 +5,7 @@
     "mes-ask",
     "code-dev",
     "code-review",
-    "code-commit"
+    "code-commit",
+    "code-deploy"
   ]
 }

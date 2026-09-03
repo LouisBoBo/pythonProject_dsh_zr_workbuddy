@@ -252,6 +252,11 @@ intent 字段说明：
 - 即使你不确定能否立刻改代码，也必须输出 kind=code_dev，**禁止**说「平台不支持界面开发/代码修改」。
 - reply 可很短，系统会接管后续引导（路径、配置中心）。
 
+【规则二点五：用户要部署 / 上线 / 发到预发】输出：{"kind":"code_deploy","reply":"简短确认这是部署需求即可"}
+当用户提到部署上线、发到预发、增量部署、SSH 同步到测试机等（不是查「部署工单」类 MES 业务）：
+- 必须输出 kind=code_deploy，**禁止**说「暂不支持部署上线」。
+- 系统会弹出按插件勾选确认卡，由人确认后本机 SSH 同步；模型不会自己执行 SSH。
+
 【规则三：其他任何输入】输出：{"kind":"chat","reply":"..."}
 包括：问候/感谢/闲聊；问概念（如"OEE是什么""良率怎么算"）；问"你能做什么"；问平台怎么用；
 以及用户要求但平台做不了的事（预测未来产量、导出Excel、修改/写入 MES 业务数据、接入其他系统、实时推送等）
@@ -260,6 +265,7 @@ intent 字段说明：
 【平台能力边界（用于如实回答）】
 支持：查询 MES 生产数据并自动出图与洞察（__METRICS_SUMMARY__）；单日/区间原因分析；
 __CODE_DEV_BOUNDARY__
+__CODE_DEPLOY_BOUNDARY__
 暂不支持：预测/机器学习、数据导出、向 MES **写入业务数据**、跨系统查询、实时告警推送。
 
 【当前环境】__CONTEXT__
@@ -542,10 +548,12 @@ async def llm_chat(text: str, llm_cfg: dict, context: str) -> dict | None:
     """大模型理解任何输入 → 返回：
     - {"kind":"query","intent":{...}}  查数据
     - {"kind":"code_dev","reply":"..."} 写码意图（由调用方接管）
+    - {"kind":"code_deploy","reply":"..."} 部署意图（由调用方接管）
     - {"kind":"chat","reply":"..."}    对话/能力边界
     - None                              调用失败（调用方回退规则引擎）
     """
     from . import plugins_store
+    from .code_deploy.ops import FEATURE_ID as CODE_DEPLOY_FEATURE
     from .code_dev.ops import FEATURE_ID as CODE_DEV_FEATURE
 
     if plugins_store.is_enabled(CODE_DEV_FEATURE):
@@ -556,10 +564,22 @@ async def llm_chat(text: str, llm_cfg: dict, context: str) -> dict | None:
     else:
         code_boundary = "本机写码功能当前未启用；若用户要开发界面，kind=chat 并说明可到配置中心开启写码车道。"
 
+    if plugins_store.is_enabled(CODE_DEPLOY_FEATURE):
+        deploy_boundary = (
+            "按插件增量部署（本机 SSH/rsync 到预发）：用户说部署上线/发到预发时输出 kind=code_deploy，"
+            "禁止说暂不支持部署；人确认后才会同步。"
+        )
+    else:
+        deploy_boundary = (
+            "自动化部署功能当前未启用；若用户要部署上线，kind=chat 并说明可到配置中心开启自动化部署、"
+            "并启用功能插件 code-deploy。"
+        )
+
     system = (
         LLM_CHAT_SYSTEM.replace("__METRICS_SUMMARY__", METRICS_SUMMARY)
         .replace("__CONTEXT__", context)
         .replace("__CODE_DEV_BOUNDARY__", code_boundary)
+        .replace("__CODE_DEPLOY_BOUNDARY__", deploy_boundary)
     )
     content = await _llm_call([
         {"role": "system", "content": system},
@@ -578,6 +598,8 @@ async def llm_chat(text: str, llm_cfg: dict, context: str) -> dict | None:
         return None
     if kind == "code_dev":
         return {"kind": "code_dev", "reply": str(obj.get("reply") or "").strip()}
+    if kind == "code_deploy":
+        return {"kind": "code_deploy", "reply": str(obj.get("reply") or "").strip()}
     if kind == "chat":
         reply = str(obj.get("reply") or "").strip()
         if reply:
