@@ -39,3 +39,4 @@ apps/*/plugins/*/node_modules/
 **/engine/data/local_dev/sandboxes/
 **/engine/data/local_dev/jobs/
 **/engine/data/code_review/reports/
+**/engine/data/code_commit/jobs/

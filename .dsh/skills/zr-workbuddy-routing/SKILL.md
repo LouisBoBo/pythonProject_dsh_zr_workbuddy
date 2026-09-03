@@ -2,7 +2,8 @@
 name: zr-workbuddy-routing
 description: >-
   ZR-WorkBuddy 工具路由：根据用户意图选择 mes_ask / mes_pcb / mes_code_dev_* /
-  mes_config 等热插拔 feature 工具。查数、PCB 工艺、本机写码、连接配置分流。
+  mes_code_review_* / mes_code_commit_* / mes_config 等热插拔 feature 工具。
+  查数、PCB 工艺、本机写码、本机审码、人触发提交、连接配置分流。
 ---
 
 # ZR-WorkBuddy 工具路由
@@ -18,6 +19,7 @@ description: >-
 | PCB 工序、叠层阻抗、DFM、AOI/飞针、IPC、缺陷排障 | `mes_pcb` | mes-pcb |
 | 在本机工程 **写代码 / 改页面 / 加功能 / 做报表页** | `mes_code_dev_*`（见 zr-workbuddy-code-dev） | code-dev |
 | **本机目录审码**（直读源码，非 Git） | `mes_code_review_*`（见 zr-workbuddy-code-review） | code-review |
+| **提交 / git commit / 推送本批代码** | 对话确认卡优先；工具 `mes_code_commit_*` | code-commit |
 | 测 MES/LLM 连接、看引擎状态 | `mes_config` / `mes_status` | mes-config |
 
 ## 边界（易错）
@@ -29,9 +31,13 @@ description: >-
    「员工工时报表页面」「加一个列表 CRUD」→ 写码流程（`code-dev`），不是 `mes_ask`。
 
 3. **写码不会自动 commit**  
-   本机写码只同步改动到 workspace；提交需用户后续单独确认（P0-2 未开前勿承诺自动提交）。
+   本机写码只同步改动到 workspace；提交走 `code-commit`：**选目录 → 门禁 → 人确认** 后才 git。  
+   禁止模型口头「确认一下」就调用 `mes_code_commit_confirm`（须 `confirmed=true` 且用户已点确认卡）。
 
-4. **引擎要先在跑**  
+4. **提交 ≠ 全量审码**  
+   「提交代码」走门禁 findings 列表，**不要**调用 `mes_code_review_run` 出「代码审核汇总报告」。
+
+5. **引擎要先在跑**  
    工具经 `mesEngine.runEngine` 调后厨。若失败，提示：`scripts/engine.sh zr-workbuddy ensure`。
 
 ## 各工具一览
@@ -70,16 +76,23 @@ description: >-
 - 工具：`mes_code_review_status`、`check`、`list`、`run`、`report`。
 - 审码车道须在配置中心开启（`code_review.enabled`）+ LLM 已配置。
 
+### code-commit（`mes_code_commit_*`）
+
+- 人触发提交：对话出选目录卡 → `POST /api/code-commit/start` 门禁 → 人确认 → `confirm` 才 commit/push。
+- Skill（门禁批审，非报告）：**zr-workbuddy-commit-batch-review**
+- 工具：`mes_code_commit_status`、`check`、`prepare`、`start`、`confirm`（须 confirmed）、`job`。
+- 提交车道须在配置中心开启（`code_commit.enabled`）；默认 `default_push=true`。
+
 ## Feature 未启用时
 
 告知用户（不必重启 DSH）：
 
 ```bash
 scripts/plugin.sh --app zr-workbuddy features          # 看清单
-scripts/plugin.sh --app zr-workbuddy enable <feature-id> # 例如 code-dev
+scripts/plugin.sh --app zr-workbuddy enable <feature-id> # 例如 code-commit
 ```
 
-写码还需引擎配置中心 → **写码车道** 打开开关。
+写码还需引擎配置中心 → **写码车道** 打开开关；提交还需 **提交车道**。
 
 ## 与架构的关系
 

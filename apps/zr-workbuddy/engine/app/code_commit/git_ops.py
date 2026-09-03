@@ -63,6 +63,58 @@ def _norm_rel_path(rel: str) -> str:
     return r.lstrip("/")
 
 
+def _unquote_git_porcelain_path(raw: str) -> str:
+    """解析 git status --porcelain 路径（含引号与 C 风格八进制转义）。
+
+    例如：\"docs/\\345\\212\\237...\" → docs/功能...
+    八进制转义的是 UTF-8 字节，须先拼成 bytes 再 decode；
+    且必须在把反斜杠当成路径分隔符之前解码。
+    """
+    path = (raw or "").strip()
+    if len(path) < 2 or path[0] != '"' or path[-1] != '"':
+        return path
+    inner = path[1:-1]
+    out = bytearray()
+    i = 0
+    n = len(inner)
+    while i < n:
+        ch = inner[i]
+        if ch == "\\" and i + 1 < n:
+            nxt = inner[i + 1]
+            if nxt == "n":
+                out.append(0x0A)
+                i += 2
+                continue
+            if nxt == "t":
+                out.append(0x09)
+                i += 2
+                continue
+            if nxt == '"':
+                out.append(0x22)
+                i += 2
+                continue
+            if nxt == "\\":
+                out.append(0x5C)
+                i += 2
+                continue
+            if nxt in "01234567":
+                j = i + 1
+                while j < n and j < i + 4 and inner[j] in "01234567":
+                    j += 1
+                try:
+                    out.append(int(inner[i + 1 : j], 8) & 0xFF)
+                except ValueError:
+                    out.extend(inner[i:j].encode("utf-8", errors="replace"))
+                i = j
+                continue
+        out.extend(ch.encode("utf-8"))
+        i += 1
+    try:
+        return out.decode("utf-8")
+    except UnicodeDecodeError:
+        return out.decode("utf-8", errors="replace")
+
+
 def is_git_network_error(error: str) -> bool:
     """推送/远程 git 操作是否像网络原因（可重试）。"""
     return bool(_NETWORK_ERROR_RE.search(str(error or "")))
@@ -173,13 +225,13 @@ def is_commit_retryable(result: dict[str, Any]) -> bool:
 
 
 def _is_business_source(rel: str) -> bool:
-    """是否业务/功能源码（对齐 code_review 后缀白名单；排除文档/样式/敏感）。"""
-    from .skill_review import is_functional_source_rel
+    """是否可纳入本批提交（功能源码 + 文档/Skill/HTML/gitignore 等；排除噪声与敏感）。"""
+    from .skill_review import is_committable_rel
 
     r = _norm_rel_path(rel)
     if not r or is_commit_noise_path(r):
         return False
-    return bool(is_functional_source_rel(r))
+    return bool(is_committable_rel(r))
 
 
 def list_git_dirty_files(workspace: Path | str) -> set[str]:
@@ -201,11 +253,9 @@ def list_git_dirty_files(workspace: Path | str) -> set[str]:
         else:
             path = line[3:] if len(line) > 3 else ""
         path = path.strip()
-        if path.startswith('"') and path.endswith('"'):
-            # git 可能对特殊字符路径加引号；简单去壳即可
-            path = path[1:-1]
+        path = _unquote_git_porcelain_path(path)
         if " -> " in path:
-            path = path.split(" -> ", 1)[1].strip()
+            path = _unquote_git_porcelain_path(path.split(" -> ", 1)[1].strip())
         path = _norm_rel_path(path)
         if path:
             dirty.add(path)
@@ -237,10 +287,11 @@ def filter_pending_commit_files(
     workspace: Path | str,
     synced_files: list[str],
 ) -> dict[str, Any]:
-    """从 WorkBuddy 同步池里筛出 Git 仍待提交的文件（交集，排除噪声路径）。
+    """筛出本批可提交文件：同步池 ∩ Git dirty，并并入其余 Git 可提交脏文件。
 
-    若同步池与 Git 待提交无交集，但工作区仍有业务源码改动（例如在 IDE 直接改的），
-    则回落为「Git 工作区业务改动」，避免用户看到 Changes 却提示 0 个文件。
+    同步池（写码 Job 同步路径）优先排在前面；同仓库其它 IDE/手工改动一并纳入，
+    避免「只提交了同步池里 1 个文件、文档/Skill 等脏文件被丢掉」。
+    仅当两边都空时 pending 为空。
     """
     root = Path(workspace).expanduser().resolve()
     synced = [_norm_rel_path(str(p)) for p in (synced_files or []) if str(p).strip()]
@@ -257,51 +308,70 @@ def filter_pending_commit_files(
     dirty_business = sorted(p for p in dirty_clean if _is_business_source(p))
 
     pending: list[str] = []
+    seen: set[str] = set()
     for rel in business_synced:
         try:
             if not (root / rel).is_file():
                 continue
         except OSError:
             continue
+        if rel in seen:
+            continue
         if file_has_git_pending_change(root, rel):
             pending.append(rel)
+            seen.add(rel)
 
-    source = "sync_pool"
-    if not pending and dirty_business:
-        # 回落：纳入当前 Git 工作区业务改动（仍排除日志/缓存/配置等）
-        pending = []
-        for rel in dirty_business:
-            try:
-                if (root / rel).is_file():
-                    pending.append(rel)
-            except OSError:
+    pool_hit = len(pending)
+    # 并入工作区其余可提交脏文件（文档 / Skill / 手工改等）
+    for rel in dirty_business:
+        if rel in seen:
+            continue
+        try:
+            if not (root / rel).is_file():
                 continue
-            if len(pending) >= 80:
-                break
+        except OSError:
+            continue
+        pending.append(rel)
+        seen.add(rel)
+        if len(pending) >= 80:
+            break
+
+    if pool_hit and len(pending) > pool_hit:
+        source = "sync_pool_plus_dirty"
+    elif pool_hit:
+        source = "sync_pool"
+    elif pending:
         source = "git_dirty_fallback"
-        business_synced = list(dict.fromkeys([*business_synced, *pending]))
+    else:
+        source = "sync_pool"
 
     outside_pool = [p for p in dirty_business if p not in set(synced)]
+    included_outside = [p for p in pending if p not in set(business_synced)]
     note = (
         f"WorkBuddy 同步池 {len(synced)} 个；"
-        f"排除非业务 {len(excluded_non_business)} 个（配置/锁/样式/文档等）；"
-        f"业务源码 {len([p for p in synced if _is_business_source(p)])} 个；"
+        f"排除不可提交 {len(excluded_non_business)} 个（敏感/锁/样式/日志等）；"
+        f"可提交 {len([p for p in synced if _is_business_source(p)])} 个；"
         f"Git 工作区变更 {len(dirty_clean)} 个（已排除日志/缓存）；"
     )
     if source == "git_dirty_fallback":
         note += (
-            f"同步池与 Git 无交集；已回落纳入 Git 业务改动 {len(pending)} 个"
+            f"同步池与 Git 无交集；已纳入 Git 可提交改动 {len(pending)} 个"
             + (f"（含 IDE 直接修改 {len(outside_pool)} 个）" if outside_pool else "")
         )
+    elif source == "sync_pool_plus_dirty":
+        note += (
+            f"本批待提交 {len(pending)} 个"
+            f"（同步池仍脏 {pool_hit} + 其它 Git 可提交 {len(included_outside)}）"
+        )
     else:
-        note += f"本批待提交 {len(pending)} 个（业务源码 ∩ Git 待提交）"
+        note += f"本批待提交 {len(pending)} 个（可提交文件 ∩ Git 待提交）"
         if outside_pool:
-            note += f"；另有 {len(outside_pool)} 个 Git 业务改动未在同步池（未纳入）"
+            note += f"；另有 {len(outside_pool)} 个 Git 可提交改动未在同步池（未纳入）"
 
     return {
         "pending_files": pending,
-        "synced_pool": business_synced if source == "sync_pool" else pending,
-        "synced_total": len(business_synced) if source == "sync_pool" else len(pending),
+        "synced_pool": list(dict.fromkeys([*business_synced, *pending])),
+        "synced_total": len(pending),
         "synced_raw_total": len(synced),
         "excluded_non_business": excluded_non_business,
         "excluded_non_business_total": len(excluded_non_business),

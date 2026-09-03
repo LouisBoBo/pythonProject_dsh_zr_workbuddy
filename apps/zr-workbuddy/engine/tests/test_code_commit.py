@@ -159,6 +159,93 @@ class CodeCommitTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(err, "")
 
+    def test_committable_includes_docs_html_gitignore(self):
+        from app.code_commit.skill_review import is_committable_rel, is_functional_source_rel
+
+        self.assertTrue(is_committable_rel("docs/功能实现/P0-2.md"))
+        self.assertTrue(is_committable_rel(".dsh/skills/zr-workbuddy-routing/SKILL.md"))
+        self.assertTrue(is_committable_rel("apps/zr-workbuddy/engine/app/static/index.html"))
+        self.assertTrue(is_committable_rel(".gitignore"))
+        self.assertTrue(is_committable_rel("apps/zr-workbuddy/engine/app/main.py"))
+        self.assertFalse(is_functional_source_rel("docs/README.md"))
+        self.assertFalse(is_committable_rel("secret.env"))
+        self.assertFalse(is_committable_rel("assets/logo.png"))
+        self.assertFalse(is_committable_rel("styles/app.css"))
+
+    def test_git_porcelain_octal_path_and_filter(self):
+        from app.code_commit.git_ops import (
+            _unquote_git_porcelain_path,
+            filter_pending_commit_files,
+            list_git_dirty_files,
+        )
+
+        quoted = (
+            '"docs/\\345\\212\\237\\350\\203\\275\\345\\256\\236\\347\\216\\260/'
+            'P0-2.md"'
+        )
+        decoded = _unquote_git_porcelain_path(quoted)
+        self.assertEqual(decoded, "docs/功能实现/P0-2.md")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            import subprocess
+
+            subprocess.run(
+                ["git", "init", "-b", "feature/docs"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "t@t.com"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "t"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+            (root / "keep.py").write_text("x=1\n", encoding="utf-8")
+            subprocess.run(["git", "add", "keep.py"], cwd=root, check=True, capture_output=True)
+            subprocess.run(
+                ["git", "commit", "-m", "init"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+            docs = root / "docs" / "功能实现"
+            docs.mkdir(parents=True)
+            (docs / "P0-2.md").write_text("# P0-2\n", encoding="utf-8")
+            (root / ".gitignore").write_text("*.log\n", encoding="utf-8")
+            (root / "static").mkdir()
+            (root / "static" / "index.html").write_text("<html></html>\n", encoding="utf-8")
+            (root / "noise.log").write_text("x\n", encoding="utf-8")
+
+            dirty = list_git_dirty_files(root)
+            self.assertIn("docs/功能实现/P0-2.md", dirty)
+            self.assertIn(".gitignore", dirty)
+            self.assertIn("static/index.html", dirty)
+
+            out = filter_pending_commit_files(root, [])
+            pending = set(out.get("pending_files") or [])
+            self.assertIn("docs/功能实现/P0-2.md", pending)
+            self.assertIn(".gitignore", pending)
+            self.assertIn("static/index.html", pending)
+            self.assertNotIn("noise.log", pending)
+            self.assertGreaterEqual(out.get("pending_total") or 0, 3)
+
+            # 同步池只有部分文件时，仍须并入其余 Git 可提交脏文件
+            out2 = filter_pending_commit_files(root, ["static/index.html", "keep.py"])
+            pending2 = out2.get("pending_files") or []
+            self.assertEqual(out2.get("pending_source"), "sync_pool_plus_dirty")
+            self.assertEqual(pending2[0], "static/index.html")
+            self.assertIn("docs/功能实现/P0-2.md", pending2)
+            self.assertIn(".gitignore", pending2)
+            self.assertNotIn("noise.log", pending2)
+
     def test_fix_from_gate_intent_and_prepare(self):
         from app.code_commit.intent import is_fix_from_gate_question, is_code_commit_question
         from app.code_commit.ops import build_fix_requirement, prepare_fix_from_gate

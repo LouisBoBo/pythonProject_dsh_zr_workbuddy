@@ -212,7 +212,7 @@ def prepare(
     files: list[str] | None = None,
     work_branch: str = "",
 ) -> dict[str, Any]:
-    """列出待提交业务源码（优先 git dirty ∩ 同步池；回落 git dirty）。"""
+    """列出待提交文件（同步池仍脏 ∪ Git 可提交脏文件）。"""
     cfg = get_config()
     if not cfg.enabled:
         return {
@@ -275,9 +275,9 @@ def prepare(
         "scope_note": filtered.get("scope_note"),
         "pending_source": filtered.get("pending_source"),
         "reply": (
-            f"待提交 {len(pending)} 个业务源码文件（分支 {chosen}）"
+            f"待提交 {len(pending)} 个文件（分支 {chosen}）"
             if pending
-            else "没有待提交的业务源码变更（Git 工作区干净或仅有非业务文件）"
+            else "没有待提交变更（Git 工作区干净，或仅有日志/敏感等不可提交文件）"
         ),
         "detail": filtered.get("scope_note") or "",
     }

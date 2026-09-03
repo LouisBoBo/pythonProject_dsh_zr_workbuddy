@@ -32,7 +32,7 @@ def _norm_rel(rel: str) -> str:
 
 
 def is_functional_source_rel(rel: str) -> bool:
-    """业务/功能源码：白名单后缀、非文档样式、非敏感。"""
+    """业务/功能源码：白名单后缀、非文档样式、非敏感（供批审 LLM 深读）。"""
     r = _norm_rel(rel)
     if not r or is_sensitive_rel(r):
         return False
@@ -40,6 +40,37 @@ def is_functional_source_rel(rel: str) -> bool:
     if suf in DOC_OR_STYLE_SUFFIXES:
         return False
     return suf in ALLOWED_SUFFIXES
+
+
+# 可随本批提交、但不走功能源码深审的后缀（文档 / SPA 壳）
+_COMMIT_EXTRA_SUFFIXES = frozenset({".md", ".mdx", ".html", ".htm"})
+# 仓库元数据（无后缀或特殊名）
+_COMMIT_META_BASENAMES = frozenset(
+    {
+        ".gitignore",
+        ".gitattributes",
+        ".editorconfig",
+        ".npmrc",
+        ".nvmrc",
+    }
+)
+
+
+def is_committable_rel(rel: str) -> bool:
+    """人触发提交可纳入的路径：功能源码 + 文档/Skill/HTML 壳 + 常见仓库元数据。
+
+    仍排除敏感路径；样式/图片/锁等不纳入（避免把无关噪音塞进本批）。
+    """
+    r = _norm_rel(rel)
+    if not r or is_sensitive_rel(r):
+        return False
+    if is_functional_source_rel(r):
+        return True
+    base = Path(r).name.lower()
+    if base in _COMMIT_META_BASENAMES:
+        return True
+    suf = Path(r).suffix.lower()
+    return suf in _COMMIT_EXTRA_SUFFIXES
 
 
 def _estimate_tokens(text: str) -> int:
