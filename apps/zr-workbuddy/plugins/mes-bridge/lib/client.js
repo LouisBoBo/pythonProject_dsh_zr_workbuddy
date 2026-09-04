@@ -224,6 +224,7 @@ window.__ModuleLoader__.load({
       if (ds === "code_dev") return "本机写码";
       if (ds === "code_review") return "本机审码";
       if (ds === "code_commit") return "人触发提交";
+      if (ds === "code_deploy") return "按插件增量部署";
       return "演示数据";
     }
     function srcLabel(ev) {
@@ -232,19 +233,47 @@ window.__ModuleLoader__.load({
       if (ev && ev.source === "code_dev") return "写码顾问";
       if (ev && ev.source === "code_review") return "审码顾问";
       if (ev && ev.source === "code_commit") return "提交顾问";
+      if (ev && ev.source === "code_deploy") return "部署顾问";
       if (ev && ev.source === "disabled") return "已停用";
       return "规则引擎";
     }
     function formatChatMeta(ev) {
       var srcTxt = srcLabel(ev);
       var ds = dataSourceLabel(ev && ev.data_source);
-      var metricMap = { options: "需求选项", propose: "写码确认", code_dev: "本机写码", code_review: "本机审码", code_commit: "人触发提交", need_path: "待填路径", pick: "选目录确认", confirm: "确认提交", done: "审码完成", run: "本机审码", disabled: "已停用" };
+      var metricMap = {
+        options: "需求选项",
+        propose: "写码确认",
+        code_dev: "本机写码",
+        code_review: "本机审码",
+        code_commit: "人触发提交",
+        code_deploy: "增量部署",
+        need_path: "待填路径",
+        pick: "选目录确认",
+        confirm: "部署确认",
+        success: "部署完成",
+        done: "审码完成",
+        run: "本机审码",
+        disabled: "已停用",
+        blocked: "未就绪",
+      };
       var it = (ev && ev.intent) || {};
-      var intentTxt = it.type === "code_review" ? "本机审码" : it.type === "code_commit" ? "人触发提交" : "本机写码";
+      var intentTxt =
+        it.type === "code_review"
+          ? "本机审码"
+          : it.type === "code_commit"
+            ? "人触发提交"
+            : it.type === "code_deploy"
+              ? "增量部署"
+              : "本机写码";
       if (it.type === "code_dev" && it.metric) intentTxt = metricMap[it.metric] || String(it.metric);
       else if (it.type === "code_review" && it.metric) intentTxt = metricMap[it.metric] || "本机审码";
       else if (it.type === "code_commit" && it.metric) intentTxt = metricMap[it.metric] || "人触发提交";
-      else if (it.type) intentTxt = metricMap[it.type] || String(it.type);
+      else if (it.type === "code_deploy" && it.metric) {
+        intentTxt =
+          it.metric === "confirm"
+            ? "部署确认"
+            : metricMap[it.metric] || "增量部署";
+      } else if (it.type) intentTxt = metricMap[it.type] || String(it.type);
       return "来源：" + srcTxt + " · 数据源：" + ds + " · 意图：" + intentTxt;
     }
     var CODE_DEV_PIPELINE = [
@@ -416,7 +445,10 @@ window.__ModuleLoader__.load({
       var card = document.createElement("div");
       card.className = "cd-card cdp-card";
       if (ui.kind === "confirm") renderCdDeployConfirm(card, ui);
-      else return;
+      else if (ui.kind === "success") {
+        card.className = "cd-card cdp-card done";
+        card.innerHTML = cdpSuccessCardHtml(ui);
+      } else return;
       if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
       else hostEl.appendChild(card);
     }
@@ -657,13 +689,14 @@ window.__ModuleLoader__.load({
               return;
             }
             var doneMode = d.mode === "full" || sendMode === "full" ? "全量" : "增量";
-            var succ = d.deploy_success || {};
+            var succ = d.deploy_success || d.code_deploy_ui || {};
             var unitList = Array.isArray(d.units)
               ? d.units
               : Array.isArray(succ.units)
                 ? succ.units
                 : ids;
-            card.innerHTML = cdpSuccessCardHtml({
+            var successUi = {
+              kind: "success",
               title: succ.title || doneMode + "部署完成",
               mode: d.mode || sendMode,
               mode_label: succ.mode_label || doneMode,
@@ -697,7 +730,19 @@ window.__ModuleLoader__.load({
                 (d.deploy_result && d.deploy_result.remote_receipt_path) ||
                 "",
               synced_rels: succ.synced_rels || [],
-            });
+            };
+            var hostCard = card.closest(".assist") || card.closest(".msg-assistant") || host;
+            var metaEl = hostCard ? hostCard.querySelector(".meta") : null;
+            if (hostCard) {
+              mountCodeDeployUi(hostCard, successUi, metaEl);
+            } else {
+              card.className = "cd-card cdp-card done";
+              card.innerHTML = cdpSuccessCardHtml(successUi);
+            }
+            if (metaEl) {
+              metaEl.textContent =
+                "来源：部署顾问 · 数据源：按插件增量部署 · 意图：部署完成";
+            }
             if (replyEl) {
               var unitTxt =
                 unitList.slice(0, 4).join("、") + (unitList.length > 4 ? "…" : "");

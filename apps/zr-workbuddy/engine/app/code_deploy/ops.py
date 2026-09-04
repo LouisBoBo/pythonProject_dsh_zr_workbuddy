@@ -658,6 +658,10 @@ def confirm(
             "mode": deploy_mode,
             "deploy_result": result,
             "deploy_success": success,
+            "code_deploy_ui": {
+                "kind": "success",
+                **success,
+            },
             "units": unit_ids,
             "access_url": access,
             "health_url": access,
