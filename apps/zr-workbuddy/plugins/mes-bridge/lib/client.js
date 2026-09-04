@@ -49,6 +49,8 @@ window.__ModuleLoader__.load({
         .catch(function () { if (done) done(false); });
     }
     var LS_KEY = "dsh-mes-panel-convs";
+    /** buildPanel 注入：卡内状态写回 localStorage */
+    var persistHitlFromHost = function () {};
     var SUGGESTIONS = [
       "今天正在生产的工单有多少个",
       "PCB有哪些工序",
@@ -434,7 +436,10 @@ window.__ModuleLoader__.load({
       if (ui.kind === "pick") renderCcPick(card, ui, hooks);
       else if (ui.kind === "confirm") renderCcConfirm(card, ui, hooks);
       else if (ui.kind === "blocked") renderCcBlocked(card, ui, hooks);
-      else return;
+      else if (ui.kind === "success") {
+        card.className = "cd-card cc-card done";
+        card.innerHTML = ccSuccessCardHtml(ui);
+      } else return;
       if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
       else hostEl.appendChild(card);
     }
@@ -760,19 +765,26 @@ window.__ModuleLoader__.load({
                   (succ.ssh_app_path || d.ssh_app_path || ui.ssh_app_path
                     ? ":" + (succ.ssh_app_path || d.ssh_app_path || ui.ssh_app_path)
                     : ""));
-              replyEl.innerHTML = md(
+              var deployReply =
                 "**" +
-                  (succ.title || doneMode + "部署完成") +
-                  "** · `" +
-                  (unitTxt || "—") +
-                  "`\n- 环境：`" +
-                  (succ.env || d.env || ui.env || "—") +
-                  "` · " +
-                  healthBit +
-                  "\n- 远端：`" +
-                  (remoteTxt || "—") +
-                  "`"
-              );
+                (succ.title || doneMode + "部署完成") +
+                "** · `" +
+                (unitTxt || "—") +
+                "`\n- 环境：`" +
+                (succ.env || d.env || ui.env || "—") +
+                "` · " +
+                healthBit +
+                "\n- 远端：`" +
+                (remoteTxt || "—") +
+                "`";
+              replyEl.innerHTML = md(deployReply);
+              persistHitlFromHost(hostCard || host, {
+                code_deploy_ui: successUi,
+                text: deployReply,
+                meta: metaEl ? metaEl.textContent : undefined,
+              });
+            } else {
+              persistHitlFromHost(hostCard || host, { code_deploy_ui: successUi });
             }
           } catch (e) {
             errEl.style.display = "";
@@ -921,7 +933,8 @@ window.__ModuleLoader__.load({
                     : [];
             var title = "已提交并推送";
             card.className = "cd-card cc-card done";
-            card.innerHTML = ccSuccessCardHtml({
+            var successUi = {
+              kind: "success",
               title: title,
               workspace: out.workspace || d.workspace || "",
               branch: cr2.branch || cr.branch || "",
@@ -929,26 +942,26 @@ window.__ModuleLoader__.load({
               remote: "已推送",
               files: fileList,
               message: out.message || cr2.message || d.message || "",
-            });
-            if (replyEl) {
-              var proj =
-                String(out.workspace || d.workspace || "")
-                  .replace(/\\/g, "/")
-                  .split("/")
-                  .filter(Boolean)
-                  .pop() || "—";
-              replyEl.innerHTML = md(
-                "**" +
-                  title +
-                  "** · `" +
-                  (cr2.branch || cr.branch || "") +
-                  "`\n- 项目：`" +
-                  proj +
-                  "`\n- 文件：" +
-                  fileList.length +
-                  " 个 · 已推送"
-              );
-            }
+            };
+            card.innerHTML = ccSuccessCardHtml(successUi);
+            var proj =
+              String(out.workspace || d.workspace || "")
+                .replace(/\\/g, "/")
+                .split("/")
+                .filter(Boolean)
+                .pop() || "—";
+            var successReply =
+              "**" +
+              title +
+              "** · `" +
+              (cr2.branch || cr.branch || "") +
+              "`\n- 项目：`" +
+              proj +
+              "`\n- 文件：" +
+              fileList.length +
+              " 个 · 已推送";
+            if (replyEl) replyEl.innerHTML = md(successReply);
+            persistHitlFromHost(host, { code_commit_ui: successUi, text: successReply });
             if (typeof hooks.onCommitted === "function") hooks.onCommitted(out);
           })
           .catch(function (e) {
@@ -1221,33 +1234,35 @@ window.__ModuleLoader__.load({
                 ? "已推送"
                 : "未推送";
             var title = push && cr.push && cr.push.ok ? "已提交并推送" : "已提交";
-            card.innerHTML = ccSuccessCardHtml({
+            var fileList = Array.isArray(cr.files) && cr.files.length ? cr.files : files;
+            var successUi = {
+              kind: "success",
               title: title,
               workspace: ui.workspace || "",
               branch: cr.branch || ui.work_branch || "",
               commit: cr.commit || "",
               remote: remoteLabel,
-              files: Array.isArray(cr.files) && cr.files.length ? cr.files : files,
+              files: fileList,
               message: message,
-            });
-            if (replyEl) {
-              replyEl.innerHTML = md(
-                "**" +
-                  title +
-                  "** · `" +
-                  (cr.branch || ui.work_branch || "") +
-                  "`\n- 项目：`" +
-                  String(ui.workspace || "")
-                    .replace(/\\/g, "/")
-                    .split("/")
-                    .filter(Boolean)
-                    .pop() +
-                  "`\n- 文件：" +
-                  (Array.isArray(cr.files) && cr.files.length ? cr.files.length : files.length) +
-                  " 个 · " +
-                  remoteLabel
-              );
-            }
+            };
+            card.innerHTML = ccSuccessCardHtml(successUi);
+            var successReply =
+              "**" +
+              title +
+              "** · `" +
+              (cr.branch || ui.work_branch || "") +
+              "`\n- 项目：`" +
+              String(ui.workspace || "")
+                .replace(/\\/g, "/")
+                .split("/")
+                .filter(Boolean)
+                .pop() +
+              "`\n- 文件：" +
+              fileList.length +
+              " 个 · " +
+              remoteLabel;
+            if (replyEl) replyEl.innerHTML = md(successReply);
+            persistHitlFromHost(host, { code_commit_ui: successUi, text: successReply });
             if (typeof hooks.onCommitted === "function") hooks.onCommitted(d);
           })
           .catch(function (e) {
@@ -1447,7 +1462,21 @@ window.__ModuleLoader__.load({
                 blocking_count: blockN,
                 work_branch: d.work_branch || work_branch,
               }, hooks);
-              if (replyEl) replyEl.innerHTML = md(d.reply || blockedSummary);
+              var blockedReply = d.reply || blockedSummary;
+              if (replyEl) replyEl.innerHTML = md(blockedReply);
+              persistHitlFromHost(host, {
+                code_commit_ui: {
+                  kind: "blocked",
+                  workspace: workspace,
+                  job_id: d.job_id,
+                  files: d.files || [],
+                  findings: d.findings || [],
+                  summary: blockedSummary,
+                  blocking_count: blockN,
+                  work_branch: d.work_branch || work_branch,
+                },
+                text: blockedReply,
+              });
               return;
             }
             var confirmUi = d.code_commit_ui || {
@@ -1462,7 +1491,9 @@ window.__ModuleLoader__.load({
               summary: d.summary || "",
             };
             renderCcConfirm(card, confirmUi, hooks);
-            if (replyEl) replyEl.innerHTML = md(d.reply || "门禁通过，请确认后提交。");
+            var confirmReply = d.reply || "门禁通过，请确认后提交。";
+            if (replyEl) replyEl.innerHTML = md(confirmReply);
+            persistHitlFromHost(host, { code_commit_ui: confirmUi, text: confirmReply });
           })
           .catch(function (e) {
             errEl.style.display = "";
@@ -2122,6 +2153,52 @@ window.__ModuleLoader__.load({
         }
         return div;
       }
+      function hitlHooks() {
+        return {
+          send: send,
+          renderMsg: renderMsg,
+          getBrief: getCodeDevBrief,
+          onStarted: function (d) {
+            startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")), {
+              workspace: (d.workspace || (d.job && d.job.workspace) || "") || undefined,
+              resumeCommit: !!(d.resume_commit || d.from_gate_fix || (d.job && d.job.resume_commit)),
+            });
+          },
+        };
+      }
+      function hydrateHitlCards(hostEl, m) {
+        if (!hostEl || !m || m.role === "user") return;
+        var metaEl = hostEl.querySelector(".meta");
+        var hooks = hitlHooks();
+        if (m.code_dev_ui) mountCodeDevUi(hostEl, m.code_dev_ui, metaEl, hooks);
+        if (m.code_review_ui) mountCodeReviewUi(hostEl, m.code_review_ui, metaEl, hooks);
+        if (m.code_commit_ui) mountCodeCommitUi(hostEl, m.code_commit_ui, metaEl, hooks);
+        if (m.code_deploy_ui) mountCodeDeployUi(hostEl, m.code_deploy_ui, metaEl);
+      }
+      function persistHitlFromHostInner(hostEl, patch) {
+        if (!cur || !cur.msgs || !patch) return;
+        for (var i = cur.msgs.length - 1; i >= 0; i--) {
+          if (cur.msgs[i].role === "assistant") {
+            Object.keys(patch).forEach(function (k) {
+              cur.msgs[i][k] = patch[k];
+            });
+            save();
+            return;
+          }
+        }
+      }
+      persistHitlFromHost = persistHitlFromHostInner;
+      function restoreLastConv() {
+        if (!convs.length) return false;
+        cur = convs[convs.length - 1];
+        if (!cur.msgs || !cur.msgs.length) return false;
+        msgs.innerHTML = "";
+        cur.msgs.forEach(function (m) {
+          var el = renderMsg(m.role, m.text, m.chart, m.table, m.meta, false, m.thinking);
+          hydrateHitlCards(el, m);
+        });
+        return true;
+      }
 
       function startCodeDevJobWatch(jobId, startReply, opts) {
         opts = opts || {};
@@ -2457,48 +2534,18 @@ window.__ModuleLoader__.load({
                 bubble.meta.style.display = "";
                 bubble.meta.textContent = meta;
                 if (ev.code_dev_ui) {
-                  mountCodeDevUi(bubble.el, ev.code_dev_ui, bubble.meta, {
-                    send: send,
-                    getBrief: getCodeDevBrief,
-                    onStarted: function (d) {
-                      startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")), {
-                        workspace: (d.workspace || (d.job && d.job.workspace) || "") || undefined,
-                        resumeCommit: !!(d.resume_commit || d.from_gate_fix || (d.job && d.job.resume_commit)),
-                      });
-                    },
-                  });
+                  mountCodeDevUi(bubble.el, ev.code_dev_ui, bubble.meta, hitlHooks());
                 } else {
                   var fbUi = parseCodeDevUiFromText(bubble.replyText, "");
                   if (fbUi) {
-                    mountCodeDevUi(bubble.el, fbUi, bubble.meta, {
-                      send: send,
-                      getBrief: getCodeDevBrief,
-                      onStarted: function (d) {
-                        startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")), {
-                          workspace: (d.workspace || (d.job && d.job.workspace) || "") || undefined,
-                          resumeCommit: !!(d.resume_commit || d.from_gate_fix || (d.job && d.job.resume_commit)),
-                        });
-                      },
-                    });
+                    mountCodeDevUi(bubble.el, fbUi, bubble.meta, hitlHooks());
                   }
                 }
                 if (ev.code_review_ui) {
-                  mountCodeReviewUi(bubble.el, ev.code_review_ui, bubble.meta, {
-                    renderMsg: renderMsg,
-                  });
+                  mountCodeReviewUi(bubble.el, ev.code_review_ui, bubble.meta, hitlHooks());
                 }
                 if (ev.code_commit_ui) {
-                  mountCodeCommitUi(bubble.el, ev.code_commit_ui, bubble.meta, {
-                    renderMsg: renderMsg,
-                    send: send,
-                    getBrief: getCodeDevBrief,
-                    onStarted: function (d) {
-                      startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")), {
-                        workspace: (d.workspace || (d.job && d.job.workspace) || "") || undefined,
-                        resumeCommit: !!(d.resume_commit || d.from_gate_fix || (d.job && d.job.resume_commit)),
-                      });
-                    },
-                  });
+                  mountCodeCommitUi(bubble.el, ev.code_commit_ui, bubble.meta, hitlHooks());
                 }
                 if (ev.code_deploy_ui) {
                   mountCodeDeployUi(bubble.el, ev.code_deploy_ui, bubble.meta);
@@ -2514,6 +2561,10 @@ window.__ModuleLoader__.load({
                     chart: ev.chart || null,
                     table: ev.table || null,
                     meta: meta,
+                    code_dev_ui: ev.code_dev_ui || null,
+                    code_review_ui: ev.code_review_ui || null,
+                    code_commit_ui: ev.code_commit_ui || null,
+                    code_deploy_ui: ev.code_deploy_ui || null,
                   });
                   save();
                 }
@@ -2553,11 +2604,13 @@ window.__ModuleLoader__.load({
       sendBtn.onclick = function () { send(); };
       input.addEventListener("keydown", function (e) { if (e.key === "Enter") send(); });
 
-      renderMsg("assistant",
-        "你好！我是 ZR-WorkBuddy。\n" +
-        "• 查数出图：例如 **今天正在生产的工单有多少个**\n" +
-        "• PCB 工艺：例如 **飞针和 AOI 怎么分工**（会展示思考过程，并流式输出）",
-        null, null, null, false);
+      if (!restoreLastConv()) {
+        renderMsg("assistant",
+          "你好！我是 ZR-WorkBuddy。\n" +
+          "• 查数出图：例如 **今天正在生产的工单有多少个**\n" +
+          "• PCB 工艺：例如 **飞针和 AOI 怎么分工**（会展示思考过程，并流式输出）",
+          null, null, null, false);
+      }
 
       discoverEngine(function () {
         fetch(STATUS_URL()).then(function (r) { return r.json(); }).then(function (s) {

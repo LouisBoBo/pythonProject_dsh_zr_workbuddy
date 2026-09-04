@@ -810,13 +810,39 @@ function selectConv(id) {
   const conv = convs.find(c => c.id === id);
   $("msgs").innerHTML = "";
   if (conv && conv.messages.length) {
-    conv.messages.forEach(m => renderMsg(m.role, m.text, m.chart, m.table, m.meta, false));
+    conv.messages.forEach((m) => {
+      const el = renderMsg(m.role, m.text, m.chart, m.table, m.meta, false, m.thinking);
+      hydrateHitlCards(el, m);
+    });
     $("welcome").style.display = "none";
     $("msgs").classList.add("show");
   } else {
     showWelcome();
   }
   switchView("chat");
+}
+/** 刷新/切会话后把 HITL 卡重新挂回气泡（仅文本不够） */
+function hydrateHitlCards(hostEl, m) {
+  if (!hostEl || !m || m.role === "user") return;
+  const metaEl = hostEl.querySelector(".msg-meta");
+  if (m.code_dev_ui) mountCodeDevUi(hostEl, m.code_dev_ui, metaEl);
+  if (m.code_review_ui) mountCodeReviewUi(hostEl, m.code_review_ui, metaEl);
+  if (m.code_commit_ui) mountCodeCommitUi(hostEl, m.code_commit_ui, metaEl);
+  if (m.code_deploy_ui) mountCodeDeployUi(hostEl, m.code_deploy_ui, metaEl);
+}
+/** 卡内状态变更（门禁→确认→成功）写回最后一条助手消息，供刷新还原 */
+function persistHitlFromHost(hostEl, patch) {
+  const conv = curConv();
+  if (!conv || !conv.messages || !patch) return;
+  for (let i = conv.messages.length - 1; i >= 0; i--) {
+    if (conv.messages[i].role === "assistant") {
+      Object.keys(patch).forEach((k) => {
+        conv.messages[i][k] = patch[k];
+      });
+      saveConvs();
+      return;
+    }
+  }
 }
 function deleteConv(id) {
   convs = convs.filter(c => c.id !== id);
@@ -1023,11 +1049,13 @@ function eventText(ev, prev) {
 }
 function renderMsg(role, text, chart, table, meta, persist, thinking) {
   const msgs = $("msgs");
+  let hostEl = null;
   if (role === "user") {
     const div = document.createElement("div");
     div.className = "msg-user";
     div.textContent = text;
     msgs.appendChild(div);
+    hostEl = div;
   } else {
     const wrap = document.createElement("div");
     wrap.className = "msg-assistant";
@@ -1050,6 +1078,7 @@ function renderMsg(role, text, chart, table, meta, persist, thinking) {
       wrap.appendChild(m);
     }
     msgs.appendChild(wrap);
+    hostEl = wrap;
   }
   const body = document.querySelector(".chat-body");
   body.scrollTop = body.scrollHeight;
@@ -1062,6 +1091,7 @@ function renderMsg(role, text, chart, table, meta, persist, thinking) {
       saveConvs();
     }
   }
+  return hostEl;
 }
 function createStreamBubble() {
   const wrap = document.createElement("div");
@@ -1303,7 +1333,10 @@ function mountCodeCommitUi(hostEl, ui, beforeMetaEl) {
   if (ui.kind === "pick") renderCcPick(card, ui);
   else if (ui.kind === "confirm") renderCcConfirm(card, ui);
   else if (ui.kind === "blocked") renderCcBlocked(card, ui);
-  else return;
+  else if (ui.kind === "success") {
+    card.className = "cd-card cc-card done";
+    card.innerHTML = ccSuccessCardHtml(ui);
+  } else return;
   if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
   else hostEl.appendChild(card);
 }
@@ -1601,7 +1634,7 @@ function renderCdDeployConfirm(card, ui) {
           synced_rels: succ.synced_rels || [],
         };
         var hostCard = card.closest(".msg-assistant") || host;
-        var metaEl = hostCard ? hostCard.querySelector(".meta") : null;
+        var metaEl = hostCard ? hostCard.querySelector(".msg-meta") : null;
         if (hostCard) mountCodeDeployUi(hostCard, successUi, metaEl);
         else {
           card.className = "cd-card cdp-card done";
@@ -1628,19 +1661,26 @@ function renderCdDeployConfirm(card, ui) {
               (succ.ssh_app_path || d.ssh_app_path || ui.ssh_app_path
                 ? ":" + (succ.ssh_app_path || d.ssh_app_path || ui.ssh_app_path)
                 : ""));
-          replyEl.innerHTML = md(
+          const deployReply =
             "**" +
-              (succ.title || doneMode + "部署完成") +
-              "** · `" +
-              (unitTxt || "—") +
-              "`\n- 环境：`" +
-              (succ.env || d.env || ui.env || "—") +
-              "` · " +
-              healthBit +
-              "\n- 远端：`" +
-              (remoteTxt || "—") +
-              "`"
-          );
+            (succ.title || doneMode + "部署完成") +
+            "** · `" +
+            (unitTxt || "—") +
+            "`\n- 环境：`" +
+            (succ.env || d.env || ui.env || "—") +
+            "` · " +
+            healthBit +
+            "\n- 远端：`" +
+            (remoteTxt || "—") +
+            "`";
+          replyEl.innerHTML = md(deployReply);
+          persistHitlFromHost(hostCard || host, {
+            code_deploy_ui: successUi,
+            text: deployReply,
+            meta: metaEl ? metaEl.textContent : undefined,
+          });
+        } else {
+          persistHitlFromHost(hostCard || host, { code_deploy_ui: successUi });
         }
       } catch (e) {
         errEl.style.display = "";
@@ -1849,7 +1889,21 @@ function renderCcPick(card, ui) {
         });
         const host = card.closest(".msg-assistant") || card.parentElement;
         const replyEl = host && host.querySelector(".reply");
-        if (replyEl) replyEl.innerHTML = md(d.reply || blockedSummary);
+        const blockedReply = d.reply || blockedSummary;
+        if (replyEl) replyEl.innerHTML = md(blockedReply);
+        persistHitlFromHost(host, {
+          code_commit_ui: {
+            kind: "blocked",
+            workspace,
+            job_id: d.job_id,
+            files: d.files || [],
+            findings: d.findings || [],
+            summary: blockedSummary,
+            blocking_count: blockN,
+            work_branch: d.work_branch || work_branch,
+          },
+          text: blockedReply,
+        });
         return;
       }
       const confirmUi = d.code_commit_ui || {
@@ -1868,7 +1922,9 @@ function renderCcPick(card, ui) {
       renderCcConfirm(card, confirmUi);
       const host = card.closest(".msg-assistant") || card.parentElement;
       const replyEl = host && host.querySelector(".reply");
-      if (replyEl) replyEl.innerHTML = md(d.reply || "门禁通过，请确认后提交。");
+      const confirmReply = d.reply || "门禁通过，请确认后提交。";
+      if (replyEl) replyEl.innerHTML = md(confirmReply);
+      persistHitlFromHost(host, { code_commit_ui: confirmUi, text: confirmReply });
     } catch (e) {
       errEl.style.display = "";
       errEl.textContent = "请求失败：" + e.message;
@@ -2169,7 +2225,8 @@ function renderCcPushRetryCard(card, d) {
               : [];
       const title = "已提交并推送";
       card.classList.add("done");
-      card.innerHTML = ccSuccessCardHtml({
+      const successUi = {
+        kind: "success",
         title,
         workspace: out.workspace || d.workspace || "",
         branch: cr2.branch || cr.branch || "",
@@ -2177,26 +2234,26 @@ function renderCcPushRetryCard(card, d) {
         remote: "已推送",
         files: fileList,
         message: out.message || cr2.message || d.message || "",
-      });
-      if (replyEl) {
-        const proj =
-          String(out.workspace || d.workspace || "")
-            .replace(/\\/g, "/")
-            .split("/")
-            .filter(Boolean)
-            .pop() || "—";
-        replyEl.innerHTML = md(
-          "**" +
-            title +
-            "** · `" +
-            (cr2.branch || cr.branch || "") +
-            "`\n- 项目：`" +
-            proj +
-            "`\n- 文件：" +
-            fileList.length +
-            " 个 · 已推送"
-        );
-      }
+      };
+      card.innerHTML = ccSuccessCardHtml(successUi);
+      const proj =
+        String(out.workspace || d.workspace || "")
+          .replace(/\\/g, "/")
+          .split("/")
+          .filter(Boolean)
+          .pop() || "—";
+      const successReply =
+        "**" +
+        title +
+        "** · `" +
+        (cr2.branch || cr.branch || "") +
+        "`\n- 项目：`" +
+        proj +
+        "`\n- 文件：" +
+        fileList.length +
+        " 个 · 已推送";
+      if (replyEl) replyEl.innerHTML = md(successReply);
+      persistHitlFromHost(host, { code_commit_ui: successUi, text: successReply });
     } catch (e) {
       errEl.style.display = "";
       errEl.textContent = "请求失败：" + e.message;
@@ -2297,7 +2354,8 @@ function renderCcConfirm(card, ui) {
       const remoteLabel = !push ? "仅本地提交" : cr.push && cr.push.ok ? "已推送" : "未推送";
       const title = push && cr.push && cr.push.ok ? "已提交并推送" : "已提交";
       const fileList = Array.isArray(cr.files) && cr.files.length ? cr.files : files;
-      card.innerHTML = ccSuccessCardHtml({
+      const successUi = {
+        kind: "success",
         title,
         workspace: ui.workspace || "",
         branch: cr.branch || ui.work_branch || "",
@@ -2305,18 +2363,27 @@ function renderCcConfirm(card, ui) {
         remote: remoteLabel,
         files: fileList,
         message,
-      });
-      if (replyEl) {
-        const proj =
-          String(ui.workspace || "")
-            .replace(/\\/g, "/")
-            .split("/")
-            .filter(Boolean)
-            .pop() || "—";
-        replyEl.innerHTML = md(
-          `**${title}** · \`${cr.branch || ui.work_branch || ""}\`\n- 项目：\`${proj}\`\n- 文件：${fileList.length} 个 · ${remoteLabel}`
-        );
-      }
+      };
+      card.innerHTML = ccSuccessCardHtml(successUi);
+      const proj =
+        String(ui.workspace || "")
+          .replace(/\\/g, "/")
+          .split("/")
+          .filter(Boolean)
+          .pop() || "—";
+      const successReply =
+        "**" +
+        title +
+        "** · `" +
+        (cr.branch || ui.work_branch || "") +
+        "`\n- 项目：`" +
+        proj +
+        "`\n- 文件：" +
+        fileList.length +
+        " 个 · " +
+        remoteLabel;
+      if (replyEl) replyEl.innerHTML = md(successReply);
+      persistHitlFromHost(host, { code_commit_ui: successUi, text: successReply });
     } catch (e) {
       errEl.style.display = "";
       errEl.textContent = "请求失败：" + e.message;
