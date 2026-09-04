@@ -32,13 +32,16 @@ def _enrich_unit_for_ui(u: dict[str, Any], cfg: Any) -> dict[str, Any]:
     uid = str(row.get("id") or "")
     action = str(row.get("action") or "")
     if uid == "bridge" or action in {"sync_bridge", "sync_bridge_reinstall"}:
-        if getattr(cfg, "auto_restart_bridge", False):
+        if getattr(cfg, "auto_restart_bridge", True):
             row["action"] = "sync_bridge_reinstall"
-            row["action_hint"] = "同步 bridge 后重装并重启 DSH（已开启 auto_restart_bridge）"
+            row["action_hint"] = "同步 bridge 后重装并重启远端 DSH（面板 UI 立即生效）"
             row["risk"] = "high"
         else:
             row["action"] = "sync_bridge"
-            row["action_hint"] = "同步 bridge 文件，不重启 DSH"
+            row["action_hint"] = (
+                "仅同步 bridge 文件，不重启 DSH（auto_restart_bridge=false）；"
+                "面板 UI 需另行重启远端 DSH 才生效"
+            )
             row["risk"] = "medium"
     elif uid == "engine" or action == "sync_engine_restart":
         if getattr(cfg, "auto_restart_engine", True):
@@ -602,9 +605,16 @@ def confirm(
         if result.get("engine_restart"):
             actions.append("已重启引擎" + (f"（:{engine_port}）" if engine_port else ""))
         if result.get("bridge_restart"):
-            actions.append("已重装 bridge")
+            actions.append("已重装 bridge 并后台重启远端 DSH")
         if not actions:
-            actions.append("仅同步文件（未重启 DSH）")
+            actions.append("仅同步文件")
+        # 人只触发：含 bridge 且已重启时，成功摘要点明面板已收尾
+        if result.get("bridge_restart"):
+            reply_extra = "\n- 面板：远端 DSH 已后台重启（bridge 变更已收尾）"
+        elif "bridge" in unit_ids and not getattr(cfg, "auto_restart_bridge", True):
+            reply_extra = "\n- 面板：未重启 DSH（auto_restart_bridge=false）"
+        else:
+            reply_extra = ""
         title = f"{mode_label}部署完成"
         receipt_path = str(result.get("remote_receipt_path") or "").strip()
         synced_rels = []
@@ -624,11 +634,11 @@ def confirm(
         health_bit = "探活通过" if health_ok else (
             "探活未通过" if isinstance(health, dict) and health.get("ok") is False else "探活未配置"
         )
-        # 与提交成功卡一致：上方短摘要；细节放 deploy_success 卡片
         reply = (
             f"**{title}** · `{unit_short or '—'}`\n"
             f"- 环境：`{job.get('env') or cfg.default_env}` · {health_bit}\n"
             f"- 远端：`{remote}`"
+            f"{reply_extra}"
         )
         success = {
             "title": title,
