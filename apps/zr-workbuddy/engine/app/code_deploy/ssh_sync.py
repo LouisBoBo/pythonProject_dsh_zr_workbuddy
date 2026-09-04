@@ -372,31 +372,56 @@ def _write_remote_deploy_receipt(
     }
     rel_path = "apps/zr-workbuddy/engine/data/code_deploy/last_deploy_receipt.json"
     remote_path = f"{app.rstrip('/')}/{rel_path}"
+    remote_dir = f"{app.rstrip('/')}/apps/zr-workbuddy/engine/data/code_deploy"
     body = json.dumps(receipt, ensure_ascii=False, indent=2)
-    # 用 python 写文件，避免 shell 转义问题
-    py = (
-        "import os,sys\n"
-        f"p={remote_path!r}\n"
-        "os.makedirs(os.path.dirname(p), exist_ok=True)\n"
-        "open(p,'w',encoding='utf-8').write(sys.stdin.read())\n"
-        "print('receipt_ok', p)\n"
-    )
     _log(f"写入远端部署回执 → {remote_path}")
-    # stdin via ssh
+
+    # 本机写临时文件再 scp，避免 ssh python -c 引号被踩碎
+    import tempfile
+
+    key = Path(cfg.ssh_key_path).expanduser().resolve()
+    user, host, port = cfg.ssh_user, cfg.ssh_host, int(cfg.ssh_port)
+    tmp = ""
+    c2, o2, e2 = 1, "", "scp 未执行"
     try:
-        p = subprocess.run(
-            ssh + ["python3", "-c", py],
-            input=body,
-            capture_output=True,
-            text=True,
-            timeout=40,
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", suffix=".json", delete=False
+        ) as tf:
+            tf.write(body)
+            tmp = tf.name
+        mkdir_c, _, mkdir_e = _run(
+            ssh + [f"mkdir -p -- {shlex.quote(remote_dir)}"], timeout=30
         )
+        if mkdir_c != 0:
+            return {"ok": False, "error": f"建目录失败：{(mkdir_e or '')[:200]}", "path": remote_path}
+        scp = [
+            "scp",
+            "-i",
+            str(key),
+            "-P",
+            str(port),
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "ConnectTimeout=15",
+            tmp,
+            f"{user}@{host}:{remote_path}",
+        ]
+        c2, o2, e2 = _run(scp, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as e:
         return {"ok": False, "error": str(e), "path": remote_path}
-    if p.returncode != 0 or "receipt_ok" not in (p.stdout or ""):
+    finally:
+        if tmp:
+            try:
+                Path(tmp).unlink(missing_ok=True)
+            except OSError:
+                pass
+    if c2 != 0:
         return {
             "ok": False,
-            "error": ((p.stderr or p.stdout or "写回执失败")[:300]),
+            "error": ((e2 or o2 or "scp 回执失败")[:300]),
             "path": remote_path,
         }
     return {"ok": True, "path": remote_path, "error": ""}
