@@ -575,6 +575,9 @@ def confirm(
             "ok": overall_ok,
             "job_id": job_id,
             "status": "done",
+            "workspace": str(job.get("workspace") or ""),
+            "message": msg,
+            "files": list(files),
             "commit_result": result,
             "reply": reply,
             "detail": reply,
@@ -618,23 +621,46 @@ def push_retry(job_id: str) -> dict[str, Any]:
         or resolve_work_branch(workspace=root, work_branch=cfg.work_branch)
     )
     push_out = _push_work_branch(root, branch)
-    new_result = {**prev, "push": push_out, "ok": True if push_out.get("ok") else prev.get("ok", True)}
+    new_result = {
+        **prev,
+        "push": push_out,
+        "ok": True if push_out.get("ok") else prev.get("ok", True),
+        "branch": prev.get("branch") or branch,
+    }
     update_job(default_data_dir(), job_id, commit_result=new_result, status="done")
+    files = list(prev.get("files") or job.get("files") or [])
+    msg = str(job.get("message") or prev.get("message") or "").strip()
+    workspace = str(job.get("workspace") or "")
     if push_out.get("ok"):
+        sha = str(new_result.get("commit") or "").strip()
+        reply = f"已提交到分支 `{branch}`"
+        if sha:
+            reply += f"（{sha}）"
+        reply += "，并已推送到远程。"
         return {
             "ok": True,
             "job_id": job_id,
+            "status": "done",
+            "workspace": workspace,
+            "message": msg,
+            "files": files,
             "push": push_out,
-            "reply": "已重新推送到远程",
-            "detail": "push ok",
+            "commit_result": new_result,
+            "reply": reply,
+            "detail": reply,
         }
     return {
         "ok": False,
         "job_id": job_id,
+        "workspace": workspace,
+        "message": msg,
+        "files": files,
         "push": push_out,
+        "commit_result": new_result,
         "detail": push_out.get("error") or "推送失败",
         "reply": push_out.get("error") or "推送失败",
         "hint": push_retry_hint(str(push_out.get("raw_error") or push_out.get("error") or "")),
+        "push_retry_needed": True,
     }
 
 

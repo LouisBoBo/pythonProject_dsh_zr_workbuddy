@@ -118,6 +118,7 @@ window.__ModuleLoader__.load({
       "#dshMesMsgs .cd-chosen{padding:6px 12px 10px;font-size:12px}" +
       "#dshMesMsgs .cd-chosen-row{display:flex;gap:8px;margin:3px 0}" +
       "#dshMesMsgs .cd-k{color:#9ca3af;min-width:56px;flex:none}" +
+      "#dshMesMsgs .cdp-card .cd-k{min-width:72px}" +
       "#dshMesMsgs .cc-ok-files{margin:0;padding:0 12px 10px 28px;max-height:200px;overflow:auto;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#374151}" +
       "#dshMesMsgs .cc-ok-files li{margin:2px 0;word-break:break-all}" +
       "#dshMesMsgs .cd-path-row{display:flex;gap:8px;align-items:stretch}" +
@@ -697,7 +698,37 @@ window.__ModuleLoader__.load({
                 "",
               synced_rels: succ.synced_rels || [],
             });
-            if (replyEl) replyEl.innerHTML = md(d.reply || succ.title || "部署完成");
+            if (replyEl) {
+              var unitTxt =
+                unitList.slice(0, 4).join("、") + (unitList.length > 4 ? "…" : "");
+              var healthObj =
+                succ.health || (d.deploy_result && d.deploy_result.health) || null;
+              var healthBit =
+                healthObj && healthObj.ok
+                  ? "探活通过"
+                  : healthObj && healthObj.ok === false
+                    ? "探活未通过"
+                    : "探活未配置";
+              var remoteTxt =
+                succ.remote ||
+                ((succ.ssh_host || d.ssh_host || ui.ssh_host || "") +
+                  (succ.ssh_app_path || d.ssh_app_path || ui.ssh_app_path
+                    ? ":" + (succ.ssh_app_path || d.ssh_app_path || ui.ssh_app_path)
+                    : ""));
+              replyEl.innerHTML = md(
+                "**" +
+                  (succ.title || doneMode + "部署完成") +
+                  "** · `" +
+                  (unitTxt || "—") +
+                  "`\n- 环境：`" +
+                  (succ.env || d.env || ui.env || "—") +
+                  "` · " +
+                  healthBit +
+                  "\n- 远端：`" +
+                  (remoteTxt || "—") +
+                  "`"
+              );
+            }
           } catch (e) {
             errEl.style.display = "";
             errEl.textContent = "请求失败：" + e.message;
@@ -834,13 +865,45 @@ window.__ModuleLoader__.load({
               if (replyEl) replyEl.innerHTML = md(out.reply || out.detail || "重试推送失败");
               return;
             }
+            var cr2 = out.commit_result || cr || {};
+            var fileList =
+              Array.isArray(cr2.files) && cr2.files.length
+                ? cr2.files
+                : Array.isArray(out.files)
+                  ? out.files
+                  : Array.isArray(d.files)
+                    ? d.files
+                    : [];
+            var title = "已提交并推送";
             card.className = "cd-card cc-card done";
-            card.innerHTML =
-              '<div class="cd-done-banner ok" style="margin:12px"><span class="cd-done-icon">✓</span>' +
-              "<div><strong>已推送到远程</strong> · " + esc(cr.branch || "") +
-              (cr.commit ? " · " + esc(cr.commit) : "") +
-              "</div></div>";
-            if (replyEl) replyEl.innerHTML = md(out.reply || "已重新推送到远程");
+            card.innerHTML = ccSuccessCardHtml({
+              title: title,
+              workspace: out.workspace || d.workspace || "",
+              branch: cr2.branch || cr.branch || "",
+              commit: cr2.commit || cr.commit || "",
+              remote: "已推送",
+              files: fileList,
+              message: out.message || cr2.message || d.message || "",
+            });
+            if (replyEl) {
+              var proj =
+                String(out.workspace || d.workspace || "")
+                  .replace(/\\/g, "/")
+                  .split("/")
+                  .filter(Boolean)
+                  .pop() || "—";
+              replyEl.innerHTML = md(
+                "**" +
+                  title +
+                  "** · `" +
+                  (cr2.branch || cr.branch || "") +
+                  "`\n- 项目：`" +
+                  proj +
+                  "`\n- 文件：" +
+                  fileList.length +
+                  " 个 · 已推送"
+              );
+            }
             if (typeof hooks.onCommitted === "function") hooks.onCommitted(out);
           })
           .catch(function (e) {
@@ -920,12 +983,20 @@ window.__ModuleLoader__.load({
     function cdpSuccessCardHtml(info) {
       info = info || {};
       var units = Array.isArray(info.units) ? info.units : [];
+      var rels = Array.isArray(info.synced_rels) ? info.synced_rels : [];
       var title = info.title || ((info.mode_label || "部署") + "完成");
+      var modeLabel =
+        info.mode_label || (info.mode === "full" ? "全量" : info.mode === "incremental" ? "增量" : "—");
       var remote =
         info.remote ||
         ((info.ssh_host || "") + (info.ssh_app_path ? ":" + info.ssh_app_path : ""));
       var access = info.access_url || info.health_url || "";
-      var actions = Array.isArray(info.actions) ? info.actions : [];
+      var appName = String(info.ssh_app_path || remote || "")
+        .replace(/\\/g, "/")
+        .replace(/\/+$/, "");
+      var slash = appName.lastIndexOf("/");
+      appName = slash >= 0 ? appName.slice(slash + 1) : appName || "—";
+      var actions = Array.isArray(info.actions) ? info.actions.slice() : [];
       if (!actions.length) {
         if (info.engine_restart) {
           actions.push(
@@ -937,17 +1008,25 @@ window.__ModuleLoader__.load({
         if (!actions.length) actions.push("仅同步文件（未重启 DSH）");
       }
       var health = info.health || null;
+      var healthTxt = "—";
+      if (health && health.ok != null) {
+        healthTxt =
+          (health.ok ? "通过" : "未通过") +
+          (health.status != null ? "（" + health.status + "）" : "");
+      }
+      var unitShort = units.slice(0, 4).join("、") + (units.length > 4 ? "…" : "");
+      var banner = title + (unitShort ? " · " + unitShort : "");
       var html =
         '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">部署完成</span></div>' +
         '<p class="cd-summary">' +
         esc(title) +
         "</p></div>" +
         '<div class="cd-done-banner ok" style="margin:0 12px 8px"><span class="cd-done-icon">✓</span><div><strong>' +
-        esc(title) +
+        esc(banner) +
         "</strong></div></div>" +
         '<div class="cd-chosen">' +
-        '<div class="cd-chosen-row"><span class="cd-k">访问地址</span><span class="cd-v">' +
-        cdpAccessLinkHtml(access) +
+        '<div class="cd-chosen-row"><span class="cd-k">项目</span><span class="cd-v">' +
+        esc(appName) +
         "</span></div>" +
         '<div class="cd-chosen-row"><span class="cd-k">远端</span><span class="cd-v">' +
         esc(remote || "—") +
@@ -956,49 +1035,45 @@ window.__ModuleLoader__.load({
         esc(info.env || "—") +
         "</span></div>" +
         '<div class="cd-chosen-row"><span class="cd-k">方式</span><span class="cd-v">' +
-        esc(info.mode_label || (info.mode === "full" ? "全量" : "增量")) +
+        esc(modeLabel) +
+        "</span></div>" +
+        '<div class="cd-chosen-row"><span class="cd-k">访问</span><span class="cd-v">' +
+        cdpAccessLinkHtml(access) +
+        "</span></div>" +
+        '<div class="cd-chosen-row"><span class="cd-k">探活</span><span class="cd-v">' +
+        esc(healthTxt) +
         "</span></div>" +
         '<div class="cd-chosen-row"><span class="cd-k">动作</span><span class="cd-v">' +
         esc(actions.join("；")) +
-        "</span></div>";
+        "</span></div>" +
+        '<div class="cd-chosen-row"><span class="cd-k">单元</span><span class="cd-v">' +
+        units.length +
+        " 个</span></div>";
       if (info.head_sha) {
         html +=
-          '<div class="cd-chosen-row"><span class="cd-k">基线 SHA</span><span class="cd-v">' +
+          '<div class="cd-chosen-row"><span class="cd-k">基线</span><span class="cd-v">' +
           esc(String(info.head_sha).slice(0, 12)) +
-          "</span></div>";
-      }
-      if (health && health.ok != null) {
-        html +=
-          '<div class="cd-chosen-row"><span class="cd-k">探活</span><span class="cd-v">' +
-          esc(
-            (health.ok ? "通过" : "未通过") +
-              (health.status != null ? " · HTTP " + health.status : "")
-          ) +
           "</span></div>";
       }
       if (info.remote_receipt_path) {
         html +=
-          '<div class="cd-chosen-row"><span class="cd-k">服务器回执</span><span class="cd-v" style="word-break:break-all">' +
+          '<div class="cd-chosen-row"><span class="cd-k">回执</span><span class="cd-v" style="word-break:break-all">' +
           esc(info.remote_receipt_path) +
           "</span></div>";
       }
-      html +=
-        '<div class="cd-chosen-row"><span class="cd-k">单元</span><span class="cd-v">' +
-        units.length +
-        " 个</span></div></div>";
+      html += "</div>";
       if (units.length) {
         html +=
-          '<div class="cd-label" style="padding:0 12px 4px">已部署单元</div><ul class="cc-ok-files">';
+          '<div class="cd-label" style="padding:0 12px 4px">本批单元</div><ul class="cc-ok-files">';
         for (var i = 0; i < Math.min(units.length, 40); i++) {
           html += "<li>" + esc(String(units[i])) + "</li>";
         }
         if (units.length > 40) html += "<li>…另有 " + (units.length - 40) + " 个</li>";
         html += "</ul>";
       }
-      var rels = Array.isArray(info.synced_rels) ? info.synced_rels : [];
       if (rels.length) {
         html +=
-          '<div class="cd-label" style="padding:0 12px 4px">实际同步路径</div><ul class="cc-ok-files">';
+          '<div class="cd-label" style="padding:0 12px 4px">同步路径</div><ul class="cc-ok-files">';
         for (var j = 0; j < Math.min(rels.length, 40); j++) {
           html += "<li>" + esc(String(rels[j])) + "</li>";
         }

@@ -594,7 +594,6 @@ def confirm(
             logs=logs[-80:],
         )
         unit_ids = [u.id for u in selected]
-        ids = "、".join(unit_ids)
         access = (cfg.health_url or "").strip() or str(job.get("health_url") or "").strip()
         remote = f"{cfg.ssh_host}:{cfg.ssh_app_path}"
         engine_port = result.get("remote_engine_port")
@@ -611,24 +610,26 @@ def confirm(
         synced_rels = []
         for u in selected:
             synced_rels.extend(list(u.local_rels))
-        reply_lines = [
-            f"**{title}**",
-            f"- 访问地址：{access or '（未配置 health_url）'}",
-            f"- 远端：`{remote}`",
-            f"- 环境：`{job.get('env') or cfg.default_env}`",
-            f"- 单元（{len(unit_ids)}）：{ids}",
-            f"- 动作：{'；'.join(actions)}",
-        ]
+        # 去重保序
+        _seen_rel: set[str] = set()
+        synced_unique: list[str] = []
+        for r in synced_rels:
+            if r not in _seen_rel:
+                _seen_rel.add(r)
+                synced_unique.append(r)
+        synced_rels = synced_unique
         head_sha = sha or str(job.get("head_sha") or "").strip()
-        if head_sha:
-            reply_lines.append(f"- 基线 SHA：`{head_sha[:12]}`")
-        if isinstance(health, dict) and health.get("ok") is not None:
-            reply_lines.append(
-                f"- 探活：{'通过' if health.get('ok') else '未通过'}（{health.get('status') or health.get('detail') or ''}）"
-            )
-        if receipt_path:
-            reply_lines.append(f"- 服务器回执：`{receipt_path}`（可 SSH cat 核对本次实际同步范围）")
-        reply = "\n".join(reply_lines)
+        unit_short = "、".join(unit_ids[:4]) + ("…" if len(unit_ids) > 4 else "")
+        health_ok = isinstance(health, dict) and bool(health.get("ok"))
+        health_bit = "探活通过" if health_ok else (
+            "探活未通过" if isinstance(health, dict) and health.get("ok") is False else "探活未配置"
+        )
+        # 与提交成功卡一致：上方短摘要；细节放 deploy_success 卡片
+        reply = (
+            f"**{title}** · `{unit_short or '—'}`\n"
+            f"- 环境：`{job.get('env') or cfg.default_env}` · {health_bit}\n"
+            f"- 远端：`{remote}`"
+        )
         success = {
             "title": title,
             "mode": deploy_mode,
