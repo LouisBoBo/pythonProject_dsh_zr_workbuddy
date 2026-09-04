@@ -258,6 +258,20 @@ class CodeDeployUnitTests(unittest.TestCase):
         self.assertFalse(probe_health("http://127.0.0.1:9/").get("ok"))
         self.assertFalse(probe_health("http://localhost/").get("ok"))
 
+    def test_remote_port_ignores_health_url(self):
+        """health_url 公网反代口不得覆盖引擎 remote_engine_port。"""
+        from app.code_deploy.config import CodeDeployConfig
+        from app.code_deploy.ssh_sync import _resolve_remote_port
+
+        cfg = CodeDeployConfig(
+            enabled=True,
+            health_url="http://175.178.238.31:8092/",
+            remote_engine_port=8091,
+        )
+        self.assertEqual(_resolve_remote_port(cfg), 8091)
+        cfg2 = CodeDeployConfig(enabled=True, health_url="", remote_engine_port=8092)
+        self.assertEqual(_resolve_remote_port(cfg2), 8091)  # 8092 视为反代保留口
+
 
 if __name__ == "__main__":
     unittest.main()

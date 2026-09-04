@@ -271,18 +271,16 @@ def deploy_units_ssh(
 
 
 def _resolve_remote_port(cfg: CodeDeployConfig) -> int:
-    port = int(getattr(cfg, "remote_engine_port", None) or 8091)
-    u = (cfg.health_url or "").strip()
-    if u.startswith(("http://", "https://")):
-        try:
-            from urllib.parse import urlparse
+    """远端引擎监听端口：只认 remote_engine_port，绝不从 health_url 偷端口。
 
-            p = urlparse(u).port
-            if p:
-                port = int(p)
-        except Exception:  # noqa: BLE001
-            pass
-    if port in {80, 443, 22, 3306, 8000, 8009, 888, 8888}:
+    health_url 常为公网 nginx（如 :8092），与引擎回环 :8091 不是同一端口；
+    若用 health_url 覆盖，会误判「nginx 占用引擎端口」并拒绝部署。
+    """
+    port = int(getattr(cfg, "remote_engine_port", None) or 8091)
+    # 保留口 / 公网反代口：禁止当作引擎监听
+    if port in {80, 443, 22, 3306, 8000, 8009, 8092, 888, 8888}:
+        return 8091
+    if port < 1 or port > 65535:
         return 8091
     return port
 
