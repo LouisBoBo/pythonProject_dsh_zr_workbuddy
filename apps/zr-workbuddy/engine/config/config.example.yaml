@@ -71,3 +71,9 @@ code_deploy:
   env_whitelist: [staging]
   allow_production: false
   health_timeout_sec: 8
+
+# 第三方 / feature 安装（P2；业务验收看引擎功能插件页）
+feature_install:
+  max_zip_bytes: 5242880         # zip 最大字节
+  max_files: 200
+  allow_force: true              # 是否允许覆盖已有 features/<id>

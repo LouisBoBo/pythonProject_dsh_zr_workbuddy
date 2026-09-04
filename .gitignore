@@ -43,3 +43,5 @@ apps/*/plugins/*/node_modules/
 **/engine/data/code_deploy/jobs/
 **/engine/data/code_deploy/last_deploy.json
 **/engine/data/code_deploy/jobs.lock
+**/engine/data/feature_quarantine/
+**/engine/data/feature_install_tmp/

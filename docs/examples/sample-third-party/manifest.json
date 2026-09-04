@@ -1,0 +1,9 @@
+{
+  "id": "sample-third-party",
+  "name": "样例第三方插件",
+  "purpose": "演示 WorkBuddy 第三方安装契约：校验通过后可 enable，经 mesEngine 调 status",
+  "version": "1.0.0",
+  "author": "ZR-WorkBuddy",
+  "inject": ["tools"],
+  "requires_engine_commands": ["status"]
+}

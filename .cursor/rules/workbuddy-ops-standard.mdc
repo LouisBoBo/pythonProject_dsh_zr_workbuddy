@@ -1,0 +1,37 @@
+---
+description: WorkBuddy 运行约定——保留 DSH 架构、日常不跑宿主、验收看引擎
+alwaysApply: true
+---
+
+# WorkBuddy 运行与验收标准
+
+与用户协作、排障、写文档、做部署时**一律按本标准**（细则见 `AGENTS.md` §0、`docs/三大核心目标落地方案.md`）。
+
+## 四条铁律
+
+1. **架构保留 DSH 写法**  
+   - 保留唯一 `plugins/mes-bridge` + `features/` 热插拔契约。  
+   - **禁止**删除 Bridge、禁止再增业务正式 Cordis 包、禁止把业务堆进 profile。
+
+2. **日常当作本机/服务器未装 DSH**  
+   - 不以打开 Harness/聊天窗口为步骤；不把「重启 DSH」当业务收尾。  
+   - `auto_restart_bridge` 默认 false；无远端 profile 时跳过宿主重启属正常，不得当部署失败。
+
+3. **验收与发布只认引擎**  
+   - 成败看：引擎网页 / 探活 / `engine.sh … ensure|restart`。  
+   - 增量部署：改哪发哪；引擎单元收尾优先；bridge 同步≠业务成败条件。
+
+4. **第三方只进 `features/`**  
+   - 校验 → enable（`plugins.json` / 引擎功能插件页）→ 可按 `feature:<id>` 部署。  
+   - 安装与启停不依赖本机是否在跑 DSH。
+
+## 禁止说成
+
+- ❌「必须重启 DSH 业务才生效」（日常业务路径）  
+- ❌「没装 DSH 就装不了第三方 / 不是 DSH 架构」  
+- ❌「删掉 Bridge 也一样」（会退出 DSH 宿主架构）
+
+## 可以这样说
+
+- ✅「架构在（Bridge+features），宿主可不上；验收看引擎」  
+- ✅「聊天里 Cordis 热挂工具」属 DSH 进程能力，非员工网页验收项

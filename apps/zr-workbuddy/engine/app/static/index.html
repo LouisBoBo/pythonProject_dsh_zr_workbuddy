@@ -307,6 +307,30 @@
   .plugins-head { margin-bottom: 16px; text-align: left; }
   .plugins-head h2 { font-size: 18px; font-weight: 600; }
   .plugins-head p { font-size: 13px; color: var(--text-2); margin-top: 4px; line-height: 1.6; }
+  .plugin-install {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
+    padding: 14px 16px; margin-bottom: 14px; box-shadow: var(--shadow);
+  }
+  .plugin-install-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .plugin-install-hint { font-size: 12px; color: var(--text-2); line-height: 1.55; margin: 0 0 10px; }
+  .plugin-install-hint code { font-size: 11px; }
+  .plugin-install-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .plugin-install-row input[type="file"] { font-size: 13px; max-width: 100%; }
+  .plugin-force { font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+  .plugin-install-btn {
+    border: 1px solid var(--border); background: var(--bg-soft); color: var(--text);
+    border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer;
+  }
+  .plugin-install-btn.primary { background: #0f766e; border-color: #0f766e; color: #fff; }
+  .plugin-install-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  .plugin-install-report {
+    margin: 10px 0 0; padding: 10px 12px; font-size: 12px; line-height: 1.5;
+    background: var(--bg-soft); border-radius: 8px; white-space: pre-wrap; word-break: break-word;
+    color: var(--text-2); max-height: 180px; overflow: auto;
+  }
+  .plugin-card .ctrl .unlink {
+    border: none; background: transparent; color: #b91c1c; font-size: 12px; cursor: pointer; padding: 0;
+  }
   .plugin-list {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -431,7 +455,18 @@
         <div class="plugins-wrap">
           <div class="plugins-head">
             <h2>功能插件</h2>
-            <p>按需开启或关闭业务能力；列表自动扫描新增功能，无需改管理页。开关状态由本机自动保存，下次打开仍保持您的选择；改动约 1 秒生效，无需重启。</p>
+            <p>按需开启或关闭业务能力；列表自动扫描 <code>features/</code>。下方可<strong>上传 zip 安装第三方插件</strong>；装好后出现在列表中开关启停。约 1 秒生效，不依赖是否打开 DSH。</p>
+          </div>
+          <div class="plugin-install" id="pluginInstall">
+            <div class="plugin-install-title">安装第三方插件</div>
+            <p class="plugin-install-hint">选择符合契约的 zip（内含 <code>manifest.json</code> + <code>index.js</code>），先「校验」再「安装」。也可用命令行：<code>scripts/plugin.sh --app zr-workbuddy install-feature ./xxx.zip</code></p>
+            <div class="plugin-install-row">
+              <input type="file" id="pluginZipInput" accept=".zip,application/zip" />
+              <label class="plugin-force"><input type="checkbox" id="pluginForce" /> 覆盖已有同名插件</label>
+              <button type="button" class="plugin-install-btn" id="pluginPreflightBtn">校验</button>
+              <button type="button" class="plugin-install-btn primary" id="pluginInstallBtn">安装</button>
+            </div>
+            <pre class="plugin-install-report" id="pluginInstallReport" hidden></pre>
           </div>
           <div class="plugin-list" id="pluginList"></div>
         </div>
@@ -943,6 +978,7 @@ async function loadPlugins() {
     } else {
       list.innerHTML = items.map(p => {
         const on = enabled.has(p.id);
+        const ver = p.version ? '<span class="tag">v' + esc(String(p.version)) + '</span>' : '';
         return (
           '<div class="plugin-card" data-id="' + esc(p.id) + '">' +
             '<div class="info">' +
@@ -950,6 +986,7 @@ async function loadPlugins() {
               '<div class="meta">' +
                 '<span>' + (on ? "运行中" : "未启用") + '</span>' +
                 '<span class="tag">' + esc(p.id) + '</span>' +
+                ver +
               '</div>' +
               (p.purpose ? '<div class="purpose">' + esc(p.purpose) + '</div>' : '') +
             '</div>' +
@@ -958,6 +995,7 @@ async function loadPlugins() {
               '<button type="button" class="switch' + (on ? " on" : "") + '"' +
                 ' data-enable="' + (on ? "0" : "1") + '"' +
                 ' aria-checked="' + on + '" title="' + (on ? "点击停用" : "点击启用") + '"></button>' +
+              '<button type="button" class="unlink" data-purge="1" title="停用并移出 features">卸载</button>' +
             '</div>' +
           '</div>'
         );
@@ -970,6 +1008,13 @@ async function loadPlugins() {
           togglePlugin(id, enable);
         };
       });
+      list.querySelectorAll(".plugin-card button.unlink").forEach(btn => {
+        btn.onclick = () => {
+          const card = btn.closest(".plugin-card");
+          const id = card && card.getAttribute("data-id");
+          uninstallPlugin(id, true);
+        };
+      });
     }
     if (!_pluginsPoll) {
       _pluginsPoll = setInterval(() => {
@@ -978,6 +1023,62 @@ async function loadPlugins() {
     }
   } catch (e) {
     list.innerHTML = '<div class="plugins-empty">无法加载插件列表：' + esc(e.message) + '</div>';
+  }
+}
+
+function showInstallReport(obj) {
+  const el = $("pluginInstallReport");
+  el.hidden = false;
+  el.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+}
+
+async function uploadPlugin(mode) {
+  const input = $("pluginZipInput");
+  const file = input && input.files && input.files[0];
+  if (!file) {
+    showPluginsToast("请先选择 zip 文件", false);
+    return;
+  }
+  const force = $("pluginForce") && $("pluginForce").checked;
+  const fd = new FormData();
+  fd.append("file", file);
+  const url = mode === "install"
+    ? ("/api/plugins/install?force=" + (force ? "true" : "false"))
+    : "/api/plugins/preflight";
+  _pluginsBusy = true;
+  try {
+    const r = await fetch(url, { method: "POST", body: fd });
+    const d = await r.json();
+    showInstallReport(d);
+    if (!d.ok) {
+      showPluginsToast((d.detail || (d.errors && d.errors[0]) || "失败"), false);
+      return;
+    }
+    showPluginsToast(mode === "install" ? ("已安装 " + (d.id || "")) : ("校验通过 " + (d.id || "")), true);
+    if (mode === "install") await loadPlugins();
+  } catch (e) {
+    showPluginsToast(e.message || "请求失败", false);
+  } finally {
+    _pluginsBusy = false;
+  }
+}
+
+async function uninstallPlugin(id, purge) {
+  if (_pluginsBusy || !id) return;
+  if (!confirm((purge ? "停用并移出 features/：" : "仅停用：") + id + "？")) return;
+  _pluginsBusy = true;
+  try {
+    const r = await fetch("/api/plugins/" + encodeURIComponent(id) + (purge ? "?purge=true" : ""), {
+      method: "DELETE",
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.detail || "卸载失败");
+    showPluginsToast(d.detail || ("已处理 " + id), true);
+    await loadPlugins();
+  } catch (e) {
+    showPluginsToast(e.message || "卸载失败", false);
+  } finally {
+    _pluginsBusy = false;
   }
 }
 
@@ -3617,6 +3718,12 @@ initTheme();
 loadConvs();
 if (!convs.length) newConv(); else selectConv(convs[0].id);
 loadStatus();
+(function bindPluginInstall() {
+  const pre = $("pluginPreflightBtn");
+  const inst = $("pluginInstallBtn");
+  if (pre) pre.onclick = () => uploadPlugin("preflight");
+  if (inst) inst.onclick = () => uploadPlugin("install");
+})();
 loadConfig();
 </script>
 </body>

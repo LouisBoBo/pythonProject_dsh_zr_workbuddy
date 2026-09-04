@@ -62,7 +62,13 @@ def list_available() -> List[Dict[str, Any]]:
                 with open(man, encoding="utf-8") as f:
                     data = json.loads(f.read())
                 if isinstance(data, dict):
-                    meta.update({k: data[k] for k in ("id", "name", "purpose") if k in data})
+                    meta.update(
+                        {
+                            k: data[k]
+                            for k in ("id", "name", "purpose", "version", "author")
+                            if k in data
+                        }
+                    )
                     meta["id"] = name
                     meta["kind"] = "feature"
                     meta["path"] = f"features/{name}"

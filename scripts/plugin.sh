@@ -8,6 +8,9 @@
 #   scripts/plugin.sh --app <应用> disable <feature-id>             # 热停用，不重启
 #   scripts/plugin.sh --app <应用> features                         # 列出 features
 #   scripts/plugin.sh --app <应用> new <id> ["说明"]                # 新建 feature
+#   scripts/plugin.sh --app <应用> check-features [id…]             # 校验契约
+#   scripts/plugin.sh --app <应用> install-feature <dir|zip> [--force]
+#   scripts/plugin.sh --app <应用> uninstall-feature <id> [--purge]
 #   scripts/plugin.sh --app <应用> backup|restore …
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,7 +33,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 set -- "${ARGS[@]}"
-CMD="${1:?用法: plugin.sh --app <应用名> list|install|uninstall|enable|disable|features|new|backup|restore ...}"
+CMD="${1:?用法: plugin.sh --app <应用名> list|install|uninstall|enable|disable|features|new|check-features|install-feature|uninstall-feature|backup|restore ...}"
 shift || true
 
 [ -n "$APP" ] || APP="zr-workbuddy"
@@ -382,6 +385,37 @@ PY
     fi
     echo
     echo "✅ 已请求停用 $FID（bridge ~1s 内热卸载，无需重启）"
+    ;;
+
+  check-features)
+    (cd "$ENGINE" && PYTHONPATH=. python3 -m app.feature_install check "$@")
+    ;;
+
+  install-feature)
+    SRC="${1:?用法: plugin.sh --app $APP install-feature <dir|zip> [--force]}"
+    shift || true
+    FORCE_ARGS=()
+    for a in "$@"; do
+      case "$a" in --force) FORCE_ARGS+=(--force) ;; esac
+    done
+    case "$SRC" in
+      /*) ABS="$SRC" ;;
+      *) ABS="$ROOT/$SRC" ;;
+    esac
+    [ -e "$ABS" ] || { echo "找不到 $ABS"; exit 1; }
+    (cd "$ENGINE" && PYTHONPATH=. python3 -m app.feature_install install "$ABS" "${FORCE_ARGS[@]}")
+    echo
+    ;;
+
+  uninstall-feature)
+    FID="${1:?用法: plugin.sh --app $APP uninstall-feature <id> [--purge]}"
+    shift || true
+    EXTRA=()
+    for a in "$@"; do
+      case "$a" in --purge) EXTRA+=(--purge) ;; esac
+    done
+    (cd "$ENGINE" && PYTHONPATH=. python3 -m app.feature_install uninstall "$FID" "${EXTRA[@]}")
+    echo
     ;;
 
   backup)

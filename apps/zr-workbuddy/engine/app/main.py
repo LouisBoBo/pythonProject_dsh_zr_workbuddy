@@ -5,7 +5,7 @@ import os
 from typing import Any, Dict, List
 
 import httpx
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, File, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -929,6 +929,92 @@ def api_plugins_enable(body: PluginBody):
 def api_plugins_disable(body: PluginBody):
     from . import plugins_store
     return plugins_store.disable(body.id)
+
+
+@app.post(
+    "/api/plugins/preflight",
+    tags=["功能热插拔"],
+    summary="安装前校验第三方插件",
+    description="对本地目录路径或上传的 zip 做契约校验，不写入 features/。"
+    "multipart 字段名 file；或 query path=。业务验收看引擎页，不依赖 DSH。",
+)
+async def api_plugins_preflight(
+    file: UploadFile | None = File(None),
+    path: str = Query("", description="本机 feature 目录或 zip 路径"),
+):
+    from . import feature_install
+
+    if file is not None and (file.filename or "").strip():
+        import tempfile
+
+        suffix = ".zip" if (file.filename or "").lower().endswith(".zip") else ".bin"
+        os.makedirs(feature_install.install_tmp_dir(), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(
+            prefix="feat-up-", suffix=suffix, dir=feature_install.install_tmp_dir()
+        )
+        os.close(fd)
+        try:
+            data = await file.read()
+            with open(tmp, "wb") as f:
+                f.write(data)
+            return feature_install.preflight_path(tmp)
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    return feature_install.preflight_path(path)
+
+
+@app.post(
+    "/api/plugins/install",
+    tags=["功能热插拔"],
+    summary="安装第三方功能插件",
+    description="校验通过后原子落入 features/<id>/ 并默认 enable。"
+    "支持 multipart zip（字段 file）或 path 指向目录/zip；force 可覆盖已有 id。",
+)
+async def api_plugins_install(
+    file: UploadFile | None = File(None),
+    path: str = Query("", description="本机 feature 目录或 zip 路径"),
+    force: bool = Query(False, description="覆盖已存在的 features/<id>"),
+    enable: bool = Query(True, description="安装后是否写入 enable"),
+):
+    from . import feature_install
+
+    if file is not None and (file.filename or "").strip():
+        import tempfile
+
+        os.makedirs(feature_install.install_tmp_dir(), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(
+            prefix="feat-up-", suffix=".zip", dir=feature_install.install_tmp_dir()
+        )
+        os.close(fd)
+        try:
+            data = await file.read()
+            with open(tmp, "wb") as f:
+                f.write(data)
+            return feature_install.install_from_zip(tmp, force=force, enable=enable)
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    return feature_install.install_source(path, force=force, enable=enable)
+
+
+@app.delete(
+    "/api/plugins/{plugin_id}",
+    tags=["功能热插拔"],
+    summary="停用或卸载功能插件",
+    description="默认仅 disable；purge=true 时将 features/<id>/ 移入 engine/data/feature_quarantine/。",
+)
+def api_plugins_uninstall(
+    plugin_id: str,
+    purge: bool = Query(False, description="移入隔离区并删除 features 下目录"),
+):
+    from . import feature_install
+
+    return feature_install.uninstall_feature(plugin_id, purge=purge)
 
 
 @app.get(

@@ -587,7 +587,9 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
         if blocked:
             return blocked
         from .code_review import get_report as code_review_report
-        return code_review_report(rest[0] if rest else "")
+        rid = rest[0] if rest else ""
+        return code_review_report(rid)
+
     if cmd == "code-commit-status":
         blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
         if blocked:

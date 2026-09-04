@@ -12,6 +12,27 @@
 
 ---
 
+## 0. 运行与验收标准（默认约定）
+
+> Cursor 规则同步：`.cursor/rules/workbuddy-ops-standard.mdc`（alwaysApply）。
+
+本仓库**采用 DSH 架构写法**，但**日常操作面默认当作本机与服务器均未安装、也不运行 DSH**：
+
+| # | 标准 | 含义 |
+|---|---|---|
+| 1 | **架构保留** | 保留唯一 `plugins/mes-bridge` + `features/` 契约；**禁止删除 Bridge**；禁止再增业务正式 Cordis 包 |
+| 2 | **宿主可不上** | 不以 Harness/聊天窗口为步骤；不把「重启 DSH」当业务收尾；`auto_restart_bridge` 默认 false |
+| 3 | **验收看引擎** | 成败只认引擎网页 / 探活 / `engine.sh … ensure\|restart`；bridge 文件同步≠业务成败 |
+| 4 | **第三方进 features** | 校验 → enable → 可按单元部署；安装与启停**不依赖**是否在跑 DSH |
+
+**边界（勿混）：**
+
+- 「聊天里 Cordis 热挂 Agent 工具」发生在 **DSH 进程**（有人跑宿主时才用）——**不是**员工网页验收项。  
+- 删掉 Bridge = 退出 DSH 宿主架构；与「要用 DSH 架构」冲突，故**不得删**。  
+- 无远端 `~/.dsh/profiles/web` 时跳过宿主重启属**正常**，不得判部署失败。
+
+---
+
 ## 1. 框架 vs 业务（不要写混）
 
 **框架（`scripts/` / `vendor/`）**
