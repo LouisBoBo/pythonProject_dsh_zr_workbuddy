@@ -81,7 +81,6 @@ class CodeDeployUnitTests(unittest.TestCase):
 
     def test_policy_first_forces_full(self):
         from app.code_deploy.policy import decide_deploy_mode
-        from app.code_deploy.units import build_unit
 
         d = decide_deploy_mode(
             last_sha="",
@@ -91,7 +90,8 @@ class CodeDeployUnitTests(unittest.TestCase):
         )
         self.assertTrue(d.force_full)
         self.assertEqual(d.mode, "full")
-        self.assertFalse(d.allow_mode_override)
+        self.assertFalse(d.allow_upgrade_to_full)
+        self.assertFalse(d.recommend_full)
 
     def test_policy_feature_only_incremental(self):
         from app.code_deploy.policy import decide_deploy_mode
@@ -109,6 +109,7 @@ class CodeDeployUnitTests(unittest.TestCase):
         )
         self.assertEqual(d.mode, "incremental")
         self.assertFalse(d.force_full)
+        self.assertTrue(d.allow_upgrade_to_full)
 
     def test_policy_scripts_force_full(self):
         from app.code_deploy.policy import decide_deploy_mode
@@ -124,6 +125,28 @@ class CodeDeployUnitTests(unittest.TestCase):
         self.assertTrue(d.force_full)
         self.assertEqual(d.mode, "full")
 
+    def test_policy_binary_no_soft_recommend(self):
+        """变更面较大也不再出现「建议全量」中间态，仍为增量（可升级）。"""
+        from app.code_deploy.policy import decide_deploy_mode
+        from app.code_deploy.units import build_unit
+
+        units = [
+            build_unit("feature:a"),
+            build_unit("feature:b"),
+            build_unit("feature:c"),
+            build_unit("engine"),
+        ]
+        # 4 个单元 < 强制阈值 6 → 增量
+        d = decide_deploy_mode(
+            last_sha="abc123",
+            base_resolved=True,
+            paths=["apps/zr-workbuddy/features/a/index.js"],
+            units=units,
+        )
+        self.assertEqual(d.mode, "incremental")
+        self.assertFalse(d.force_full)
+        self.assertFalse(d.recommend_full)
+
     def test_policy_override_blocked_when_forced(self):
         from app.code_deploy.policy import apply_user_mode_override, decide_deploy_mode
 
@@ -131,16 +154,6 @@ class CodeDeployUnitTests(unittest.TestCase):
         out = apply_user_mode_override(d, "incremental")
         self.assertEqual(out.mode, "full")
         self.assertTrue(out.force_full)
-
-    def test_safe_local_path_blocks_escape(self):
-        from pathlib import Path
-
-        from app.code_deploy.ssh_sync import _safe_local_path
-
-        root = Path(_ENG).resolve().parents[2]
-        self.assertIsNotNone(_safe_local_path(root, "apps/zr-workbuddy/engine/app"))
-        self.assertIsNone(_safe_local_path(root, "/etc/passwd"))
-        self.assertIsNone(_safe_local_path(root, "../README.md"))
 
     def test_policy_requirements_not_force_full(self):
         """依赖变更走 engine 单元，不应锁死全仓全量。"""
@@ -175,6 +188,37 @@ class CodeDeployUnitTests(unittest.TestCase):
         self.assertFalse(d.force_full)
         self.assertEqual(d.mode, "incremental")
 
+    def test_execution_plan_matches_mode(self):
+        from app.code_deploy.policy import resolve_confirm_mode, resolve_execution_plan
+
+        full = [{"id": "engine"}, {"id": "bridge"}, {"id": "scripts"}]
+        incr = [{"id": "engine"}]
+        p_full = resolve_execution_plan(
+            mode="full", force_full=True, units_full=full, units_incremental=incr
+        )
+        self.assertEqual(p_full["mode"], "full")
+        self.assertEqual(p_full["unit_ids"], ["engine", "bridge", "scripts"])
+        self.assertTrue(p_full["locked"])
+
+        p_incr = resolve_execution_plan(
+            mode="incremental", force_full=False, units_full=full, units_incremental=incr
+        )
+        self.assertEqual(p_incr["mode"], "incremental")
+        self.assertEqual(p_incr["unit_ids"], ["engine"])
+        self.assertFalse(p_incr["locked"])
+
+        m, err = resolve_confirm_mode(
+            job_mode="full", force_full=True, requested_mode="incremental"
+        )
+        self.assertEqual(m, "full")
+        self.assertTrue(err)
+
+        m2, err2 = resolve_confirm_mode(
+            job_mode="incremental", force_full=False, requested_mode="full"
+        )
+        self.assertEqual(m2, "full")
+        self.assertFalse(err2)
+
     def test_filter_unchanged_dirty_paths(self):
         import tempfile
         from pathlib import Path
@@ -197,3 +241,23 @@ class CodeDeployUnitTests(unittest.TestCase):
             keep2, skipped2 = filter_unchanged_dirty_paths(root, [rel], {rel: "other"})
             self.assertEqual(keep2, [rel])
             self.assertEqual(skipped2, [])
+
+    def test_safe_local_path_blocks_escape(self):
+        from pathlib import Path
+
+        from app.code_deploy.ssh_sync import _safe_local_path
+
+        root = Path(_ENG).resolve().parents[2]
+        self.assertIsNotNone(_safe_local_path(root, "apps/zr-workbuddy/engine/app"))
+        self.assertIsNone(_safe_local_path(root, "/etc/passwd"))
+        self.assertIsNone(_safe_local_path(root, "../README.md"))
+
+    def test_health_blocks_loopback(self):
+        from app.code_deploy.ssh_sync import probe_health
+
+        self.assertFalse(probe_health("http://127.0.0.1:9/").get("ok"))
+        self.assertFalse(probe_health("http://localhost/").get("ok"))
+
+
+if __name__ == "__main__":
+    unittest.main()

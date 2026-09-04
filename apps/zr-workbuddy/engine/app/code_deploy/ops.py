@@ -26,6 +26,32 @@ def default_data_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "data"
 
 
+def _enrich_unit_for_ui(u: dict[str, Any], cfg: Any) -> dict[str, Any]:
+    """按真实配置改写 action_hint，避免卡片写「重启 DSH」但实际不会执行。"""
+    row = dict(u)
+    uid = str(row.get("id") or "")
+    action = str(row.get("action") or "")
+    if uid == "bridge" or action in {"sync_bridge", "sync_bridge_reinstall"}:
+        if getattr(cfg, "auto_restart_bridge", False):
+            row["action"] = "sync_bridge_reinstall"
+            row["action_hint"] = "同步 bridge 后重装并重启 DSH（已开启 auto_restart_bridge）"
+            row["risk"] = "high"
+        else:
+            row["action"] = "sync_bridge"
+            row["action_hint"] = "同步 bridge 文件，不重启 DSH"
+            row["risk"] = "medium"
+    elif uid == "engine" or action == "sync_engine_restart":
+        if getattr(cfg, "auto_restart_engine", True):
+            row["action_hint"] = "同步引擎代码后重启本应用引擎（不影响其它服务）"
+        else:
+            row["action_hint"] = "同步引擎文件；按配置跳过远端引擎重启"
+    return row
+
+
+def _enrich_units(units: list[dict[str, Any]], cfg: Any) -> list[dict[str, Any]]:
+    return [_enrich_unit_for_ui(u, cfg) for u in units if isinstance(u, dict)]
+
+
 def status() -> dict[str, Any]:
     avail = availability()
     cfg = get_config()
@@ -116,7 +142,7 @@ def prepare(
     base = (base_ref or "").strip() or last_sha or ""
 
     catalog_objs = list_catalog_units(root)
-    units_full = [u.to_dict() for u in catalog_objs]
+    units_full = _enrich_units([u.to_dict() for u in catalog_objs], cfg)
 
     remote_empty = None
     remote_probe_error = ""
@@ -215,19 +241,30 @@ def prepare(
         remote_empty=remote_empty,
         remote_probe_error=remote_probe_error,
     )
-    # mode=auto 走策略；显式 mode 尝试覆盖（强制全量时拒绝增量）
+    # mode=auto 走策略；显式 mode 仅允许增量→全量升级（强制全量不可降级）
     decision = apply_user_mode_override(decision, mode if mode != "auto" else "")
     deploy_mode = decision.mode
+    if decision.force_full:
+        deploy_mode = "full"
 
+    units_incremental = _enrich_units([u.to_dict() for u in incr_objs], cfg)
+    from .policy import resolve_execution_plan
+
+    execution = resolve_execution_plan(
+        mode=deploy_mode,
+        force_full=decision.force_full,
+        units_full=units_full,
+        units_incremental=units_incremental,
+    )
     active_objs = catalog_objs if deploy_mode == "full" else incr_objs
-    units = [u.to_dict() for u in active_objs]
+    units = _enrich_units([u.to_dict() for u in active_objs], cfg)
 
     avail = availability()
     can_deploy = bool(avail.get("ok")) and (
-        bool(units) if deploy_mode == "full" else True
+        bool(execution.get("unit_ids")) if deploy_mode == "full" else True
     )
-    # 增量且无单元：仍允许出卡，但 can_deploy=false（除非改全量）
-    if deploy_mode == "incremental" and not units:
+    # 增量且无单元：仍允许出卡，但 can_deploy=false（除非升级全量）
+    if deploy_mode == "incremental" and not execution.get("unit_ids"):
         can_deploy = False
 
     job_id = new_job_id()
@@ -240,9 +277,11 @@ def prepare(
         "env": target_env,
         "mode": deploy_mode,
         "force_full": decision.force_full,
-        "recommend_full": decision.recommend_full,
-        "allow_mode_override": decision.allow_mode_override,
+        "recommend_full": False,
+        "allow_mode_override": decision.allow_upgrade_to_full,
+        "allow_upgrade_to_full": decision.allow_upgrade_to_full,
         "policy": policy,
+        "execution": execution,
         "first_deploy": decision.first_deploy,
         "last_deploy_sha": last_sha,
         "base_ref": mapped.get("base_ref") or base or "(none)",
@@ -254,6 +293,7 @@ def prepare(
         "units_incremental": units_incremental,
         "changed_paths": mapped.get("paths") or [],
         "dirty_paths": mapped.get("dirty_paths") or [],
+        "dirty_skipped_same_as_last": mapped.get("dirty_skipped_same_as_last") or [],
         "skipped_paths": mapped.get("skipped_paths") or [],
         "ssh_host": cfg.ssh_host,
         "ssh_app_path": cfg.ssh_app_path,
@@ -267,24 +307,30 @@ def prepare(
 
     reason_txt = "；".join(decision.reasons[:3]) if decision.reasons else ""
     if deploy_mode == "full":
-        lock = "（已强制，不可改增量）" if decision.force_full else "（建议全量，可改增量但有风险）"
-        reply = (
-            f"策略判定 **全量部署**{lock} → **{target_env}**（`{cfg.ssh_host}`），"
-            f"**{len(units_full)}** 个单元。"
-            + (f"\n原因：{reason_txt}" if reason_txt else "")
-            + "\n人只须确认触发；未确认不会 rsync。"
-        )
+        if decision.force_full:
+            reply = (
+                f"策略判定 **全量部署**（已锁定，不可改增量）→ **{target_env}**"
+                f"（`{cfg.ssh_host}`），**{len(units_full)}** 个单元。"
+            )
+        else:
+            reply = (
+                f"将执行 **全量部署** → **{target_env}**（`{cfg.ssh_host}`），"
+                f"**{len(units_full)}** 个单元。"
+            )
+        if reason_txt:
+            reply += f"\n原因：{reason_txt}"
+        reply += "\n人只须确认触发；未确认不会 rsync。"
     elif not units_incremental:
         reply = (
             f"相对上次部署无业务单元变更（`{job['base_ref']}` → `{job['head_ref']}`）。"
-            "确认将不执行同步；若远端异常请改选全量。"
+            "确认将不执行同步；若远端异常可升级为全量。"
         )
     else:
         labels = "、".join(u["id"] for u in units_incremental)
         reply = (
             f"策略判定 **增量部署** → **{target_env}**：自动全选 **{labels}**。"
             + (f"\n原因：{reason_txt}" if reason_txt else "")
-            + "\n人只须确认触发；未确认不会 rsync。"
+            + "\n人只须确认触发；未确认不会 rsync。需要时可将本任务升级为全量。"
         )
     if decision.warnings:
         reply += "\n注意：" + "；".join(decision.warnings[:2])
@@ -299,7 +345,8 @@ def prepare(
         "env": target_env,
         "mode": deploy_mode,
         "force_full": decision.force_full,
-        "recommend_full": decision.recommend_full,
+        "recommend_full": False,
+        "execution": execution,
         "policy": policy,
         "first_deploy": decision.first_deploy,
         "last_deploy_sha": last_sha,
@@ -325,15 +372,19 @@ def _build_confirm_ui(job: dict[str, Any]) -> dict[str, Any]:
     mode = job.get("mode") or "incremental"
     first = bool(job.get("first_deploy"))
     force_full = bool(job.get("force_full"))
-    recommend_full = bool(job.get("recommend_full"))
-    allow_override = bool(job.get("allow_mode_override"))
+    allow_upgrade = (not force_full) and bool(
+        job.get("allow_upgrade_to_full", job.get("allow_mode_override"))
+    )
     units_full = job.get("units_full") or []
     units_incr = job.get("units_incremental") or []
     units = units_full if mode == "full" else units_incr
     policy = job.get("policy") or {}
-    reasons = policy.get("reasons") or []
+    reasons = policy.get("reasons") or job.get("reasons") or []
     warnings = policy.get("warnings") or []
-    badge = "强制全量" if force_full else ("建议全量" if recommend_full and mode == "full" else ("全量部署" if mode == "full" else "增量部署"))
+    execution = job.get("execution") or {}
+    badge = "全量部署" if mode == "full" else "增量部署"
+    if force_full:
+        badge = "强制全量"
     return {
         "kind": "confirm",
         "status": "pending",
@@ -342,9 +393,11 @@ def _build_confirm_ui(job: dict[str, Any]) -> dict[str, Any]:
         "env": job.get("env") or "",
         "mode": mode,
         "force_full": force_full,
-        "recommend_full": recommend_full,
-        "allow_mode_override": False if force_full else allow_override,
+        "recommend_full": False,
+        "allow_mode_override": allow_upgrade,
+        "allow_upgrade_to_full": allow_upgrade,
         "locked_mode": "full" if force_full else "",
+        "execution": execution,
         "first_deploy": first,
         "last_deploy_sha": job.get("last_deploy_sha") or "",
         "base_ref": job.get("base_ref") or "",
@@ -363,11 +416,15 @@ def _build_confirm_ui(job: dict[str, Any]) -> dict[str, Any]:
         "health_url": job.get("health_url") or "",
         "access_url": job.get("health_url") or "",
         "can_deploy": bool(job.get("can_deploy")),
-        "hint": "系统已按上次部署记录自动判定；人只确认触发",
+        "hint": (
+            "已判定全量：确认后同步全部单元，不可改增量"
+            if force_full
+            else "已判定增量：确认后只同步命中单元；需要时可升级为全量"
+        ),
         "summary": f"{badge} · {job.get('env')}",
         "desc": (
-            "对比上次成功部署 SHA 与当前 HEAD（含未提交变更）后自动选方式。"
-            "强制全量时不可改增量；建议全量时可改，但可能漏发。"
+            "二元策略：触发全量条件则全量锁定；否则增量。"
+            "对比上次成功部署 SHA → HEAD（含未提交，已部署同内容脏文件会忽略）。"
         ),
     }
 
@@ -414,56 +471,56 @@ def confirm(
     if not avail.get("ok"):
         return {"ok": False, "detail": avail.get("detail"), "reply": avail.get("detail"), "job_id": job_id}
 
-    # 强制全量：拒绝增量覆盖
-    requested = (mode if mode is not None else "") or ""
-    if job.get("force_full") and requested.lower() in {"incremental", "incr", "diff", "增量"}:
+    from .policy import resolve_confirm_mode, resolve_execution_plan
+
+    deploy_mode, mode_err = resolve_confirm_mode(
+        job_mode=str(job.get("mode") or "incremental"),
+        force_full=bool(job.get("force_full")),
+        requested_mode=mode,
+    )
+    if mode_err:
         return {
             "ok": False,
-            "detail": "当前变更必须全量部署，不能改选增量",
-            "reply": "当前变更必须全量部署，不能改选增量",
+            "detail": mode_err,
+            "reply": mode_err,
             "job_id": job_id,
             "force_full": True,
         }
 
-    deploy_mode = _normalize_mode(
-        mode if mode is not None else (job.get("mode") or "incremental"),
-        first_deploy=bool(job.get("first_deploy")),
+    # 执行集以策略计划为准：全量=目录全部单元；增量=prepare 命中单元（忽略客户端随意瘦身）
+    plan = resolve_execution_plan(
+        mode=deploy_mode,
+        force_full=bool(job.get("force_full")) and deploy_mode == "full",
+        units_full=job.get("units_full") or [],
+        units_incremental=job.get("units_incremental") or [],
     )
-    if job.get("force_full"):
-        deploy_mode = "full"
+    unit_ids = list(plan.get("unit_ids") or [])
+    if deploy_mode == "incremental" and unit_ids is not None and unit_ids == []:
+        # 无增量单元：允许「空确认」视为成功跳过，或升级全量；此处拒绝空同步
+        return {
+            "ok": False,
+            "detail": "当前无增量单元可同步；请升级为全量或取消",
+            "reply": "当前无增量单元可同步；请升级为全量或取消",
+            "job_id": job_id,
+        }
 
-    if deploy_mode == "full":
-        raw_units = job.get("units_full") or job.get("units") or []
-        # 全量：默认同步目录全部单元（忽略瘦身勾选，防漏发）
-        unit_ids = [u["id"] for u in raw_units if isinstance(u, dict) and u.get("id")]
-    else:
-        raw_units = job.get("units_incremental") or job.get("units") or []
-        # 增量：默认自动全选 diff 单元；若传入 unit_ids 则仍尊重（须为 prepare 集合子集）
-        if unit_ids is None:
-            unit_ids = [u["id"] for u in raw_units if isinstance(u, dict) and u.get("id")]
-        else:
-            allowed = {
-                str(u.get("id") or "")
-                for u in raw_units
-                if isinstance(u, dict) and u.get("id")
-            }
-            unit_ids = [str(x).strip() for x in unit_ids if str(x).strip() in allowed]
-
+    raw_units = (
+        (job.get("units_full") or [])
+        if deploy_mode == "full"
+        else (job.get("units_incremental") or [])
+    )
     unit_objs = []
     for u in raw_units:
         if isinstance(u, dict) and u.get("id"):
             built = resolve_units_from_ids([u["id"]])
             if built:
                 unit_objs.append(built[0])
-    selected = filter_units_by_ids(
-        unit_objs,
-        unit_ids if unit_ids is not None else [u.id for u in unit_objs],
-    )
+    selected = filter_units_by_ids(unit_objs, unit_ids)
     if not selected:
         return {
             "ok": False,
             "detail": "未选择部署单元",
-            "reply": "请至少勾选一个插件/单元，或改选全量部署",
+            "reply": "请升级为全量部署，或取消后重试",
             "job_id": job_id,
         }
 

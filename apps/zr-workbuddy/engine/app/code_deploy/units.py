@@ -18,7 +18,7 @@ class DeployUnit:
     kind: str  # feature | engine | bridge | skills | scripts
     label: str
     local_rels: tuple[str, ...]  # 相对仓库根，rsync 源
-    action: str  # sync_feature | sync_engine_restart | sync_bridge_reinstall | sync_only
+    action: str  # sync_feature | sync_engine_restart | sync_bridge | sync_bridge_reinstall | sync_only
     risk: str  # low | medium | high
     selected: bool = True
 
@@ -38,8 +38,10 @@ class DeployUnit:
 def _action_hint(action: str) -> str:
     return {
         "sync_feature": "仅同步插件目录，热加载，不重启",
-        "sync_engine_restart": "同步引擎代码后重启引擎进程",
-        "sync_bridge_reinstall": "同步 bridge 后重装并重启 DSH",
+        "sync_engine_restart": "同步引擎代码后重启本应用引擎（不影响其它服务）",
+        # 共享机默认只同步文件；仅 auto_restart_bridge=true 时才重装 DSH
+        "sync_bridge": "同步 bridge 文件，默认不重启 DSH",
+        "sync_bridge_reinstall": "同步 bridge 后重装并重启 DSH（仅显式开启时）",
         "sync_only": "仅同步文件",
     }.get(action, action)
 
@@ -120,8 +122,9 @@ def build_unit(unit_id: str, *, selected: bool = True) -> DeployUnit | None:
                 "apps/zr-workbuddy/plugins/mes-bridge",
                 "apps/zr-workbuddy/plugins/mes-runtime",
             ),
-            action="sync_bridge_reinstall",
-            risk="high",
+            # 默认只同步文件；是否重装 DSH 由 code_deploy.auto_restart_bridge 决定
+            action="sync_bridge",
+            risk="medium",
             selected=selected,
         )
     if uid == "skills":

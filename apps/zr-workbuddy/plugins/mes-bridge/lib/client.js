@@ -434,9 +434,10 @@ window.__ModuleLoader__.load({
         ui.locked_mode === "full" ||
         (String(ui.summary || "").indexOf("强制全量") === 0)
       );
-      var allowOverride = !forceFull && ui.allow_mode_override === true;
-      var mode = "full";
-      if (!forceFull && ui.mode === "incremental") mode = "incremental";
+      var allowUpgrade =
+        !forceFull &&
+        (ui.allow_upgrade_to_full === true || ui.allow_mode_override === true);
+      var mode = forceFull ? "full" : ui.mode === "full" ? "full" : "incremental";
       var reasons = Array.isArray(ui.reasons)
         ? ui.reasons
         : Array.isArray(policy.reasons)
@@ -458,16 +459,14 @@ window.__ModuleLoader__.load({
         var badge = forceFull
           ? "强制全量"
           : mode === "full"
-            ? ui.recommend_full
-              ? "建议全量"
-              : "全量部署"
+            ? "全量部署"
             : "增量部署";
         var goLabel = mode === "full" ? "确认全量部署" : "确认增量部署";
         var html =
           '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">' +
           badge +
           '</span><span class="cd-hint">' +
-          esc(ui.hint || "系统已自动判定；人只确认") +
+          esc(ui.hint || "二元判定：全量或增量；人只确认") +
           '</span></div><p class="cd-summary">' +
           esc(ui.summary || "") +
           '</p><p class="cd-desc">' +
@@ -488,31 +487,29 @@ window.__ModuleLoader__.load({
             "</p>";
         }
         html += '<div class="cd-label" style="padding:0 14px 4px">部署方式</div>';
-        if (forceFull || !allowOverride) {
-          // 强制或不允许覆盖：只展示锁定结果，不出现可点的增量选项
+        if (forceFull) {
+          html +=
+            '<p class="cd-desc" style="padding:0 14px 8px"><strong>全量部署（已锁定）</strong>' +
+            " — 触发全量条件，确认后同步全部单元，不可改增量。</p>";
+        } else if (!allowUpgrade) {
           html +=
             '<p class="cd-desc" style="padding:0 14px 8px"><strong>' +
-            (mode === "full" ? "全量部署（已锁定）" : "增量部署（已锁定）") +
-            "</strong>" +
-            (forceFull ? " — 不可改选增量，防止漏发。" : "。") +
-            "</p>";
+            (mode === "full" ? "全量部署" : "增量部署") +
+            "</strong></p>";
         } else {
           html +=
             '<div style="padding:0 14px 8px;display:flex;gap:16px;flex-wrap:wrap">' +
             '<label style="font-size:13px"><input type="radio" name="cdp-mode-' +
             esc(ui.job_id || "x") +
-            '" value="full"' +
-            (mode === "full" ? " checked" : "") +
-            "> 全量部署</label>" +
-            '<label style="font-size:13px"><input type="radio" name="cdp-mode-' +
-            esc(ui.job_id || "x") +
             '" value="incremental"' +
             (mode === "incremental" ? " checked" : "") +
-            "> 增量部署</label></div>";
-          if (ui.recommend_full && mode === "full") {
-            html +=
-              '<p class="cd-desc" style="padding:0 14px 8px">策略建议全量；改增量需自担漏发风险。</p>';
-          }
+            "> 增量部署（默认）</label>" +
+            '<label style="font-size:13px"><input type="radio" name="cdp-mode-' +
+            esc(ui.job_id || "x") +
+            '" value="full"' +
+            (mode === "full" ? " checked" : "") +
+            "> 升级为全量</label></div>" +
+            '<p class="cd-desc" style="padding:0 14px 8px">增量只同步命中单元；升级全量将同步目录全部单元。</p>';
         }
         html +=
           '<div class="cd-chosen">' +
@@ -599,7 +596,7 @@ window.__ModuleLoader__.load({
           card.querySelectorAll('input[name="' + radioName + '"]'),
           function (el) {
             el.onchange = function () {
-              if (el.checked && allowOverride && !forceFull) {
+              if (el.checked && allowUpgrade && !forceFull) {
                 mode = el.value === "full" ? "full" : "incremental";
                 paint();
               }

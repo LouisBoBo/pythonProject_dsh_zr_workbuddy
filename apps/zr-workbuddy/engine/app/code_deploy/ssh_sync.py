@@ -173,7 +173,7 @@ def deploy_units_ssh(
         if urec["ok"]:
             if unit.action == "sync_engine_restart":
                 need_engine = True
-            elif unit.action == "sync_bridge_reinstall":
+            elif unit.action in {"sync_bridge", "sync_bridge_reinstall"}:
                 # 共享机默认只 rsync bridge 文件，绝不自动重装/重启 DSH
                 if getattr(cfg, "auto_restart_bridge", False):
                     need_bridge = True
@@ -181,6 +181,8 @@ def deploy_units_ssh(
                     urec["logs"].append(
                         "已同步 bridge；跳过 DSH 重装（auto_restart_bridge=false）"
                     )
+                    # 对外展示用：本单元实际动作为仅同步
+                    urec["action_effective"] = "sync_bridge"
         results.append(urec)
         if not urec["ok"]:
             return {"ok": False, "error": f"单元 {unit.id} 失败：{urec.get('error')}", "results": results}

@@ -1,4 +1,10 @@
-"""部署策略：对比上次成功部署记录，自动判定全量 / 增量（人只触发确认）。"""
+"""部署策略：严格二元判定 —— 全量 或 增量，没有「建议全量」中间态。
+
+契约（必须同时满足 UI / prepare / confirm）：
+1. 触发全量条件 → mode=full 且 force_full=True，禁止改增量；确认时同步目录全部单元。
+2. 否则 → mode=incremental 且 force_full=False；确认时只同步 diff 命中单元。
+3. 增量任务允许人「升级」为全量（安全方向）；禁止把强制全量降为增量。
+"""
 from __future__ import annotations
 
 import re
@@ -7,9 +13,7 @@ from typing import Any
 
 from .units import DeployUnit, path_to_unit_id
 
-# 触及即强制全量（整仓脚手架 / 宿主依赖）。
-# 注意：engine/requirements.txt、runtime.yaml、bridge 源码等已映射到 engine/bridge 单元，
-# 由对应单元增量同步 + 引擎重启/远端 venv 安装即可，禁止因此锁死「全仓全量」。
+# 触及即强制全量（整仓脚手架 / 宿主）。业务映射单元（engine/bridge/feature）不在此列。
 _FORCE_FULL_PATH_RE = re.compile(
     r"("
     r"^scripts/"
@@ -23,7 +27,6 @@ _FORCE_FULL_PATH_RE = re.compile(
     re.I,
 )
 
-# 业务仓内未映射路径：可能漏发 → 强制全量
 _CRITICAL_UNMAPPED_RE = re.compile(
     r"^apps/zr-workbuddy/(features|plugins|engine)/",
     re.I,
@@ -42,29 +45,41 @@ _SKIP_UNMAPPED_RE = re.compile(
     re.I,
 )
 
+# 命中单元数达到此阈值 → 强制全量（不再有「建议全量可改增量」）
 _FORCE_FULL_UNIT_COUNT = 6
-_RECOMMEND_FULL_UNIT_COUNT = 4
 
 
 @dataclass
 class DeployDecision:
-    mode: str  # full | incremental
+    mode: str  # 仅 full | incremental
     force_full: bool
-    recommend_full: bool
     first_deploy: bool
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    allow_mode_override: bool = False
+    # 仅增量时可升级为全量；强制全量时恒为 False
+    allow_upgrade_to_full: bool = False
+
+    @property
+    def recommend_full(self) -> bool:
+        """兼容旧字段：二元策略下恒为 False。"""
+        return False
+
+    @property
+    def allow_mode_override(self) -> bool:
+        """兼容旧字段：仅表示「可升级全量」，不可降级为增量。"""
+        return self.allow_upgrade_to_full
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "mode": self.mode,
             "force_full": self.force_full,
-            "recommend_full": self.recommend_full,
+            "recommend_full": False,
             "first_deploy": self.first_deploy,
             "reasons": list(self.reasons),
             "warnings": list(self.warnings),
-            "allow_mode_override": self.allow_mode_override,
+            "allow_mode_override": self.allow_upgrade_to_full,
+            "allow_upgrade_to_full": self.allow_upgrade_to_full,
+            "locked": bool(self.force_full and self.mode == "full"),
         }
 
 
@@ -85,6 +100,38 @@ def collect_unmapped_critical(paths: list[str]) -> list[str]:
     return out[:40]
 
 
+def _full(
+    *,
+    first: bool,
+    reasons: list[str],
+    warnings: list[str],
+) -> DeployDecision:
+    return DeployDecision(
+        mode="full",
+        force_full=True,
+        first_deploy=first,
+        reasons=reasons or ["策略判定：强制全量"],
+        warnings=warnings,
+        allow_upgrade_to_full=False,
+    )
+
+
+def _incremental(
+    *,
+    first: bool,
+    reasons: list[str],
+    warnings: list[str],
+) -> DeployDecision:
+    return DeployDecision(
+        mode="incremental",
+        force_full=False,
+        first_deploy=first,
+        reasons=reasons,
+        warnings=warnings,
+        allow_upgrade_to_full=True,
+    )
+
+
 def decide_deploy_mode(
     *,
     last_sha: str,
@@ -95,67 +142,49 @@ def decide_deploy_mode(
     remote_empty: bool | None = None,
     remote_probe_error: str = "",
 ) -> DeployDecision:
-    """根据上次部署 SHA 对比结果自动判定。
-
-    - 无记录 / 基线失效 / 远端空 / 触及脚手架或未映射关键路径 → 强制全量
-    - 变更面过大 → 默认全量并提示（可覆盖）
-    - 否则增量，单元 = diff 命中集合（自动全选）
-    """
+    """二元判定：满足任一强制条件 → 全量；否则 → 增量。"""
     reasons: list[str] = []
     warnings: list[str] = []
     first = not bool((last_sha or "").strip())
     all_paths = [_norm(p) for p in (paths or []) if _norm(p)]
     dirty = [_norm(p) for p in (dirty_paths or []) if _norm(p)]
 
-    force = False
-    recommend = False
+    force_reasons: list[str] = []
 
     if first:
-        force = True
-        reasons.append("无上次成功部署记录（last_deploy.json），按首次全量处理")
+        force_reasons.append("无上次成功部署记录（last_deploy.json），按首次全量处理")
     elif not base_resolved:
-        force = True
-        reasons.append("上次部署 SHA 无法在本仓库解析（可能 rebase/换仓），强制全量以免漏文件")
+        force_reasons.append("上次部署 SHA 无法在本仓库解析（可能 rebase/换仓），强制全量以免漏文件")
 
     if remote_empty is True:
-        force = True
-        reasons.append("远端应用目录为空或不存在，强制全量")
+        force_reasons.append("远端应用目录为空或不存在，强制全量")
     elif remote_probe_error:
         warnings.append(f"远端探测未完成：{remote_probe_error}（仍按本机变更策略）")
 
     force_hits = [p for p in all_paths if _FORCE_FULL_PATH_RE.search(p)]
     if force_hits:
-        force = True
         sample = "、".join(force_hits[:5])
-        reasons.append(f"变更触及脚手架/依赖路径，强制全量：{sample}")
+        force_reasons.append(f"变更触及脚手架路径，强制全量：{sample}")
 
     unmapped = collect_unmapped_critical(all_paths)
     if unmapped:
-        force = True
         sample = "、".join(unmapped[:5])
-        reasons.append(f"存在未映射到部署单元的关键路径，增量可能漏发，强制全量：{sample}")
+        force_reasons.append(f"存在未映射到部署单元的关键路径，强制全量：{sample}")
+
+    dirty_unmapped = collect_unmapped_critical(dirty)
+    if dirty_unmapped:
+        sample = "、".join(dirty_unmapped[:5])
+        force_reasons.append(f"未提交变更含未映射关键路径，强制全量：{sample}")
 
     kinds = {u.kind for u in units}
-    feature_n = sum(1 for u in units if u.kind == "feature")
     unit_n = len(units)
 
     if "scripts" in kinds and ("engine" in kinds or "bridge" in kinds):
-        force = True
-        reasons.append("同时变更 scripts 与引擎/bridge，强制全量保证远端可重启")
+        force_reasons.append("同时变更 scripts 与引擎/bridge，强制全量保证远端可重启")
 
     if unit_n >= _FORCE_FULL_UNIT_COUNT:
-        force = True
-        reasons.append(
+        force_reasons.append(
             f"命中部署单元 {unit_n} 个（≥{_FORCE_FULL_UNIT_COUNT}），强制全量降低漏配风险"
-        )
-    elif unit_n >= _RECOMMEND_FULL_UNIT_COUNT or (
-        feature_n >= 3 and ("engine" in kinds or "bridge" in kinds)
-    ):
-        # engine+bridge 同改不再默认全量：两单元增量即可，避免「已部署过仍锁全量」
-        recommend = True
-        reasons.append(
-            f"变更面较大（单元 {unit_n}，feature {feature_n}，含 "
-            f"{', '.join(sorted(kinds)) or '无'}），建议全量；确认卡默认全量"
         )
 
     if dirty:
@@ -163,98 +192,119 @@ def decide_deploy_mode(
             f"工作区有 {len(dirty)} 个未提交变更已纳入对比；"
             "与上次成功部署内容相同的脏文件会被自动忽略"
         )
-        dirty_unmapped = collect_unmapped_critical(dirty)
-        if dirty_unmapped and not force:
-            recommend = True
-            reasons.append("未提交变更含未映射关键路径，建议全量")
 
-    if force:
-        return DeployDecision(
-            mode="full",
-            force_full=True,
-            recommend_full=True,
-            first_deploy=first,
-            reasons=reasons or ["策略判定：强制全量"],
-            warnings=warnings,
-            allow_mode_override=False,
-        )
-
-    if recommend:
-        return DeployDecision(
-            mode="full",
-            force_full=False,
-            recommend_full=True,
-            first_deploy=first,
-            reasons=reasons,
-            warnings=warnings,
-            allow_mode_override=True,
-        )
+    if force_reasons:
+        return _full(first=first, reasons=force_reasons, warnings=warnings)
 
     if not units and not first:
-        reasons.append("相对上次部署无业务单元变更；若远端异常可改用全量")
-        return DeployDecision(
-            mode="incremental",
-            force_full=False,
-            recommend_full=False,
-            first_deploy=first,
+        reasons.append("相对上次部署无业务单元变更；确认将不 rsync（可升级为全量）")
+        return _incremental(
+            first=first,
             reasons=reasons,
-            warnings=warnings + ["无增量单元可同步；确认将不会 rsync（可改选全量）"],
-            allow_mode_override=True,
+            warnings=warnings + ["无增量单元可同步；若远端异常请改用全量"],
         )
 
     ids = "、".join(u.id for u in units) or "（无）"
     reasons.append(f"相对上次部署仅命中：{ids}，采用增量自动全选这些单元")
-    return DeployDecision(
-        mode="incremental",
-        force_full=False,
-        recommend_full=False,
-        first_deploy=first,
-        reasons=reasons,
-        warnings=warnings,
-        allow_mode_override=True,
-    )
+    return _incremental(first=first, reasons=reasons, warnings=warnings)
 
 
 def apply_user_mode_override(
     decision: DeployDecision,
     requested: str,
 ) -> DeployDecision:
-    """人覆盖模式：强制全量时拒绝改增量；建议全量时可改增量但留警告。"""
+    """人覆盖：仅允许增量→全量升级；强制全量禁止降级。"""
     req = (requested or "").strip().lower()
     if req in {"auto", ""}:
         return decision
     if req in {"full", "all", "全量"}:
         if decision.mode == "full":
             return decision
+        # 增量升级全量（仍非 force，确认后可再改回？为成熟机制：升级后本 job 视为全量且可确认）
         return DeployDecision(
             mode="full",
-            force_full=decision.force_full,
-            recommend_full=True,
+            force_full=False,
             first_deploy=decision.first_deploy,
-            reasons=list(decision.reasons) + ["用户改选全量"],
+            reasons=list(decision.reasons) + ["用户升级为全量"],
             warnings=list(decision.warnings),
-            allow_mode_override=decision.allow_mode_override,
+            allow_upgrade_to_full=False,
         )
     if req in {"incremental", "incr", "diff", "增量"}:
-        if decision.force_full:
+        if decision.force_full or decision.mode == "full" and not decision.allow_upgrade_to_full:
+            # 强制全量或已锁定全量：拒绝降级
+            if decision.force_full:
+                return DeployDecision(
+                    mode="full",
+                    force_full=True,
+                    first_deploy=decision.first_deploy,
+                    reasons=list(decision.reasons),
+                    warnings=list(decision.warnings)
+                    + ["已拒绝改选增量：当前必须全量部署"],
+                    allow_upgrade_to_full=False,
+                )
+            # 用户曾升级全量，再改回增量：允许（仍是安全可逆于升级前）
             return DeployDecision(
-                mode="full",
-                force_full=True,
-                recommend_full=True,
+                mode="incremental",
+                force_full=False,
                 first_deploy=decision.first_deploy,
-                reasons=list(decision.reasons),
-                warnings=list(decision.warnings)
-                + ["已拒绝改选增量：当前变更必须全量部署"],
-                allow_mode_override=False,
+                reasons=list(decision.reasons) + ["用户改回增量"],
+                warnings=list(decision.warnings),
+                allow_upgrade_to_full=True,
             )
-        return DeployDecision(
-            mode="incremental",
-            force_full=False,
-            recommend_full=decision.recommend_full,
-            first_deploy=decision.first_deploy,
-            reasons=list(decision.reasons) + ["用户改选增量（自担漏发风险）"],
-            warnings=list(decision.warnings)
-            + (["策略曾建议全量，已改增量"] if decision.recommend_full else []),
-            allow_mode_override=True,
-        )
+        return decision
     return decision
+
+
+def resolve_execution_plan(
+    *,
+    mode: str,
+    force_full: bool,
+    units_full: list[dict[str, Any]],
+    units_incremental: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """由已判定 mode 生成执行计划：确认时必须按此集合同步。"""
+    m = "full" if (force_full or mode == "full") else "incremental"
+    if m == "full":
+        ids = [
+            str(u.get("id") or "").strip()
+            for u in (units_full or [])
+            if isinstance(u, dict) and u.get("id")
+        ]
+    else:
+        ids = [
+            str(u.get("id") or "").strip()
+            for u in (units_incremental or [])
+            if isinstance(u, dict) and u.get("id")
+        ]
+    return {
+        "mode": m,
+        "unit_ids": ids,
+        "locked": bool(force_full),
+        "unit_count": len(ids),
+    }
+
+
+def resolve_confirm_mode(
+    *,
+    job_mode: str,
+    force_full: bool,
+    requested_mode: str | None,
+) -> tuple[str, str]:
+    """确认时解析最终 mode。
+
+    返回 (mode, error)。error 非空表示拒绝。
+    """
+    req = (requested_mode or "").strip().lower()
+    if force_full:
+        if req in {"incremental", "incr", "diff", "增量"}:
+            return "full", "当前变更必须全量部署，不能改选增量"
+        return "full", ""
+    # 非强制：默认跟 job；允许升级全量；允许从升级后改回增量
+    base = "full" if (job_mode or "").lower() == "full" else "incremental"
+    if req in {"full", "all", "全量"}:
+        return "full", ""
+    if req in {"incremental", "incr", "diff", "增量"}:
+        return "incremental", ""
+    if req in {"", "auto"}:
+        return base, ""
+    return base, ""
