@@ -830,16 +830,36 @@ function hydrateHitlCards(hostEl, m) {
   if (m.code_commit_ui) mountCodeCommitUi(hostEl, m.code_commit_ui, metaEl);
   if (m.code_deploy_ui) mountCodeDeployUi(hostEl, m.code_deploy_ui, metaEl);
 }
-/** 卡内状态变更（门禁→确认→成功）写回最后一条助手消息，供刷新还原 */
+/** 卡内状态变更写回对应助手消息（优先按 job_id 匹配，避免串改上一条） */
 function persistHitlFromHost(hostEl, patch) {
   const conv = curConv();
   if (!conv || !conv.messages || !patch) return;
+  const jobId = String(
+    (patch.code_commit_ui && patch.code_commit_ui.job_id) ||
+      (patch.code_deploy_ui && patch.code_deploy_ui.job_id) ||
+      ""
+  ).trim();
+  const applyPatch = (m) => {
+    Object.keys(patch).forEach((k) => {
+      m[k] = patch[k];
+    });
+    saveConvs();
+  };
+  if (jobId) {
+    for (let i = conv.messages.length - 1; i >= 0; i--) {
+      const m = conv.messages[i];
+      if (m.role !== "assistant") continue;
+      const cid = m.code_commit_ui && m.code_commit_ui.job_id;
+      const did = m.code_deploy_ui && m.code_deploy_ui.job_id;
+      if (String(cid || "") === jobId || String(did || "") === jobId) {
+        applyPatch(m);
+        return;
+      }
+    }
+  }
   for (let i = conv.messages.length - 1; i >= 0; i--) {
     if (conv.messages[i].role === "assistant") {
-      Object.keys(patch).forEach((k) => {
-        conv.messages[i][k] = patch[k];
-      });
-      saveConvs();
+      applyPatch(conv.messages[i]);
       return;
     }
   }
@@ -1599,6 +1619,7 @@ function renderCdDeployConfirm(card, ui) {
             : ids;
         var successUi = {
           kind: "success",
+          job_id: ui.job_id || d.job_id || "",
           title: succ.title || doneMode + "部署完成",
           mode: d.mode || sendMode,
           mode_label: succ.mode_label || doneMode,
@@ -2227,6 +2248,7 @@ function renderCcPushRetryCard(card, d) {
       card.classList.add("done");
       const successUi = {
         kind: "success",
+        job_id: jobId || (d && d.job_id) || "",
         title,
         workspace: out.workspace || d.workspace || "",
         branch: cr2.branch || cr.branch || "",
@@ -2356,6 +2378,7 @@ function renderCcConfirm(card, ui) {
       const fileList = Array.isArray(cr.files) && cr.files.length ? cr.files : files;
       const successUi = {
         kind: "success",
+        job_id: ui.job_id || d.job_id || "",
         title,
         workspace: ui.workspace || "",
         branch: cr.branch || ui.work_branch || "",

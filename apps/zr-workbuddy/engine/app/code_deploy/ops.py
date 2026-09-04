@@ -27,20 +27,22 @@ def default_data_dir() -> Path:
 
 
 def _enrich_unit_for_ui(u: dict[str, Any], cfg: Any) -> dict[str, Any]:
-    """按真实配置改写 action_hint，避免卡片写「重启 DSH」但实际不会执行。"""
+    """按真实配置改写 action_hint（三大目标：业务成败看引擎，宿主可选）。"""
     row = dict(u)
     uid = str(row.get("id") or "")
     action = str(row.get("action") or "")
     if uid == "bridge" or action in {"sync_bridge", "sync_bridge_reinstall"}:
-        if getattr(cfg, "auto_restart_bridge", True):
+        if getattr(cfg, "auto_restart_bridge", False):
             row["action"] = "sync_bridge_reinstall"
-            row["action_hint"] = "同步 bridge 后重装并重启远端 DSH（面板 UI 立即生效）"
+            row["action_hint"] = (
+                "同步 bridge 后重装并重启远端宿主（已开 auto_restart_bridge；非员工网页成败条件）"
+            )
             row["risk"] = "high"
         else:
             row["action"] = "sync_bridge"
             row["action_hint"] = (
-                "仅同步 bridge 文件，不重启 DSH（auto_restart_bridge=false）；"
-                "面板 UI 需另行重启远端 DSH 才生效"
+                "仅同步 bridge 文件（默认）；业务验收看引擎网页。"
+                "确需宿主收尾时设 auto_restart_bridge=true"
             )
             row["risk"] = "medium"
     elif uid == "engine" or action == "sync_engine_restart":
@@ -605,14 +607,26 @@ def confirm(
         if result.get("engine_restart"):
             actions.append("已重启引擎" + (f"（:{engine_port}）" if engine_port else ""))
         if result.get("bridge_restart"):
-            actions.append("已重装 bridge 并后台重启远端 DSH")
+            actions.append("已重装 bridge 并后台重启远端宿主")
+        bridge_skip_warn = ""
+        for urec in result.get("results") or []:
+            if isinstance(urec, dict) and urec.get("id") == "_bridge_restart":
+                bridge_skip_warn = str(urec.get("warning") or "").strip()
+                break
+        if not result.get("bridge_restart") and "bridge" in unit_ids:
+            if bridge_skip_warn:
+                actions.append("bridge 文件已同步，远端无宿主 profile 已跳过重启")
+            elif not getattr(cfg, "auto_restart_bridge", False):
+                actions.append("bridge 仅同步（默认，不重启远端宿主）")
         if not actions:
             actions.append("仅同步文件")
-        # 人只触发：含 bridge 且已重启时，成功摘要点明面板已收尾
+        # 业务成功看引擎；bridge/宿主为可选收尾
         if result.get("bridge_restart"):
-            reply_extra = "\n- 面板：远端 DSH 已后台重启（bridge 变更已收尾）"
-        elif "bridge" in unit_ids and not getattr(cfg, "auto_restart_bridge", True):
-            reply_extra = "\n- 面板：未重启 DSH（auto_restart_bridge=false）"
+            reply_extra = "\n- bridge：远端宿主已后台重启（可选收尾已执行）"
+        elif bridge_skip_warn:
+            reply_extra = f"\n- bridge：{bridge_skip_warn}"
+        elif "bridge" in unit_ids and not getattr(cfg, "auto_restart_bridge", False):
+            reply_extra = "\n- bridge：仅同步文件（默认；业务以引擎网页为准）"
         else:
             reply_extra = ""
         title = f"{mode_label}部署完成"
@@ -644,6 +658,7 @@ def confirm(
             "title": title,
             "mode": deploy_mode,
             "mode_label": mode_label,
+            "job_id": job_id,
             "env": job.get("env") or cfg.default_env,
             "ssh_host": cfg.ssh_host,
             "ssh_app_path": cfg.ssh_app_path,

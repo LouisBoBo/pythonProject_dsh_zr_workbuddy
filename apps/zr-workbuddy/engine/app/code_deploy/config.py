@@ -33,9 +33,9 @@ class CodeDeployConfig:
     # 远端引擎端口：必须避开服务器已有服务（如本机 8000 常被其它项目占用）
     remote_engine_port: int = 8091
     auto_restart_engine: bool = True
-    # 含 bridge 单元时：默认重装并重启远端 DSH，面板 UI 才生效（人只触发部署）
-    # 共享机若不能动整台 DSH：在 config.yaml 显式设 auto_restart_bridge: false
-    auto_restart_bridge: bool = True
+    # 含 bridge 单元时：默认只同步文件（三大目标：业务验收看引擎网页）
+    # 确需远端宿主收尾时：config.yaml 显式 auto_restart_bridge: true
+    auto_restart_bridge: bool = False
     rsync_excludes: list[str] = field(
         default_factory=lambda: [
             "__pycache__",
@@ -91,7 +91,7 @@ def get_config() -> CodeDeployConfig:
         health_timeout_sec=max(2, min(int(raw.get("health_timeout_sec") or 8), 60)),
         remote_engine_port=max(1, min(int(raw.get("remote_engine_port") or 8091), 65535)),
         auto_restart_engine=bool(raw.get("auto_restart_engine", True)),
-        auto_restart_bridge=bool(raw.get("auto_restart_bridge", True)),
+        auto_restart_bridge=bool(raw.get("auto_restart_bridge", False)),
     )
     if isinstance(excludes, list) and excludes:
         cfg.rsync_excludes = [str(x).strip() for x in excludes if str(x).strip()]

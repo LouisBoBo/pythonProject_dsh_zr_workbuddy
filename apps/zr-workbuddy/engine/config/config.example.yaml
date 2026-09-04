@@ -65,7 +65,7 @@ code_deploy:
   ssh_port: 22
   remote_engine_port: 8091       # 远端引擎回环端口；与 health_url 可不同，勿填 8000/反代口
   auto_restart_engine: true      # 仅重启本应用引擎（校验 PID/cmdline）
-  auto_restart_bridge: true      # 含 bridge 时重启远端 DSH（面板生效）；共享机不能动整台 DSH 再改 false
+  auto_restart_bridge: false     # 默认只同步 bridge；业务验收看引擎。需远端宿主收尾再改 true
   # 以下有默认值，界面不展示
   default_env: staging
   env_whitelist: [staging]

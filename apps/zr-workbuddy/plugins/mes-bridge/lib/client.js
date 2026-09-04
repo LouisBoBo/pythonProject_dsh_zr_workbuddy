@@ -702,6 +702,7 @@ window.__ModuleLoader__.load({
                 : ids;
             var successUi = {
               kind: "success",
+              job_id: ui.job_id || d.job_id || "",
               title: succ.title || doneMode + "部署完成",
               mode: d.mode || sendMode,
               mode_label: succ.mode_label || doneMode,
@@ -935,6 +936,7 @@ window.__ModuleLoader__.load({
             card.className = "cd-card cc-card done";
             var successUi = {
               kind: "success",
+              job_id: jobId || (d && d.job_id) || (out && out.job_id) || "",
               title: title,
               workspace: out.workspace || d.workspace || "",
               branch: cr2.branch || cr.branch || "",
@@ -1237,6 +1239,7 @@ window.__ModuleLoader__.load({
             var fileList = Array.isArray(cr.files) && cr.files.length ? cr.files : files;
             var successUi = {
               kind: "success",
+              job_id: ui.job_id || d.job_id || "",
               title: title,
               workspace: ui.workspace || "",
               branch: cr.branch || ui.work_branch || "",
@@ -2177,12 +2180,32 @@ window.__ModuleLoader__.load({
       }
       function persistHitlFromHostInner(hostEl, patch) {
         if (!cur || !cur.msgs || !patch) return;
-        for (var i = cur.msgs.length - 1; i >= 0; i--) {
+        var jobId = String(
+          (patch.code_commit_ui && patch.code_commit_ui.job_id) ||
+            (patch.code_deploy_ui && patch.code_deploy_ui.job_id) ||
+            ""
+        ).trim();
+        function applyPatch(m) {
+          Object.keys(patch).forEach(function (k) {
+            m[k] = patch[k];
+          });
+          save();
+        }
+        var i;
+        if (jobId) {
+          for (i = cur.msgs.length - 1; i >= 0; i--) {
+            if (cur.msgs[i].role !== "assistant") continue;
+            var cid = cur.msgs[i].code_commit_ui && cur.msgs[i].code_commit_ui.job_id;
+            var did = cur.msgs[i].code_deploy_ui && cur.msgs[i].code_deploy_ui.job_id;
+            if (String(cid || "") === jobId || String(did || "") === jobId) {
+              applyPatch(cur.msgs[i]);
+              return;
+            }
+          }
+        }
+        for (i = cur.msgs.length - 1; i >= 0; i--) {
           if (cur.msgs[i].role === "assistant") {
-            Object.keys(patch).forEach(function (k) {
-              cur.msgs[i][k] = patch[k];
-            });
-            save();
+            applyPatch(cur.msgs[i]);
             return;
           }
         }

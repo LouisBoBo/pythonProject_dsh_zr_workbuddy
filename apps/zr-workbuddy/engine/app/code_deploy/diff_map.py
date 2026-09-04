@@ -22,6 +22,44 @@ def _run_git(cwd: Path, *args: str, timeout: int = 60) -> tuple[int, str, str]:
         return 1, "", str(e)
 
 
+def _decode_git_path(raw: str) -> str:
+    """还原 git 路径：去引号、解 C 八进制转义，再统一斜杠。
+
+    默认 quotepath 下中文会变成 \"docs/\\345\\212\\237…\"；若再把 \\ 换成 /，
+    会显示成 docs//345/212/237… 乱码。
+    """
+    s = (raw or "").strip()
+    if not s or "\0" in s or len(s) > 4096:
+        return ""
+    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+        inner = s[1:-1]
+        if "\0" in inner or len(inner) > 4096:
+            return ""
+        try:
+            # \\345 → 字节，再按 utf-8 解成汉字（仅处理 git quotepath 常见转义）
+            import codecs
+            import re
+
+            # 拒绝异常庞大的 \\N{...} 等，只允许八进制/十六进制/常见短转义
+            if re.search(r"\\N\{|\\U[0-9a-fA-F]{8}", inner):
+                s = inner
+            else:
+                as_text = codecs.decode(inner, "unicode_escape", errors="strict")
+                s = as_text.encode("latin-1", errors="strict").decode("utf-8", errors="strict")
+        except (UnicodeError, ValueError, OverflowError):
+            s = inner
+    s = s.replace("\\", "/").strip()
+    while s.startswith("./"):
+        s = s[2:]
+    if not s or "\0" in s:
+        return ""
+    # 防御路径穿越（脏仓/异常对象名）
+    parts = [p for p in s.split("/") if p not in ("", ".")]
+    if any(p == ".." for p in parts):
+        return ""
+    return "/".join(parts)
+
+
 def list_changed_paths(
     workspace: Path | str,
     *,
@@ -62,14 +100,21 @@ def list_changed_paths(
     code_h, head_sha, err_h = _run_git(root, "rev-parse", "--verify", head)
     if code_h != 0:
         return {"ok": False, "paths": [], "error": err_h or f"无法解析 head={head}"}
+    # -z + quotepath=false：中文路径不转义，避免 UI 乱码
     code_d, out_d, err_d = _run_git(
-        root, "diff", "--name-only", f"{base_sha.strip()}..{head_sha.strip()}"
+        root,
+        "-c",
+        "core.quotepath=false",
+        "diff",
+        "--name-only",
+        "-z",
+        f"{base_sha.strip()}..{head_sha.strip()}",
     )
     if code_d != 0:
         return {"ok": False, "paths": [], "error": err_d or "git diff 失败"}
     paths = []
-    for line in (out_d or "").splitlines():
-        p = line.strip().replace("\\", "/")
+    for part in (out_d or "").split("\0"):
+        p = _decode_git_path(part)
         if p:
             paths.append(p)
     return {
@@ -110,7 +155,7 @@ def list_dirty_paths(workspace: Path | str) -> dict[str, Any]:
             new_path = entries[i] if i < len(entries) else ""
             i += 1
             rest = new_path or rest
-        p = rest.replace("\\", "/").strip()
+        p = _decode_git_path(rest)
         if p:
             paths.append(p)
     return {"ok": True, "paths": paths, "error": ""}

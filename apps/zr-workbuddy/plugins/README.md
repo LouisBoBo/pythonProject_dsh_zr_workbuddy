@@ -2,7 +2,7 @@
 
 | 包 | 角色 |
 |---|---|
-| `mes-bridge` | **唯一** Cordis 常驻包（热插拔宿主 + 面板） |
+| `mes-bridge` | **唯一** Cordis 常驻包（热插拔宿主；三大目标 G1） |
 | `mes-runtime` | 引擎 HTTP 调用库（非 Cordis） |
 
 业务功能在 `../features/`：

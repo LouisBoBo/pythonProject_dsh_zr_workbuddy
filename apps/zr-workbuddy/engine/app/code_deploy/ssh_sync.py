@@ -178,12 +178,12 @@ def deploy_units_ssh(
             if unit.action == "sync_engine_restart":
                 need_engine = True
             elif unit.action in {"sync_bridge", "sync_bridge_reinstall"}:
-                # 默认随 bridge 单元重启远端 DSH（人只触发部署）；显式 false 才跳过
-                if getattr(cfg, "auto_restart_bridge", True):
+                # 默认仅同步；auto_restart_bridge=true 才重启远端宿主
+                if getattr(cfg, "auto_restart_bridge", False):
                     need_bridge = True
                 else:
                     urec["logs"].append(
-                        "已同步 bridge；跳过 DSH 重装（auto_restart_bridge=false）"
+                        "已同步 bridge；默认不重启远端宿主（auto_restart_bridge=false）"
                     )
                     urec["action_effective"] = "sync_bridge"
         results.append(urec)
@@ -217,67 +217,73 @@ def deploy_units_ssh(
         _log("已同步引擎文件；按配置跳过远端引擎重启（auto_restart_engine=false）")
         results.append({"id": "_engine_restart", "ok": True, "logs": ["skipped by config"]})
 
-    if need_bridge and getattr(cfg, "auto_restart_bridge", True):
-        # 二次保险：远端没有完整 DSH profile 时禁止 install（避免半残 .dsh / 误伤）
+    bridge_restarted = False
+    if need_bridge and getattr(cfg, "auto_restart_bridge", False):
+        # 二次保险：远端没有完整 DSH profile 时不 install（避免半残 .dsh）
+        # 文件已 rsync：降级为「跳过重启」成功，不把整次部署打成失败
         prof_check = (
             "test -f \"$HOME/.dsh/profiles/web/package.json\" "
             "&& echo dsh_ok || echo dsh_missing"
         )
         _c_p, o_p, _e_p = _run(ssh + [prof_check], timeout=30)
         if "dsh_ok" not in (o_p or ""):
-            return {
-                "ok": False,
-                "error": (
-                    "已拒绝远端 bridge 重装：未找到 "
-                    "~/.dsh/profiles/web/package.json。"
-                    "请先在远端装好 DSH profile；临时跳过可设 "
-                    "auto_restart_bridge=false（仅同步文件，面板需另行重启）。"
-                ),
-                "results": results,
-                "bridge_restart": False,
-            }
-        # 先 install（不 --restart），再后台 restart-dsh：避免 SSH 被前台 exec dsh 挂死
-        remote_install = (
-            f"cd {shlex.quote(app)} && "
-            "scripts/plugin.sh --app zr-workbuddy install bridge"
-        )
-        _log("远端重装 bridge …")
-        c4, o4, e4 = _run(ssh + [f"bash -lc {shlex.quote(remote_install)}"], timeout=300)
-        if c4 != 0:
-            return {
-                "ok": False,
-                "error": f"bridge 重装失败：{(e4 or o4)[:300]}",
-                "results": results,
-                "bridge_restart": False,
-            }
-        remote_restart = (
-            f"cd {shlex.quote(app)} && "
-            "nohup scripts/restart-dsh.sh "
-            ">/tmp/zr-workbuddy-dsh-restart.log 2>&1 & "
-            "echo dsh_restart_started"
-        )
-        _log("远端后台重启 DSH（面板 UI 生效）…")
-        c5, o5, e5 = _run(ssh + [f"bash -lc {shlex.quote(remote_restart)}"], timeout=60)
-        if c5 != 0 or "dsh_restart_started" not in (o5 or ""):
-            return {
-                "ok": False,
-                "error": (
-                    "bridge 已安装，但启动远端 DSH 重启失败："
-                    f"{(e5 or o5)[:300]}；可 SSH 查看 /tmp/zr-workbuddy-dsh-restart.log"
-                ),
-                "results": results,
-                "bridge_restart": False,
-            }
-        results.append(
-            {
-                "id": "_bridge_restart",
-                "ok": True,
-                "logs": ["bridge install ok", "dsh restart started (background)"],
-            }
-        )
+            warn = (
+                "远端无 ~/.dsh/profiles/web/package.json，已跳过 bridge 重装/重启；"
+                "文件已同步。业务验收以引擎网页为准；确需宿主时请先装 profile。"
+            )
+            _log(warn)
+            results.append(
+                {
+                    "id": "_bridge_restart",
+                    "ok": True,
+                    "logs": ["skipped: no remote DSH profile", warn],
+                    "warning": warn,
+                }
+            )
+        else:
+            # 先 install（不 --restart），再后台 restart-dsh：避免 SSH 被前台 exec dsh 挂死
+            remote_install = (
+                f"cd {shlex.quote(app)} && "
+                "scripts/plugin.sh --app zr-workbuddy install bridge"
+            )
+            _log("远端重装 bridge …")
+            c4, o4, e4 = _run(ssh + [f"bash -lc {shlex.quote(remote_install)}"], timeout=300)
+            if c4 != 0:
+                return {
+                    "ok": False,
+                    "error": f"bridge 重装失败：{(e4 or o4)[:300]}",
+                    "results": results,
+                    "bridge_restart": False,
+                }
+            remote_restart = (
+                f"cd {shlex.quote(app)} && "
+                "nohup scripts/restart-dsh.sh "
+                ">/tmp/zr-workbuddy-dsh-restart.log 2>&1 & "
+                "echo dsh_restart_started"
+            )
+            _log("远端后台重启宿主（可选收尾）…")
+            c5, o5, e5 = _run(ssh + [f"bash -lc {shlex.quote(remote_restart)}"], timeout=60)
+            if c5 != 0 or "dsh_restart_started" not in (o5 or ""):
+                return {
+                    "ok": False,
+                    "error": (
+                        "bridge 已安装，但启动远端宿主重启失败："
+                        f"{(e5 or o5)[:300]}；可 SSH 查看 /tmp/zr-workbuddy-dsh-restart.log"
+                    ),
+                    "results": results,
+                    "bridge_restart": False,
+                }
+            bridge_restarted = True
+            results.append(
+                {
+                    "id": "_bridge_restart",
+                    "ok": True,
+                    "logs": ["bridge install ok", "host restart started (background)"],
+                }
+            )
     elif need_bridge:
         _log(
-            "已同步 bridge 文件；按配置跳过远端 DSH 重启（auto_restart_bridge=false）"
+            "已同步 bridge 文件；按配置跳过远端宿主重启（auto_restart_bridge=false）"
         )
         results.append({"id": "_bridge_restart", "ok": True, "logs": ["skipped by config"]})
 
@@ -294,7 +300,7 @@ def deploy_units_ssh(
         cfg=cfg,
         meta=meta or {},
         engine_restart=bool(need_engine and getattr(cfg, "auto_restart_engine", True)),
-        bridge_restart=bool(need_bridge and getattr(cfg, "auto_restart_bridge", True)),
+        bridge_restart=bridge_restarted,
         remote_engine_port=prep.get("port"),
         health=health if isinstance(health, dict) else None,
         log=_log,
@@ -316,7 +322,7 @@ def deploy_units_ssh(
         "error": "",
         "results": results,
         "engine_restart": bool(need_engine and getattr(cfg, "auto_restart_engine", True)),
-        "bridge_restart": bool(need_bridge and getattr(cfg, "auto_restart_bridge", True)),
+        "bridge_restart": bridge_restarted,
         "health": health,
         "units": [u.id for u in units],
         "remote_engine_port": prep.get("port"),

@@ -11,6 +11,20 @@ if _ENG not in sys.path:
 
 
 class CodeDeployUnitTests(unittest.TestCase):
+    def test_decode_git_quoted_chinese_path(self):
+        from app.code_deploy.diff_map import _decode_git_path
+
+        raw = (
+            '"docs/\\345\\212\\237\\350\\203\\275\\345\\256\\236\\347\\216\\260/'
+            'P1-\\350\\207\\252\\345\\212\\250.md"'
+        )
+        out = _decode_git_path(raw)
+        self.assertEqual(out, "docs/功能实现/P1-自动.md")
+        self.assertNotIn("345/212", out)
+        self.assertEqual(_decode_git_path("apps/zr-workbuddy/engine/app/main.py"), "apps/zr-workbuddy/engine/app/main.py")
+        self.assertEqual(_decode_git_path('"../etc/passwd"'), "")
+        self.assertEqual(_decode_git_path("a/\0/b"), "")
+
     def test_map_only_changed_features(self):
         from app.code_deploy.units import map_paths_to_units
 
