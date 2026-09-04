@@ -171,6 +171,30 @@ class CodeDeployUnitTests(unittest.TestCase):
         self.assertFalse(d.force_full)
         self.assertEqual(d.mode, "incremental")
 
+    def test_engine_config_example_maps_incremental(self):
+        """config.example.yaml 归 engine 单元，不再因未映射强制全量。"""
+        from app.code_deploy.policy import decide_deploy_mode
+        from app.code_deploy.units import build_unit, map_paths_to_units, path_to_unit_id
+
+        rel = "apps/zr-workbuddy/engine/config/config.example.yaml"
+        self.assertEqual(path_to_unit_id(rel), "engine")
+        self.assertIsNone(
+            path_to_unit_id("apps/zr-workbuddy/engine/config/config.yaml")
+        )
+        units = map_paths_to_units([rel])
+        self.assertEqual([u.id for u in units], ["engine"])
+        d = decide_deploy_mode(
+            last_sha="abc123",
+            base_resolved=True,
+            paths=[rel],
+            units=units,
+        )
+        self.assertFalse(d.force_full)
+        self.assertEqual(d.mode, "incremental")
+        eng = build_unit("engine")
+        assert eng is not None
+        self.assertIn("apps/zr-workbuddy/engine/config", eng.local_rels)
+
     def test_policy_engine_bridge_incremental(self):
         from app.code_deploy.policy import decide_deploy_mode
         from app.code_deploy.units import build_unit

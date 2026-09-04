@@ -546,7 +546,19 @@ def confirm(
     def _log(msg: str) -> None:
         logs.append(msg)
 
-    result = deploy_units_ssh(job["workspace"], selected, cfg, log=_log)
+    result = deploy_units_ssh(
+        job["workspace"],
+        selected,
+        cfg,
+        log=_log,
+        meta={
+            "job_id": job_id,
+            "mode": deploy_mode,
+            "env": job.get("env") or cfg.default_env,
+            "head_sha": str(job.get("head_sha") or ""),
+            "workspace": str(job.get("workspace") or ""),
+        },
+    )
     mode_label = "全量" if deploy_mode == "full" else "增量"
     if result.get("ok"):
         # 成功时刻重读 HEAD + 脏文件指纹，避免同内容未提交文件下次再锁全量
@@ -595,6 +607,10 @@ def confirm(
         if not actions:
             actions.append("仅同步文件（未重启 DSH）")
         title = f"{mode_label}部署完成"
+        receipt_path = str(result.get("remote_receipt_path") or "").strip()
+        synced_rels = []
+        for u in selected:
+            synced_rels.extend(list(u.local_rels))
         reply_lines = [
             f"**{title}**",
             f"- 访问地址：{access or '（未配置 health_url）'}",
@@ -610,6 +626,8 @@ def confirm(
             reply_lines.append(
                 f"- 探活：{'通过' if health.get('ok') else '未通过'}（{health.get('status') or health.get('detail') or ''}）"
             )
+        if receipt_path:
+            reply_lines.append(f"- 服务器回执：`{receipt_path}`（可 SSH cat 核对本次实际同步范围）")
         reply = "\n".join(reply_lines)
         success = {
             "title": title,
@@ -622,12 +640,15 @@ def confirm(
             "access_url": access,
             "health_url": access,
             "units": unit_ids,
+            "synced_rels": synced_rels,
             "engine_restart": bool(result.get("engine_restart")),
             "bridge_restart": bool(result.get("bridge_restart")),
             "remote_engine_port": engine_port,
             "head_sha": head_sha,
             "actions": actions,
             "health": health if isinstance(health, dict) else None,
+            "remote_receipt_path": receipt_path,
+            "remote_receipt_ok": bool(result.get("remote_receipt_ok")),
         }
         return {
             "ok": True,

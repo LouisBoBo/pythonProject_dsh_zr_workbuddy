@@ -691,6 +691,11 @@ window.__ModuleLoader__.load({
               head_sha: succ.head_sha || d.head_sha || ui.head_sha || "",
               actions: succ.actions || [],
               health: succ.health || (d.deploy_result && d.deploy_result.health) || null,
+              remote_receipt_path:
+                succ.remote_receipt_path ||
+                (d.deploy_result && d.deploy_result.remote_receipt_path) ||
+                "",
+              synced_rels: succ.synced_rels || [],
             });
             if (replyEl) replyEl.innerHTML = md(d.reply || succ.title || "部署完成");
           } catch (e) {
@@ -971,6 +976,12 @@ window.__ModuleLoader__.load({
           ) +
           "</span></div>";
       }
+      if (info.remote_receipt_path) {
+        html +=
+          '<div class="cd-chosen-row"><span class="cd-k">服务器回执</span><span class="cd-v" style="word-break:break-all">' +
+          esc(info.remote_receipt_path) +
+          "</span></div>";
+      }
       html +=
         '<div class="cd-chosen-row"><span class="cd-k">单元</span><span class="cd-v">' +
         units.length +
@@ -982,6 +993,16 @@ window.__ModuleLoader__.load({
           html += "<li>" + esc(String(units[i])) + "</li>";
         }
         if (units.length > 40) html += "<li>…另有 " + (units.length - 40) + " 个</li>";
+        html += "</ul>";
+      }
+      var rels = Array.isArray(info.synced_rels) ? info.synced_rels : [];
+      if (rels.length) {
+        html +=
+          '<div class="cd-label" style="padding:0 12px 4px">实际同步路径</div><ul class="cc-ok-files">';
+        for (var j = 0; j < Math.min(rels.length, 40); j++) {
+          html += "<li>" + esc(String(rels[j])) + "</li>";
+        }
+        if (rels.length > 40) html += "<li>…另有 " + (rels.length - 40) + " 个</li>";
         html += "</ul>";
       }
       return html;

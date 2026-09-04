@@ -102,8 +102,12 @@ def deploy_units_ssh(
     cfg: CodeDeployConfig,
     *,
     log: Callable[[str], None] | None = None,
+    meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """按单元 rsync 到远端 ssh_app_path；按需重启引擎/DSH。"""
+    """按单元 rsync 到远端 ssh_app_path；按需重启引擎/DSH。
+
+    成功后在远端写入 last_deploy_receipt.json，便于服务器核对「本次实际同步了什么」。
+    """
     def _log(msg: str) -> None:
         if log:
             log(msg)
@@ -258,6 +262,31 @@ def deploy_units_ssh(
         health = probe_health(cfg.health_url, timeout=cfg.health_timeout_sec)
         _log(f"探活 {cfg.health_url} → {health}")
 
+    receipt = _write_remote_deploy_receipt(
+        ssh,
+        app,
+        units=units,
+        results=results,
+        cfg=cfg,
+        meta=meta or {},
+        engine_restart=bool(need_engine and getattr(cfg, "auto_restart_engine", True)),
+        bridge_restart=bool(need_bridge and getattr(cfg, "auto_restart_bridge", False)),
+        remote_engine_port=prep.get("port"),
+        health=health if isinstance(health, dict) else None,
+        log=_log,
+    )
+    if receipt.get("ok"):
+        results.append({"id": "_receipt", "ok": True, "logs": [receipt.get("path") or "receipt ok"]})
+    else:
+        # 回执失败不回滚已同步文件，但标进结果便于排查
+        results.append(
+            {
+                "id": "_receipt",
+                "ok": False,
+                "logs": [receipt.get("error") or "receipt failed"],
+            }
+        )
+
     return {
         "ok": True,
         "error": "",
@@ -267,7 +296,111 @@ def deploy_units_ssh(
         "health": health,
         "units": [u.id for u in units],
         "remote_engine_port": prep.get("port"),
+        "remote_receipt_path": receipt.get("path") or "",
+        "remote_receipt_ok": bool(receipt.get("ok")),
     }
+
+
+def _write_remote_deploy_receipt(
+    ssh: list[str],
+    app: str,
+    *,
+    units: list[DeployUnit],
+    results: list[dict[str, Any]],
+    cfg: CodeDeployConfig,
+    meta: dict[str, Any],
+    engine_restart: bool,
+    bridge_restart: bool,
+    remote_engine_port: Any,
+    health: dict[str, Any] | None,
+    log: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """在远端落下本次实际同步回执（服务器可 cat 核对）。"""
+    import json
+    from datetime import datetime, timezone
+
+    def _log(msg: str) -> None:
+        if log:
+            log(msg)
+
+    synced_rels: list[str] = []
+    unit_rows: list[dict[str, Any]] = []
+    for u in units:
+        rels = list(u.local_rels)
+        synced_rels.extend(rels)
+        unit_rows.append(
+            {
+                "id": u.id,
+                "kind": u.kind,
+                "action": u.action,
+                "local_rels": rels,
+            }
+        )
+    # 去重保序
+    seen: set[str] = set()
+    rels_unique: list[str] = []
+    for r in synced_rels:
+        if r not in seen:
+            seen.add(r)
+            rels_unique.append(r)
+
+    mode = str(meta.get("mode") or "").strip() or "unknown"
+    receipt = {
+        "ok": True,
+        "written_at": datetime.now(timezone.utc).isoformat(),
+        "job_id": meta.get("job_id") or "",
+        "env": meta.get("env") or cfg.default_env,
+        "mode": mode,
+        "mode_label": "全量" if mode == "full" else ("增量" if mode == "incremental" else mode),
+        "head_sha": meta.get("head_sha") or "",
+        "ssh_host": cfg.ssh_host,
+        "ssh_app_path": app,
+        "unit_ids": [u.id for u in units],
+        "units": unit_rows,
+        "synced_rels": rels_unique,
+        "engine_restart": engine_restart,
+        "bridge_restart": bridge_restart,
+        "remote_engine_port": remote_engine_port,
+        "health_url": (cfg.health_url or "").strip(),
+        "health": health,
+        "rsync_results": [
+            {"id": r.get("id"), "ok": r.get("ok"), "logs": (r.get("logs") or [])[:8]}
+            for r in results
+            if isinstance(r, dict) and not str(r.get("id") or "").startswith("_")
+        ],
+        "note": "本文件由 code-deploy 在远端写入；unit_ids/synced_rels 即本次实际 rsync 范围。",
+    }
+    rel_path = "apps/zr-workbuddy/engine/data/code_deploy/last_deploy_receipt.json"
+    remote_path = f"{app.rstrip('/')}/{rel_path}"
+    body = json.dumps(receipt, ensure_ascii=False, indent=2)
+    # 用 python 写文件，避免 shell 转义问题
+    py = (
+        "import os,sys\n"
+        f"p={remote_path!r}\n"
+        "os.makedirs(os.path.dirname(p), exist_ok=True)\n"
+        "open(p,'w',encoding='utf-8').write(sys.stdin.read())\n"
+        "print('receipt_ok', p)\n"
+    )
+    _log(f"写入远端部署回执 → {remote_path}")
+    # stdin via ssh
+    try:
+        p = subprocess.run(
+            ssh + ["python3", "-c", py],
+            input=body,
+            capture_output=True,
+            text=True,
+            timeout=40,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "error": str(e), "path": remote_path}
+    if p.returncode != 0 or "receipt_ok" not in (p.stdout or ""):
+        return {
+            "ok": False,
+            "error": ((p.stderr or p.stdout or "写回执失败")[:300]),
+            "path": remote_path,
+        }
+    return {"ok": True, "path": remote_path, "error": ""}
+
 
 
 def _resolve_remote_port(cfg: CodeDeployConfig) -> int:

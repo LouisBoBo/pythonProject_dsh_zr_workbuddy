@@ -70,8 +70,11 @@ def path_to_unit_id(rel: str) -> str | None:
         or r == "apps/zr-workbuddy/engine/engine_cli.py"
         or r == "apps/zr-workbuddy/engine/requirements.txt"
         or r.startswith("apps/zr-workbuddy/engine/tests/")
+        or r.startswith("apps/zr-workbuddy/engine/config/")
     ):
-        # 静态面板也算引擎侧
+        # 运行时密钥与数据不进部署单元（亦不应因此强制全量）
+        if r.endswith("/config.yaml") or r == "apps/zr-workbuddy/engine/config/config.yaml":
+            return None
         if "engine/data/" in r or r.startswith("apps/zr-workbuddy/engine/data/"):
             return None
         return "engine"
@@ -108,6 +111,8 @@ def build_unit(unit_id: str, *, selected: bool = True) -> DeployUnit | None:
                 "apps/zr-workbuddy/engine/app",
                 "apps/zr-workbuddy/engine/engine_cli.py",
                 "apps/zr-workbuddy/engine/requirements.txt",
+                # 示例/公开配置；真实 config.yaml 由 rsync_excludes 排除
+                "apps/zr-workbuddy/engine/config",
             ),
             action="sync_engine_restart",
             risk="medium",
