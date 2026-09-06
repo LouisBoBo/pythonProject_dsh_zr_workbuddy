@@ -39,8 +39,8 @@ def _action_hint(action: str) -> str:
     return {
         "sync_feature": "仅同步插件目录，热加载，不重启",
         "sync_engine_restart": "同步引擎代码后重启本应用引擎（不影响其它服务）",
-        "sync_bridge": "仅同步 bridge 文件（默认不重启远端宿主）",
-        "sync_bridge_reinstall": "同步 bridge；仅当 auto_restart_bridge=true 时重装并重启宿主",
+        "sync_bridge": "仅同步 bridge 文件（一体部署关且未开 auto_restart_bridge 时）",
+        "sync_bridge_reinstall": "同步 bridge；一体部署收尾会确保远端聊天壳",
         "sync_only": "仅同步文件",
     }.get(action, action)
 

@@ -303,12 +303,34 @@ class CodeDeployUnitTests(unittest.TestCase):
 
         cfg = CodeDeployConfig(
             enabled=True,
-            health_url="http://175.178.238.31:8092/",
-            remote_engine_port=8091,
+            health_url="http://203.0.113.10:8093/",
+            remote_engine_port=8095,
         )
-        self.assertEqual(_resolve_remote_port(cfg), 8091)
-        cfg2 = CodeDeployConfig(enabled=True, health_url="", remote_engine_port=8092)
-        self.assertEqual(_resolve_remote_port(cfg2), 8091)  # 8092 视为反代保留口
+        self.assertEqual(_resolve_remote_port(cfg), 8095)
+        cfg2 = CodeDeployConfig(enabled=True, health_url="", remote_engine_port=8093)
+        self.assertEqual(_resolve_remote_port(cfg2), 8095)  # 8093 视为公网入口保留口
+        cfg3 = CodeDeployConfig(enabled=True, remote_engine_port=8091)
+        self.assertEqual(_resolve_remote_port(cfg3), 8095)  # 旧项目口回落默认
+
+    def test_entry_url_prefers_over_health(self):
+        from app.code_deploy.config import CodeDeployConfig
+
+        cfg = CodeDeployConfig(
+            entry_url="http://product.example/",
+            health_url="http://old.example/",
+        )
+        self.assertEqual(cfg.resolve_entry_url(), "http://product.example/")
+        cfg2 = CodeDeployConfig(entry_url="", health_url="http://only.example/")
+        self.assertEqual(cfg2.resolve_entry_url(), "http://only.example/")
+
+    def test_unified_product_default_true(self):
+        from app.code_deploy.config import CodeDeployConfig
+
+        cfg = CodeDeployConfig()
+        self.assertTrue(cfg.unified_product)
+        self.assertTrue(cfg.auto_restart_bridge)
+        self.assertEqual(cfg.remote_host_port, 3080)
+        self.assertEqual(cfg.remote_engine_port, 8095)
 
 
 if __name__ == "__main__":

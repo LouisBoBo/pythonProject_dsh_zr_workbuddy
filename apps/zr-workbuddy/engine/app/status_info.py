@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from .config_store import load_config
-from .demo_data import get_demo_store
 from .health import check_net, llm_ready
 
 
@@ -35,5 +34,8 @@ def build_status(*, include_demo: bool = True) -> Dict[str, Any]:
         "config_ready": bool(mes.get("base_url")),
     }
     if include_demo:
+        # 延迟导入：demo_data → pandas/numpy；CLI status 默认 include_demo=False 可避开
+        from .demo_data import get_demo_store
+
         out["demo"] = get_demo_store().summary()
     return out

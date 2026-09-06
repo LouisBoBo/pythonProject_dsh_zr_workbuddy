@@ -260,6 +260,81 @@ class CodeDevTests(unittest.TestCase):
             self.assertTrue((sb / "a" / "bad.py").is_file())
             self.assertFalse((sb / "noise.txt").exists())
 
+    def test_partition_promotes_views_when_router_changed(self):
+        """窄 scope 误指向 production 时，路由变更须强制带上 warehouse 视图。"""
+        from app.code_dev.path_scope import partition_by_scope
+
+        changed = [
+            "frontend/src/router/index.js",
+            "frontend/src/layouts/AppLayout.vue",
+            "frontend/src/views/warehouse/MaterialOutboundRecordsView.vue",
+            "frontend/src/views/warehouse/MaterialOutboundView.vue",
+            "README.md",
+        ]
+        scope = [
+            "frontend/src/views/production/",
+            "frontend/src/router/",
+            "frontend/src/layouts/",
+        ]
+        inside, outside = partition_by_scope(changed, scope)
+        self.assertIn("frontend/src/router/index.js", inside)
+        self.assertIn(
+            "frontend/src/views/warehouse/MaterialOutboundRecordsView.vue",
+            inside,
+        )
+        self.assertIn(
+            "frontend/src/views/warehouse/MaterialOutboundView.vue",
+            inside,
+        )
+        self.assertIn("README.md", outside)
+
+    def test_partition_import_closure_from_sandbox(self):
+        from app.code_dev.path_scope import partition_by_scope
+
+        root = Path(_ENG) / "data" / "_test_partition_sb"
+        router = root / "frontend" / "src" / "router"
+        views = root / "frontend" / "src" / "views" / "warehouse"
+        router.mkdir(parents=True, exist_ok=True)
+        views.mkdir(parents=True, exist_ok=True)
+        (router / "index.js").write_text(
+            "import X from '../views/warehouse/MaterialOutboundRecordsView.vue'\n",
+            encoding="utf-8",
+        )
+        (views / "MaterialOutboundRecordsView.vue").write_text("<template/>", encoding="utf-8")
+        try:
+            # 故意不让 shell_touched 用 views 前缀规则以外的路径——用假 router 路径
+            # 实际：router 在 inside，view 在 outside，靠 import 闭包提升
+            changed = [
+                "frontend/src/router/index.js",
+                "frontend/src/views/warehouse/MaterialOutboundRecordsView.vue",
+            ]
+            # scope 只含 router，无 views；shell wiring 会把 router 放 inside，
+            # promote_shell_companions 因 shell_touched 也会直接提升 views
+            inside, outside = partition_by_scope(
+                changed,
+                ["frontend/src/router/"],
+                sandbox_root=root,
+            )
+            self.assertIn(
+                "frontend/src/views/warehouse/MaterialOutboundRecordsView.vue",
+                inside,
+            )
+            self.assertEqual(outside, [])
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_warehouse_module_beats_production_for_outbound(self):
+        from app.code_dev.brief import CodeDevBrief, infer_target
+
+        hints = infer_target(
+            CodeDevBrief(original_goal="MES系统仓库管理菜单新增物料出库记录")
+        )
+        self.assertEqual(hints.get("module"), "仓库管理")
+        paths = hints.get("expected_paths") or []
+        self.assertTrue(any("warehouse" in p for p in paths), paths)
+
 
 if __name__ == "__main__":
     unittest.main()

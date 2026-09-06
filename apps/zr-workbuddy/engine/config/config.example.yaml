@@ -38,6 +38,8 @@ code_review:
   max_file_bytes: 120000
   max_total_bytes: 800000
   default_workspace: ""
+  # 企业默认 false：须列文件卡签发的 path_ticket；仅排障可临时 true
+  allow_agent_absolute_path: false
 
 # P0-2 人触发提交（功能插件 code-commit 须启用；此处 enabled 默认 true）
 code_commit:
@@ -50,22 +52,27 @@ code_commit:
   allow_blocked: false     # 调试用：强制允许带阻断项提交
   max_files: 80
 
-# P1 自动化部署（仅本机 SSH；境外 Git 不用 Actions）
+# P1 自动化部署（一体产品：一次确认 → 同步单元 → 拉起引擎+聊天壳 → 浏览器单入口）
 # 功能插件 code-deploy 须启用；界面只暴露下列核心项
 code_deploy:
   enabled: false
   provider: local_ssh
+  unified_product: true          # 一体部署（推荐）：收尾确保引擎+聊天壳，入口与本机一致
   default_ref: HEAD              # 默认分支 / tag
-  health_url: ""                 # 部署后探活（公网入口，可经 nginx，如 http://主机:8092/）
+  entry_url: ""                  # 浏览器公网入口（如 http://主机:8093/）；由 nginx 反代，勿与引擎回环口相同
+  health_url: ""                 # 同 entry_url（兼容旧字段；二者填一即可）
   default_workspace: ""          # 本地项目路径（git 根）
   ssh_host: ""
   ssh_user: ""
   ssh_key_path: ""               # 如 ~/.ssh/id_ed25519（只填路径）
-  ssh_app_path: ""               # 远端目录，如 /www/wwwroot/DSH-ZR-WorkBuddy
+  ssh_app_path: ""               # 远端目录，如 /www/wwwroot/DSH-WorkBuddy（与 8092 旧项目目录无关）
   ssh_port: 22
-  remote_engine_port: 8091       # 远端引擎回环端口；与 health_url 可不同，勿填 8000/反代口
-  auto_restart_engine: true      # 仅重启本应用引擎（校验 PID/cmdline）
-  auto_restart_bridge: false     # 默认只同步 bridge；业务验收看引擎。需远端宿主收尾再改 true
+  # 引擎只绑 127.0.0.1；公网入口须另开 nginx（例：listen 8093 → 127.0.0.1:8095）
+  # 勿把 remote_engine_port 设成与 entry_url 同一端口，否则 nginx 无法 listen
+  remote_engine_port: 8095       # 远端引擎回环端口（勿用 8091/8092 旧项目口）
+  remote_host_port: 3080         # 远端聊天壳端口（与本机 dsh web 一致）
+  auto_restart_engine: true      # 同步引擎后重启；一体模式下无引擎变更也会 ensure
+  auto_restart_bridge: true      # 一体默认 true：含 bridge 时重装并重启聊天壳
   # 以下有默认值，界面不展示
   default_env: staging
   env_whitelist: [staging]

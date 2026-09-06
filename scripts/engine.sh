@@ -16,6 +16,11 @@ APP="$(resolve_app_name "$APP")"
 CMD="${2:?}"
 shift 2 || true
 
+# 与 test.sh 一致：规避部分 macOS NumPy/Accelerate 初始化 SIGFPE
+export MPLBACKEND="${MPLBACKEND:-Agg}"
+export VECLIB_MAXIMUM_THREADS="${VECLIB_MAXIMUM_THREADS:-1}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
+
 ENGINE="$ROOT/apps/$APP/engine"
 RUNTIME="$ENGINE/config/runtime.yaml"
 PID_FILE="$ENGINE/data/engine.pid"
@@ -71,7 +76,13 @@ is_our_engine_pid() {
       case "$cwd" in
         "$ENGINE"|"$ENGINE"/*) return 0 ;;
       esac
+      return 1
       ;;
+  esac
+  # Cursor/沙箱常禁 ps：仅靠 cwd 判断（daemonize 后 cwd=ENGINE）
+  cwd="$(proc_cwd "$pid")"
+  case "$cwd" in
+    "$ENGINE"|"$ENGINE"/*) return 0 ;;
   esac
   return 1
 }
@@ -221,12 +232,13 @@ do_start_fg() {
 
 do_start_bg() {
   sync_bridge_client
-  if port_holder_is_ours && health_ok; then
+  # 探活成功即就绪（避免沙箱禁 ps 时误判 foreign）
+  if health_ok; then
     echo "引擎已就绪 → http://$HOST:$PORT"
     return 0
   fi
   foreign="$(foreign_port_holder || true)"
-  if [ -n "$foreign" ]; then
+  if [ -n "$foreign" ] && ! port_holder_is_ours; then
     echo "拒绝启动：端口 $PORT 已被其它服务占用 PID=$foreign。请改 runtime.yaml，勿抢占。" >&2
     return 1
   fi
@@ -235,11 +247,11 @@ do_start_bg() {
     do_stop || true
   fi
   mkdir -p "$ENGINE/data"
-  cd "$ENGINE"
-  echo "后台启动 $APP 引擎 → http://$HOST:$PORT （日志 $LOG_FILE）"
-  nohup "$PYTHON" -m uvicorn app.main:app --host "$HOST" --port "$PORT" \
-    >>"$LOG_FILE" 2>&1 &
-  echo $! >"$PID_FILE"
+  echo "后台启动 $APP 引擎（守护、脱离 IDE 进程组）→ http://$HOST:$PORT （日志 $LOG_FILE）"
+  # start_new_session：避免 Cursor Agent shell 结束时带走 uvicorn
+  python3 "$ROOT/scripts/lib/daemonize.py" \
+    --cwd "$ENGINE" --log "$LOG_FILE" --pid "$PID_FILE" -- \
+    "$PYTHON" -m uvicorn app.main:app --host "$HOST" --port "$PORT"
   for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     sleep 0.5
     if health_ok; then

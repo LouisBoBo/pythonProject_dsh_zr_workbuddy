@@ -161,7 +161,7 @@ maybe_restart() {
     "$ROOT/scripts/restart-dsh.sh"
   else
     echo
-    echo "（仅 bridge 变更需要重启）生效: scripts/restart-dsh.sh 或加 --restart"
+    echo "（仅 bridge 变更需要重启）生效: scripts/host.sh restart-web 或 scripts/restart-dsh.sh / 加 --restart"
   fi
 }
 

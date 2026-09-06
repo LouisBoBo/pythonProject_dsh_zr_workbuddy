@@ -2,7 +2,7 @@
 
 from .ops import FEATURE_ID, cancel, check_workspace, get_job, start, status
 from .intent import is_code_dev_question
-from .chat_bridge import confirm_and_start, handle_chat_code_dev
+from .chat_bridge import build_pick_ui, confirm_and_start, handle_chat_code_dev
 from .ops import format_job_done_reply
 
 __all__ = [
@@ -15,5 +15,6 @@ __all__ = [
     "is_code_dev_question",
     "handle_chat_code_dev",
     "confirm_and_start",
+    "build_pick_ui",
     "format_job_done_reply",
 ]

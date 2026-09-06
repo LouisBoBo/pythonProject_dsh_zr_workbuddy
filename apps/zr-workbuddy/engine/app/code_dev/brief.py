@@ -48,10 +48,38 @@ MODULE_HINTS: list[dict[str, Any]] = [
     },
     {
         "module": "生产管理",
-        "keywords": ("生产", "工单", "production", "work_order"),
+        "keywords": ("生产", "工单", "production", "work_order", "领料申请"),
         "paths": (
             "frontend/src/views/production/",
-            "backend/app/routers/work_orders.py",
+            "frontend/src/router/index.js",
+            "frontend/src/layouts/AppLayout.vue",
+            "frontend/src/api/",
+            "backend/app/routers/",
+        ),
+    },
+    {
+        "module": "仓库管理",
+        "keywords": (
+            "仓库",
+            "库位",
+            "出入库",
+            "库存",
+            "warehouse",
+            "inbound",
+            "outbound",
+            "物料出库",
+            "出库记录",
+            "出库",
+            "入库",
+            "领料",
+        ),
+        "paths": (
+            "frontend/src/views/warehouse/",
+            "frontend/src/views/",
+            "frontend/src/router/index.js",
+            "frontend/src/layouts/AppLayout.vue",
+            "frontend/src/api/",
+            "backend/app/routers/",
         ),
     },
     {
@@ -59,6 +87,8 @@ MODULE_HINTS: list[dict[str, Any]] = [
         "keywords": ("系统设置", "settings", "配置中心"),
         "paths": (
             "frontend/src/views/settings/",
+            "frontend/src/router/index.js",
+            "frontend/src/layouts/AppLayout.vue",
             "backend/app/routers/settings.py",
         ),
     },
@@ -376,17 +406,33 @@ def validate_synced_files(
 
 
 def write_scope_from_hints(hints: dict[str, Any]) -> list[str]:
-    """高置信度时自动限制同步范围，防止改错模块。"""
+    """高置信度时自动限制同步范围，防止改错模块。
+
+    含「菜单/页面」类诉求时，强制带上路由/布局/api 等接线路径，
+    否则只同步视图文件会导致刷新后看不到新界面。
+    """
     if hints.get("confidence") != "high":
         return []
     out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(rel: str) -> None:
+        text = str(rel or "").replace("\\", "/").strip()
+        if not text or text in seen:
+            return
+        seen.add(text)
+        out.append(text)
+
     for p in hints.get("expected_paths") or []:
-        rel = str(p).replace("\\", "/").strip()
-        if rel.endswith("/"):
-            out.append(rel)
-        elif rel:
-            out.append(rel)
-    return out[:12]
+        _add(p)
+    # 前端壳：新增页面几乎总要改路由/菜单/API
+    for p in (
+        "frontend/src/router/",
+        "frontend/src/layouts/",
+        "frontend/src/api/",
+    ):
+        _add(p)
+    return out[:20]
 
 
 def infer_target_from_text(*texts: str) -> dict[str, Any]:

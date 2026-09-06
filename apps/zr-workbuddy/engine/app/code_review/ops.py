@@ -122,14 +122,16 @@ def status() -> dict[str, Any]:
 
 
 def check_path(path: str) -> dict[str, Any]:
+    from ..hitl import attach_path_ticket
+
     out = validate_review_root(path)
     out["ok"] = bool(out.get("ok"))
     if out["ok"]:
         out["detail"] = f"路径可用：{out.get('path')}"
         out["reply"] = out["detail"]
-    else:
-        out["detail"] = out.get("error") or "路径不可用"
-        out["reply"] = out["detail"]
+        return attach_path_ticket(out, str(out.get("path") or ""))
+    out["detail"] = out.get("error") or "路径不可用"
+    out["reply"] = out["detail"]
     return out
 
 
@@ -139,20 +141,26 @@ def list_files(
     scope: str = "",
     limit: int = 200,
 ) -> dict[str, Any]:
+    from ..hitl import attach_path_ticket
+
     check = validate_review_root(path)
     if not check.get("ok"):
         return {"ok": False, "detail": check.get("error"), "reply": check.get("error")}
 
     root = Path(check["path"])
     if check.get("is_file"):
-        return {
-            "ok": True,
-            "local_path": str(root.parent),
-            "files": [{"path": root.name, "bytes": root.stat().st_size if root.exists() else 0}],
-            "count": 1,
-            "reply": f"单文件：{root.name}",
-            "detail": "单文件模式",
-        }
+        # local_path 与 path_ticket 绑定同一规范化路径（单文件）
+        return attach_path_ticket(
+            {
+                "ok": True,
+                "local_path": str(root),
+                "files": [{"path": root.name, "bytes": root.stat().st_size if root.exists() else 0}],
+                "count": 1,
+                "reply": f"单文件：{root.name}",
+                "detail": "单文件模式",
+            },
+            str(root),
+        )
 
     scope_root, scope_err = resolve_scope_root(root, scope)
     if scope_err:
@@ -166,17 +174,20 @@ def list_files(
         explicit_files=None,
         cfg=cfg,
     )
-    return {
-        "ok": True,
-        "local_path": str(root),
-        "scope": scope or "",
-        "files": files,
-        "count": len(files),
-        "sample_selected": selected,
-        "warnings": warnings,
-        "reply": f"共 {len(files)} 个可审阅文件（展示上限 {limit}）",
-        "detail": f"默认审码将优先取 {len(selected)} 个文件",
-    }
+    return attach_path_ticket(
+        {
+            "ok": True,
+            "local_path": str(root),
+            "scope": scope or "",
+            "files": files,
+            "count": len(files),
+            "sample_selected": selected,
+            "warnings": warnings,
+            "reply": f"共 {len(files)} 个可审阅文件（展示上限 {limit}）",
+            "detail": f"默认审码将优先取 {len(selected)} 个文件",
+        },
+        str(root),
+    )
 
 
 def _parse_files_arg(raw: str) -> list[str] | None:

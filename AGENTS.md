@@ -14,31 +14,43 @@
 
 ## 0. 运行与验收标准（默认约定）
 
-> Cursor 规则同步：`.cursor/rules/workbuddy-ops-standard.mdc`（alwaysApply）。
+> Cursor 规则（alwaysApply）：  
+> - 五条铁律：`.cursor/rules/workbuddy-ops-standard.mdc`  
+> - 企业级安全底线：`.cursor/rules/workbuddy-security-enterprise.mdc`  
+> 加固方案全文：`docs/企业级安全加固方案.md`。
 
-本仓库**采用 DSH 架构写法**，但**日常操作面默认当作本机与服务器均未安装、也不运行 DSH**：
+本仓库**采用 DSH 架构写法**。业务侧日常仍以**引擎**为操作面与验收面；**完整宿主源码**在同仓 `host/`（DeepSeek Harness Studio），用于二次开发与装**生态**插件——与业务增量部署**分轨**。
 
-| # | 标准 | 含义 |
+| # | 标准（铁律） | 含义 |
 |---|---|---|
 | 1 | **架构保留** | 保留唯一 `plugins/mes-bridge` + `features/` 契约；**禁止删除 Bridge**；禁止再增业务正式 Cordis 包 |
-| 2 | **宿主可不上** | 不以 Harness/聊天窗口为步骤；不把「重启 DSH」当业务收尾；`auto_restart_bridge` 默认 false |
-| 3 | **验收看引擎** | 成败只认引擎网页 / 探活 / `engine.sh … ensure\|restart`；bridge 文件同步≠业务成败 |
-| 4 | **第三方进 features** | 校验 → enable → 可按单元部署；安装与启停**不依赖**是否在跑 DSH |
+| 2 | **业务不绑宿主** | 业务收尾不以「必须打开 Harness/聊天」为成败条件；无远端 profile 时跳过宿主重启属正常。`auto_restart_bridge`：**非一体**默认 false；**`unified_product=true`（一体部署）**时默认同拉远端聊天壳（仍可显式 false 只同步 bridge 文件）。业务验收仍认引擎探活/入口 |
+| 3 | **业务验收看引擎** | 成败只认引擎网页 / 探活 / `engine.sh … ensure\|restart`；bridge 文件同步≠业务成败 |
+| 4 | **WorkBuddy 第三方 → features** | 校验 → enable → 可按单元部署；**不**把任意生态 zip 硬塞进引擎功能页 |
+| 5 | **生态插件 → 宿主** | Cordis/Skill 等上游包：在跑起来的宿主里用插件中心 / 官方 plugin 命令装；源码树见 `host/`（说明：`host/WORKBUDDY.md`） |
 
 **边界（勿混）：**
 
-- 「聊天里 Cordis 热挂 Agent 工具」发生在 **DSH 进程**（有人跑宿主时才用）——**不是**员工网页验收项。  
+- 「聊天里 Cordis 热挂 Agent 工具」发生在 **宿主进程**（`host/` 接线并启动后）——**不是**员工引擎网页验收项。  
 - 删掉 Bridge = 退出 DSH 宿主架构；与「要用 DSH 架构」冲突，故**不得删**。  
-- 无远端 `~/.dsh/profiles/web` 时跳过宿主重启属**正常**，不得判部署失败。
+- **禁止**把业务焊进 `host/` 内核；**禁止**把完整宿主倒进根目录 `vendor/`。  
+- `scripts/host.sh` 仅状态/提示；**不**自动 `pnpm install` / 启动（防误伤）。P2 接线、P3 远端部署须另开确认。
+
+**安全（与铁律并行，不另起架构）：** 写码/提交/部署的人确认须最终可被引擎验证（HITL nonce）；引擎默认只绑回环；审码主路径须路径票据。细节与 P0～P2 见 `docs/企业级安全加固方案.md`。
 
 ---
 
 ## 1. 框架 vs 业务（不要写混）
 
-**框架（`scripts/` / `vendor/`）**
+**框架**
 
-- 只负责：脚手架、把 **bridge** 接到 DSH profile、按 `runtime.yaml` 管引擎进程
-- **禁止**硬编码：业务 URL、LLM Key、面板文案、具体业务工具名
+| 放哪 | 是什么 |
+|---|---|
+| `scripts/` | 脚手架、bridge 接线、引擎启停；`host.sh` 仅宿主状态提示 |
+| `vendor/`（仓根） | 业务侧小依赖钉选——**不是** `host/vendor/` |
+| `host/` | 完整宿主源码（二次开发 / 生态插件）；与业务分轨发版 |
+
+- **禁止**硬编码：业务 URL、LLM Key、面板文案、具体业务工具名  
 - 稳定接线：`~/.dsh/link/DSH-ZR-WorkBuddy` → 本仓库；profile 用相对  
   `link:../../link/DSH-ZR-WorkBuddy/apps/zr-workbuddy/...`  
   （业务应用目录为 `zr-workbuddy`。旧 `--app mes-analytics` 由脚本兼容映射。）

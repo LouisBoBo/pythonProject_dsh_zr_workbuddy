@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from .analyzer import analyze
 from .config_store import load_config
-from .demo_data import get_demo_store
 from .health import check_net, llm_ready
-from .mes_analyzer import analyze_mes
 from .mes_client import MesError
 from .nl_engine import llm_chat, parse_question
 from . import plugins_store
+
+# get_demo_store / analyze 含 pandas/numpy：延迟导入（见下方查数路径），
+# 避免门闸类单测 import cli_ops 即触发 macOS Accelerate SIGFPE。
 
 # feature id ↔ 能力：面板 chat / CLI / Agent 工具必须共用同一启停门闸
 FEATURE_ASK = "mes-ask"
@@ -391,6 +391,11 @@ async def chat(text: str, *, code_dev_brief: dict | None = None) -> dict:
                 "data_source": "assistant",
                 "intent": {"type": intent["type"], "metric": "", "dim": None, "chart": None}}
 
+    from . import blas_env  # noqa: F401
+    from .analyzer import analyze
+    from .demo_data import get_demo_store
+    from .mes_analyzer import analyze_mes
+
     mes = cfg.get("mes") or {}
     data_source = "demo"
     note_extra = None
@@ -497,6 +502,66 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
             return blocked
         from .code_dev import status as code_dev_status
         return code_dev_status()
+    if cmd == "code-dev-pick":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_DEV, capability="本机 Cursor 写码")
+        if blocked:
+            return blocked
+        from .code_dev import build_pick_ui
+        from .code_dev.config import availability as code_dev_availability
+        from .code_dev.config import get_config as code_dev_get_config
+        cfg = code_dev_get_config()
+        avail = code_dev_availability()
+        if not cfg.enabled:
+            return {
+                "ok": False,
+                "detail": "写码车道未开启（配置中心 → 写码车道）",
+                "note": "code_dev.disabled",
+            }
+        if not avail.get("ok"):
+            return {"ok": False, "detail": avail.get("detail") or "写码车道未就绪"}
+        hint = ""
+        req = ""
+        for arg in rest:
+            if arg.startswith("workspace="):
+                hint = arg.split("=", 1)[1]
+            elif arg.startswith("requirement=") or arg.startswith("message="):
+                req = arg.split("=", 1)[1]
+            elif arg.startswith("/") and not hint:
+                hint = arg
+        ui = build_pick_ui(workspace=hint, requirement=req)
+        return {
+            "ok": True,
+            "reply": "请选择本机工程并填写写码需求，确认后才会启动 Cursor。",
+            "code_dev_ui": ui,
+            "suggestions": ui.get("suggestions") or [],
+            "workspace": ui.get("workspace") or "",
+            "source": "code_dev",
+        }
+    if cmd == "code-dev-discuss":
+        # 需求讨论：返回 options/propose；不启动 Job
+        blocked = plugins_store.require_enabled(FEATURE_CODE_DEV, capability="本机 Cursor 写码")
+        if blocked:
+            return blocked
+        from .code_dev.chat_bridge import handle_chat_code_dev
+        hint = ""
+        msg = ""
+        for arg in rest:
+            if arg.startswith("workspace="):
+                hint = arg.split("=", 1)[1]
+            elif arg.startswith("message=") or arg.startswith("requirement="):
+                msg = arg.split("=", 1)[1]
+            elif arg.startswith("/") and not hint:
+                hint = arg
+            elif not msg:
+                msg = arg
+            else:
+                msg = (msg + " " + arg).strip()
+        if not msg:
+            return {"ok": False, "detail": "用法: code-dev-discuss message=<诉求> [workspace=路径]"}
+        text = msg
+        if hint and hint not in msg and not msg.startswith("【写码需求选项已确认】"):
+            text = f"在 {hint} 开发：{msg}"
+        return await handle_chat_code_dev(text, client_brief=None)
     if cmd == "code-dev-check":
         blocked = plugins_store.require_enabled(FEATURE_CODE_DEV, capability="本机 Cursor 写码")
         if blocked:
@@ -504,17 +569,13 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
         from .code_dev import check_workspace
         return check_workspace(" ".join(rest) if rest else "")
     if cmd == "code-dev-start":
-        blocked = plugins_store.require_enabled(FEATURE_CODE_DEV, capability="本机 Cursor 写码")
-        if blocked:
-            return blocked
-        from .code_dev import start as code_dev_start
-        # args: <workspace绝对路径> | <需求…>
-        # 约定：第一个参数为路径，其余为空格拼成需求；也可用 JSON 单参（由 HTTP 传）
-        if not rest:
-            return {"ok": False, "detail": "用法: code-dev-start <workspace绝对路径> <需求>"}
-        workspace = rest[0]
-        message = " ".join(rest[1:]).strip()
-        return code_dev_start(workspace=workspace, message=message)
+        # 企业硬门禁：禁止无 nonce 直开 Cursor Job；统一走确认卡 / code-dev-confirm
+        return {
+            "ok": False,
+            "detail": "code-dev-start 已关闭：请在确认卡点击确认（HITL nonce → code-dev-confirm）",
+            "code": "hitl_start_disabled",
+            "reply": "未确认，未启动写码。请使用主聊天写码确认卡。",
+        }
     if cmd == "code-dev-job":
         blocked = plugins_store.require_enabled(FEATURE_CODE_DEV, capability="本机 Cursor 写码")
         if blocked:
@@ -528,20 +589,81 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
         from .code_dev import cancel as code_dev_cancel
         return code_dev_cancel(rest[0] if rest else "")
     if cmd == "code-dev-confirm":
-        # 确认卡点「开始」后调用；args: <workspace> <requirement…>
+        # 确认卡点「开始」后调用；args: <workspace> <requirement…> [nonce=…]
         blocked = plugins_store.require_enabled(FEATURE_CODE_DEV, capability="本机 Cursor 写码")
         if blocked:
             return blocked
         from .code_dev.chat_bridge import confirm_and_start
+        from .hitl import ACTION_DEV, require_confirm_nonce
+
         if not rest:
-            return {"ok": False, "detail": "用法: code-dev-confirm <workspace绝对路径> <需求>"}
-        return confirm_and_start(workspace=rest[0], requirement=" ".join(rest[1:]).strip())
+            return {
+                "ok": False,
+                "detail": "用法: code-dev-confirm <workspace绝对路径> <需求> nonce=<HITL>",
+            }
+        nonce = ""
+        parts: list[str] = []
+        for a in rest:
+            if a.startswith("nonce="):
+                nonce = a[6:]
+            else:
+                parts.append(a)
+        if not parts:
+            return {"ok": False, "detail": "缺少 workspace"}
+        gate = require_confirm_nonce(
+            nonce=nonce,
+            action=ACTION_DEV,
+            workspace=parts[0],
+        )
+        if not gate.get("ok"):
+            return gate
+        return confirm_and_start(workspace=parts[0], requirement=" ".join(parts[1:]).strip())
     if cmd == "code-review-status":
         blocked = plugins_store.require_enabled(FEATURE_CODE_REVIEW, capability="本机目录审码")
         if blocked:
             return blocked
         from .code_review import status as code_review_status
         return code_review_status()
+    if cmd == "code-review-pick":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_REVIEW, capability="本机目录审码")
+        if blocked:
+            return blocked
+        from .code_review import build_pick_ui
+        from .code_review.config import availability as code_review_availability
+        from .code_review.config import get_config as code_review_get_config
+        cfg = code_review_get_config()
+        avail = code_review_availability()
+        if not cfg.enabled:
+            return {
+                "ok": False,
+                "detail": "审码车道未开启（配置中心）",
+                "note": "code_review.disabled",
+            }
+        if not avail.get("ok"):
+            return {"ok": False, "detail": avail.get("detail") or "审码车道未就绪"}
+        hint = ""
+        scope = ""
+        focus = ""
+        for arg in rest:
+            if arg.startswith("workspace=") or arg.startswith("local_path="):
+                hint = arg.split("=", 1)[1]
+            elif arg.startswith("scope="):
+                scope = arg[6:]
+            elif arg.startswith("focus="):
+                focus = arg[6:]
+            elif arg.startswith("/") and not hint:
+                hint = arg
+        ui = build_pick_ui(workspace=hint, scope=scope, focus=focus)
+        return {
+            "ok": True,
+            "reply": "请选择要审核的本机工程目录。",
+            "code_review_ui": ui,
+            "suggestions": ui.get("suggestions") or [],
+            "workspace": ui.get("workspace") or "",
+            "scope": ui.get("scope") or "",
+            "focus": ui.get("focus") or "",
+            "source": "code_review",
+        }
     if cmd == "code-review-check":
         blocked = plugins_store.require_enabled(FEATURE_CODE_REVIEW, capability="本机目录审码")
         if blocked:
@@ -562,13 +684,20 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
         blocked = plugins_store.require_enabled(FEATURE_CODE_REVIEW, capability="本机目录审码")
         if blocked:
             return blocked
-        from .code_review.ops import _parse_files_arg, run_review
+        from .code_review.config import get_config as code_review_get_config
+        from .code_review.ops import _parse_files_arg, run_review_async
+        from .hitl import gate_review_path
+
         if not rest:
-            return {"ok": False, "detail": "用法: code-review-run <local_path> [scope=子路径] [focus=审查重点] [files=a,b]"}
+            return {
+                "ok": False,
+                "detail": "用法: code-review-run <local_path> [scope=] [focus=] [files=] [path_ticket=]",
+            }
         local_path = rest[0]
         scope = ""
         focus = ""
         files_raw = ""
+        path_ticket = ""
         for arg in rest[1:]:
             if arg.startswith("scope="):
                 scope = arg[6:]
@@ -576,7 +705,18 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
                 focus = arg[6:]
             elif arg.startswith("files="):
                 files_raw = arg[6:]
-        return run_review(
+            elif arg.startswith("path_ticket="):
+                path_ticket = arg[12:]
+        cfg = code_review_get_config()
+        gate = gate_review_path(
+            local_path=local_path,
+            path_ticket=path_ticket,
+            allow_agent_absolute_path=cfg.allow_agent_absolute_path,
+        )
+        if not gate.get("ok"):
+            return gate
+        # run_async 已在事件循环内；禁止调同步 run_review()（其内部 asyncio.run 会炸）
+        return await run_review_async(
             local_path=local_path,
             scope=scope,
             files=_parse_files_arg(files_raw),
@@ -596,6 +736,39 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
             return blocked
         from .code_commit import status as code_commit_status
         return code_commit_status()
+    if cmd == "code-commit-pick":
+        blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
+        if blocked:
+            return blocked
+        from .code_commit import build_pick_ui
+        from .code_commit.config import availability as code_commit_availability
+        from .code_commit.config import get_config as code_commit_get_config
+        cfg = code_commit_get_config()
+        avail = code_commit_availability()
+        if not cfg.enabled:
+            return {
+                "ok": False,
+                "detail": "提交车道未开启（配置中心第 7 步）",
+                "note": "code_commit.disabled",
+            }
+        if not avail.get("ok"):
+            return {"ok": False, "detail": avail.get("detail") or "提交车道未就绪"}
+        hint = ""
+        for arg in rest:
+            if arg.startswith("workspace="):
+                hint = arg[10:]
+            elif arg.startswith("/") and not hint:
+                hint = arg
+        ui = build_pick_ui(workspace=hint)
+        return {
+            "ok": True,
+            "reply": "请选择要提交的本机 Git 工程目录，再开始门禁。",
+            "code_commit_ui": ui,
+            "suggestions": ui.get("suggestions") or [],
+            "workspace": ui.get("workspace") or "",
+            "work_branch": ui.get("work_branch") or "",
+            "source": "code_commit",
+        }
     if cmd == "code-commit-check":
         blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
         if blocked:
@@ -633,16 +806,19 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
         if blocked:
             return blocked
         from .code_commit import confirm as code_commit_confirm
-        # args: <job_id> [message=…] [push=true|false] [decision=approve|reject]
+        from .hitl import ACTION_COMMIT, require_confirm_nonce
+
+        # args: <job_id> [message=…] [push=true|false] [decision=approve|reject] [nonce=…]
         if not rest:
             return {
                 "ok": False,
-                "detail": "用法: code-commit-confirm <job_id> [message=中文说明] [push=true] [decision=approve]",
+                "detail": "用法: code-commit-confirm <job_id> [message=…] [push=true] [decision=approve] nonce=<HITL>",
             }
         job_id = rest[0]
         message = ""
         push = None
         decision = "approve"
+        nonce = ""
         for arg in rest[1:]:
             if arg.startswith("message="):
                 message = arg[8:]
@@ -650,8 +826,13 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
                 push = arg[5:].lower() in {"1", "true", "yes", "y"}
             elif arg.startswith("decision="):
                 decision = arg[9:]
-            elif not message and not arg.startswith(("push=", "decision=")):
+            elif arg.startswith("nonce="):
+                nonce = arg[6:]
+            elif not message and not arg.startswith(("push=", "decision=", "nonce=")):
                 message = arg
+        gate = require_confirm_nonce(nonce=nonce, action=ACTION_COMMIT, job_id=job_id)
+        if not gate.get("ok"):
+            return gate
         return code_commit_confirm(job_id, message=message, push=push, decision=decision)
     if cmd == "code-commit-job":
         blocked = plugins_store.require_enabled(FEATURE_CODE_COMMIT, capability="人触发提交")
@@ -749,10 +930,13 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
         if blocked:
             return blocked
         from .code_deploy import confirm as code_deploy_confirm
+        from .hitl import ACTION_DEPLOY, require_confirm_nonce
+
         job_id = rest[0] if rest else ""
         decision = "approve"
         mode = ""
         unit_ids = []
+        nonce = ""
         i = 1
         while i < len(rest):
             a = rest[i]
@@ -768,7 +952,18 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
                 unit_ids.append(rest[i + 1])
                 i += 2
                 continue
+            if a.startswith("nonce="):
+                nonce = a[6:]
+                i += 1
+                continue
+            if a == "--nonce" and i + 1 < len(rest):
+                nonce = rest[i + 1]
+                i += 2
+                continue
             i += 1
+        gate = require_confirm_nonce(nonce=nonce, action=ACTION_DEPLOY, job_id=job_id)
+        if not gate.get("ok"):
+            return gate
         return code_deploy_confirm(
             job_id,
             decision=decision,

@@ -1,6 +1,10 @@
 /**
  * 热插拔 feature：code-dev（本机 Cursor Local 写码）
- * 无 import npm；能力经 ctx.get('mesEngine')；算数在 engine/app/code_dev。
+ * 无 import npm；算数在 engine/app/code_dev。
+ *
+ * 主聊天 HITL：begin 返回 code_dev_ui + presentationMeta，
+ * 由 mes-bridge tool.call.toolview 在主对话工具卡内选目录/填需求/确认开工。
+ * 禁止依赖浮层面板 / ask_user_question；确认前绝不 start Job。
  */
 export const name = "code-dev";
 export const inject = ["tools"];
@@ -17,60 +21,138 @@ const OUTPUT_SCHEMA = {
   },
 };
 
+function eng(ctx) {
+  return ctx.get("mesEngine");
+}
+
+function timeoutOf(e) {
+  return Math.max(e.TIMEOUT_MS || 60000, 120000);
+}
+
+function cdPresentationMeta(_args, value) {
+  if (value && value.code_dev_ui) {
+    const kind = value.code_dev_ui.kind || "pick";
+    return { wb: { t: "cd-" + kind, ui: value.code_dev_ui } };
+  }
+  if (value && value.job_id) {
+    return { wb: { t: "cd-job", job_id: value.job_id } };
+  }
+  return { wb: { t: "cd-none" } };
+}
+
 export function apply(ctx) {
-  const eng = ctx.get("mesEngine");
-  if (!eng) {
+  const e = eng(ctx);
+  if (!e) {
     console.error("[code-dev] mesEngine 未提供：请启用 mes-bridge");
     return;
   }
-
-  const timeoutMs = Math.max(eng.TIMEOUT_MS || 60000, 120000);
+  const t = timeoutOf(e);
 
   ctx.tools.register(
-    eng.defineTool({
-      name: "mes_code_dev_status",
+    e.defineTool({
+      name: "mes_code_dev_begin",
       description:
-        "ZR-WorkBuddy：查看本机 Cursor Local 写码是否就绪（开关、API Key、cursor-sdk）。" +
-        "示例：「本机写码可用吗」「Cursor 写码状态」。",
-      parameters: {},
-      output: { schema: OUTPUT_SCHEMA, render: eng.resultRender },
-      timeoutMs: eng.TIMEOUT_MS || 60000,
-      async execute() {
-        return await eng.runEngine(["code-dev-status"]);
+        "【写码主入口】用户说「写码 / 改代码 / 改页面 / 改菜单 / 挪菜单 / 加功能 / 开发页面 / Cursor 写码」" +
+        "（含「物料出库写到仓库管理菜单」这类改菜单诉求）时必须只调本工具，且应作为本轮第一个工具调用。" +
+        "**必须把用户原话原样传入 message**（勿留空），可选 workspace；返回主聊天工具卡（选目录→梳理需求→确认）。" +
+        "不要 ask_user_question，不要 Bash/Grep/Read 扫盘，不要直接 start。",
+      parameters: {
+        workspace: {
+          type: "string",
+          description: "可选：本机工程绝对路径",
+        },
+        message: {
+          type: "string",
+          required: true,
+          description: "必填：用户本轮原话/写码诉求（原样传入，工具卡会自动填入「原始写码诉求」）",
+        },
+      },
+      output: {
+        schema: OUTPUT_SCHEMA,
+        render: e.resultRender,
+        presentationMeta: cdPresentationMeta,
+      },
+      timeoutMs: t,
+      async execute(args) {
+        const workspace = String((args && args.workspace) || "").trim();
+        const message = String((args && args.message) || "").trim();
+        const cmd = ["code-dev-pick"];
+        if (workspace) cmd.push("workspace=" + workspace);
+        if (message) cmd.push("requirement=" + message);
+        const pick = await e.runEngine(cmd);
+        if (!pick || !pick.ok) return pick;
+        const ui = pick.code_dev_ui || null;
+        if (ui) {
+          if (workspace) ui.workspace = workspace;
+          if (message) {
+            ui.requirement = message;
+            ui.original_goal = message;
+          }
+        }
+        return {
+          ok: true,
+          reply:
+            "请在**上方工具卡**中确认工程目录与需求（已尽量带入你的原话），核对后点「下一步」梳理，再确认开工。" +
+            "确认前不会改盘；成功后不会自动 git commit。",
+          detail: "await_toolview_pick",
+          workspace: (ui && ui.workspace) || workspace || pick.workspace || "",
+          code_dev_ui: ui,
+          suggestions: pick.suggestions || [],
+          source: "code_dev",
+        };
       },
     }),
   );
 
   ctx.tools.register(
-    eng.defineTool({
+    e.defineTool({
+      name: "mes_code_dev_status",
+      description:
+        "【排障】写码车道状态。用户说「写码」时禁止调用；请用 mes_code_dev_begin。",
+      parameters: {},
+      output: {
+        schema: OUTPUT_SCHEMA,
+        render: e.resultRender,
+        presentationMeta: cdPresentationMeta,
+      },
+      timeoutMs: e.TIMEOUT_MS || 60000,
+      async execute() {
+        return await e.runEngine(["code-dev-status"]);
+      },
+    }),
+  );
+
+  ctx.tools.register(
+    e.defineTool({
       name: "mes_code_dev_check",
       description:
-        "ZR-WorkBuddy：校验本机工程绝对路径是否可作为写码目标目录。" +
-        "示例：「检查一下 /Users/me/proj 能不能写码」。",
+        "【排障】校验工程路径。用户说「写码」时禁止调用；请用 mes_code_dev_begin。",
       parameters: {
         workspace: {
           type: "string",
           required: true,
-          description: "本机工程绝对路径，例如 /Users/你/项目",
+          description: "本机工程绝对路径",
         },
       },
-      output: { schema: OUTPUT_SCHEMA, render: eng.resultRender },
-      timeoutMs: eng.TIMEOUT_MS || 60000,
+      output: {
+        schema: OUTPUT_SCHEMA,
+        render: e.resultRender,
+        presentationMeta: cdPresentationMeta,
+      },
+      timeoutMs: e.TIMEOUT_MS || 60000,
       async execute(args) {
         const workspace = String(args.workspace || "").trim();
         if (!workspace) return { ok: false, detail: "workspace 不能为空" };
-        return await eng.runEngine(["code-dev-check", workspace]);
+        return await e.runEngine(["code-dev-check", workspace]);
       },
     }),
   );
 
   ctx.tools.register(
-    eng.defineTool({
+    e.defineTool({
       name: "mes_code_dev_start",
       description:
-        "ZR-WorkBuddy：仅在用户已明确确认写码方案后启动 Cursor Local 任务。" +
-        "聊天面板应走确认卡；Agent 调用时必须 confirmed=true。" +
-        "禁止在需求未确认时直接调用。启动后用 mes_code_dev_job 查进度。不会自动 commit。",
+        "仅当用户已在工具卡确认并拿到 HITL nonce 时使用。日常请用 mes_code_dev_begin；禁止仅凭 confirmed=true 开工。",
       parameters: {
         workspace: {
           type: "string",
@@ -82,62 +164,77 @@ export function apply(ctx) {
           required: true,
           description: "已确认的改码需求摘要",
         },
-        confirmed: {
-          type: "boolean",
+        nonce: {
+          type: "string",
           required: true,
-          description: "必须为 true，表示用户已确认写码确认卡/方案",
+          description: "确认卡签发的一次性 HITL nonce（须来自 UI，不可伪造）",
         },
       },
-      output: { schema: OUTPUT_SCHEMA, render: eng.resultRender },
-      timeoutMs,
+      output: {
+        schema: OUTPUT_SCHEMA,
+        render: e.resultRender,
+        presentationMeta: cdPresentationMeta,
+      },
+      timeoutMs: t,
       async execute(args) {
-        const workspace = String(args.workspace || "").trim();
-        const message = String(args.message || "").trim();
-        if (!args.confirmed) {
+        const nonce = String(args.nonce || "").trim();
+        if (!nonce) {
           return {
             ok: false,
-            detail: "未确认：请先让用户确认写码方案（confirmed=true）后再启动",
-            reply: "请先完成需求确认卡，再启动写码。",
+            detail: "缺少 HITL nonce：请让用户在写码确认卡点击确认",
+            reply: "请先完成写码确认卡，再启动。",
           };
         }
+        const workspace = String(args.workspace || "").trim();
+        const message = String(args.message || "").trim();
         if (!workspace) return { ok: false, detail: "workspace 不能为空" };
         if (!message) return { ok: false, detail: "message 不能为空" };
-        return await eng.runEngine(["code-dev-start", workspace, message]);
+        return await e.runEngine(
+          ["code-dev-confirm", workspace, message, "nonce=" + nonce],
+          t,
+        );
       },
     }),
   );
 
   ctx.tools.register(
-    eng.defineTool({
+    e.defineTool({
       name: "mes_code_dev_job",
-      description:
-        "ZR-WorkBuddy：查询本机写码任务状态与同步结果。示例：「查一下任务 ldj-xxxx」。",
-      parameters: {
-        job_id: { type: "string", required: true, description: "任务 id，如 ldj-…" },
-      },
-      output: { schema: OUTPUT_SCHEMA, render: eng.resultRender },
-      timeoutMs: eng.TIMEOUT_MS || 60000,
-      async execute(args) {
-        const job_id = String(args.job_id || "").trim();
-        if (!job_id) return { ok: false, detail: "job_id 不能为空" };
-        return await eng.runEngine(["code-dev-job", job_id]);
-      },
-    }),
-  );
-
-  ctx.tools.register(
-    eng.defineTool({
-      name: "mes_code_dev_cancel",
-      description: "ZR-WorkBuddy：取消进行中的本机写码任务。",
+      description: "查询本机写码任务状态。示例：「查一下任务 ldj-xxxx」。",
       parameters: {
         job_id: { type: "string", required: true, description: "任务 id" },
       },
-      output: { schema: OUTPUT_SCHEMA, render: eng.resultRender },
-      timeoutMs: eng.TIMEOUT_MS || 60000,
+      output: {
+        schema: OUTPUT_SCHEMA,
+        render: e.resultRender,
+        presentationMeta: cdPresentationMeta,
+      },
+      timeoutMs: e.TIMEOUT_MS || 60000,
       async execute(args) {
         const job_id = String(args.job_id || "").trim();
         if (!job_id) return { ok: false, detail: "job_id 不能为空" };
-        return await eng.runEngine(["code-dev-cancel", job_id]);
+        return await e.runEngine(["code-dev-job", job_id]);
+      },
+    }),
+  );
+
+  ctx.tools.register(
+    e.defineTool({
+      name: "mes_code_dev_cancel",
+      description: "取消进行中的本机写码任务。",
+      parameters: {
+        job_id: { type: "string", required: true, description: "任务 id" },
+      },
+      output: {
+        schema: OUTPUT_SCHEMA,
+        render: e.resultRender,
+        presentationMeta: cdPresentationMeta,
+      },
+      timeoutMs: e.TIMEOUT_MS || 60000,
+      async execute(args) {
+        const job_id = String(args.job_id || "").trim();
+        if (!job_id) return { ok: false, detail: "job_id 不能为空" };
+        return await e.runEngine(["code-dev-cancel", job_id]);
       },
     }),
   );

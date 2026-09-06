@@ -11,13 +11,15 @@ import base64
 import io
 import os
 
-import numpy as np
-import pandas as pd
+from . import blas_env  # noqa: F401 — 须在 numpy 之前
 
 os.environ.setdefault(
     "MPLCONFIGDIR",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", ".mplcache"),
 )
+
+import numpy as np
+import pandas as pd
 import matplotlib
 
 matplotlib.use("Agg")

@@ -1,11 +1,13 @@
 """FastAPI 入口：聊天分析 API + 配置 API + 静态页面（SPA）。"""
 
+from . import blas_env  # noqa: F401 — 进程尽早设 BLAS 环境，再加载其它依赖
+
 import json
 import os
 from typing import Any, Dict, List
 
 import httpx
-from fastapi import FastAPI, File, Query, UploadFile
+from fastapi import FastAPI, File, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -78,6 +80,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _hitl_origin_guard(request, call_next):
+    """变异接口：若带 Origin/Referer 则必须为本机回环（无头视为 CLI，仍须 HITL nonce）。"""
+    from fastapi.responses import JSONResponse
+
+    from .hitl import local_origin_ok, mutating_path_guarded
+
+    if mutating_path_guarded(request.url.path, request.method):
+        bad = local_origin_ok(
+            request.headers.get("origin"),
+            request.headers.get("referer"),
+        )
+        if bad:
+            return JSONResponse({"ok": False, "detail": bad, "code": "origin_rejected"}, status_code=403)
+    return await call_next(request)
 
 
 @app.on_event("startup")
@@ -188,23 +207,119 @@ class CodeDevConfirmBody(BaseModel):
         description="可选：限制同步/优先改动的相对路径（如来自提交门禁 findings）",
     )
     source_gate_job_id: str = Field("", description="可选：来源提交门禁任务 id（cc-…）")
+    nonce: str = Field(
+        "",
+        description="确认卡签发的一次性 HITL nonce（POST /api/hitl/issue）；无 nonce 拒绝开工",
+    )
+
+
+class HitlIssueBody(BaseModel):
+    action: str = Field(
+        ...,
+        description="仅 code-dev.confirm | code-commit.confirm | code-deploy.confirm（path_ticket 不经本接口）",
+    )
+    workspace: str = Field("", description="写码绑定工程路径")
+    job_id: str = Field("", description="提交/部署绑定 job_id")
+    path: str = Field("", description="（已废弃）path_ticket 请走列文件/校验，勿经本接口")
+
+
+class CodeDevDiscussBody(BaseModel):
+    message: str = Field(..., description="用户原文，或「【写码需求选项已确认】」勾选结果")
+    workspace: str = Field("", description="本机工程绝对路径（可选；并入讨论上下文）")
+    code_dev_brief: dict | None = Field(None, description="跨轮次写码简报（选项确认时必带回）")
+
+
+@app.post(
+    "/api/hitl/issue",
+    tags=["人机确认"],
+    summary="签发 HITL 一次性票据",
+    description="仅确认卡 UI 在用户点击前调用（须 X-WorkBuddy-Hitl: ui + 本机 Origin）。"
+    "可签发 code-dev/commit/deploy.confirm；path_ticket 不经本接口（仅列文件/校验后附带）。"
+    "Agent/脚本不得签发。",
+)
+def api_hitl_issue(body: HitlIssueBody, request: Request):
+    from .hitl import HTTP_ISSUE_ACTIONS, issue, issue_surface_ok
+
+    surface = issue_surface_ok(
+        origin=request.headers.get("origin"),
+        referer=request.headers.get("referer"),
+        ui_header=request.headers.get("x-workbuddy-hitl"),
+    )
+    if surface:
+        return JSONResponse(
+            {"ok": False, "detail": surface, "code": "hitl_issue_forbidden"},
+            status_code=403,
+        )
+    act = (body.action or "").strip()
+    if act not in HTTP_ISSUE_ACTIONS:
+        return JSONResponse(
+            {
+                "ok": False,
+                "detail": "该 action 不可经 HTTP 签发（path_ticket 请走列文件/校验）",
+                "code": "hitl_action_not_http",
+            },
+            status_code=400,
+        )
+    out = issue(
+        action=act,
+        workspace=body.workspace or "",
+        job_id=body.job_id or "",
+        path=body.path or "",
+    )
+    if not out.get("ok"):
+        return JSONResponse(out, status_code=400)
+    return out
+
+
+@app.post(
+    "/api/code-dev/discuss",
+    tags=["本机写码"],
+    summary="写码需求讨论（选项卡/确认卡）",
+    description="对齐引擎聊天写码 HITL：梳理需求并返回 code_dev_ui（options 或 propose），"
+    "绝不在此启动 Cursor Job。确认开工请用 POST /api/code-dev/confirm。",
+)
+async def api_code_dev_discuss(body: CodeDevDiscussBody):
+    from . import plugins_store
+    from .code_dev.chat_bridge import handle_chat_code_dev
+    from .code_dev.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机 Cursor 写码")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    raw = (body.message or "").strip()
+    if not raw:
+        return JSONResponse({"ok": False, "detail": "message 不能为空"}, status_code=400)
+    ws = (body.workspace or "").strip()
+    text = raw
+    if ws and ws not in raw and not raw.startswith("【写码需求选项已确认】"):
+        text = f"在 {ws} 开发：{raw}"
+    return await handle_chat_code_dev(text, client_brief=body.code_dev_brief)
 
 
 @app.post(
     "/api/code-dev/confirm",
     tags=["本机写码"],
     summary="确认写码并启动本机 Cursor 任务",
-    description="用户在聊天确认卡点击后调用；才会真正排队/启动写码 Job。不会自动 commit。"
+    description="用户在聊天确认卡点击后调用；须带 HITL nonce。"
+    "才会真正排队/启动写码 Job。不会自动 commit。"
     "启动后请用 GET /api/code-dev/jobs/{job_id}/stream 订阅进度。",
 )
 def api_code_dev_confirm(body: CodeDevConfirmBody):
     from . import plugins_store
     from .code_dev.chat_bridge import confirm_and_start
     from .code_dev.ops import FEATURE_ID
+    from .hitl import ACTION_DEV, require_confirm_nonce
 
     blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机 Cursor 写码")
     if blocked:
         return JSONResponse(blocked, status_code=400)
+    gate = require_confirm_nonce(
+        nonce=body.nonce or "",
+        action=ACTION_DEV,
+        workspace=body.workspace or "",
+    )
+    if not gate.get("ok"):
+        return JSONResponse(gate, status_code=400)
     out = confirm_and_start(
         workspace=body.workspace or "",
         requirement=body.requirement or "",
@@ -322,6 +437,10 @@ class CodeReviewRunBody(BaseModel):
     scope: str = ""
     files: list[str] | None = None
     focus: str = ""
+    path_ticket: str = Field(
+        "",
+        description="列文件/校验成功后签发的 path_ticket；默认必填（除非 allow_agent_absolute_path）",
+    )
 
 
 class PickFolderBody(BaseModel):
@@ -402,6 +521,7 @@ async def api_code_review_run(body: CodeReviewRunBody):
     from . import plugins_store
     from .code_review.config import availability, get_config
     from .code_review.ops import FEATURE_ID, run_review_async
+    from .hitl import gate_review_path
 
     blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机目录审码")
     if blocked:
@@ -418,6 +538,13 @@ async def api_code_review_run(body: CodeReviewRunBody):
             {"ok": False, "detail": avail.get("detail"), "reply": avail.get("detail")},
             status_code=400,
         )
+    gate = gate_review_path(
+        local_path=body.local_path or "",
+        path_ticket=body.path_ticket or "",
+        allow_agent_absolute_path=cfg.allow_agent_absolute_path,
+    )
+    if not gate.get("ok"):
+        return JSONResponse(gate, status_code=400)
     out = await run_review_async(
         local_path=body.local_path or "",
         scope=body.scope or "",
@@ -433,7 +560,8 @@ async def api_code_review_run(body: CodeReviewRunBody):
     "/api/code-review/run/stream",
     tags=["本机审码"],
     summary="流式执行本机代码审查（带进度）",
-    description="SSE：逐步推送校验/筛选/读码/LLM/汇总；过程中推送草稿 token，终态按行流式推送完整「代码审核汇总报告」。",
+    description="SSE：逐步推送校验/筛选/读码/LLM/汇总；过程中推送草稿 token，终态按行流式推送完整「代码审核汇总报告」。"
+    "须带 path_ticket（企业硬门禁）。",
 )
 async def api_code_review_run_stream(body: CodeReviewRunBody):
     import json as _json
@@ -441,7 +569,9 @@ async def api_code_review_run_stream(body: CodeReviewRunBody):
     from fastapi.responses import StreamingResponse
 
     from . import plugins_store
+    from .code_review.config import get_config
     from .code_review.ops import FEATURE_ID, iter_review_events
+    from .hitl import gate_review_path
 
     blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机目录审码")
     if blocked:
@@ -449,6 +579,18 @@ async def api_code_review_run_stream(body: CodeReviewRunBody):
             yield f"data: {_json.dumps({**blocked, 'type': 'done', 'ok': False}, ensure_ascii=False)}\n\n"
 
         return StreamingResponse(err_gen(), media_type="text/event-stream")
+
+    cfg = get_config()
+    gate = gate_review_path(
+        local_path=body.local_path or "",
+        path_ticket=body.path_ticket or "",
+        allow_agent_absolute_path=cfg.allow_agent_absolute_path,
+    )
+    if not gate.get("ok"):
+        async def gate_err():
+            yield f"data: {_json.dumps({**gate, 'type': 'done', 'ok': False}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(gate_err(), media_type="text/event-stream")
 
     async def event_gen():
         try:
@@ -510,6 +652,7 @@ class CodeCommitConfirmBody(BaseModel):
     message: str = ""
     push: bool | None = None
     decision: str = "approve"
+    nonce: str = Field("", description="确认卡签发的 HITL nonce")
 
 
 @app.get(
@@ -608,10 +751,18 @@ def api_code_commit_confirm(body: CodeCommitConfirmBody):
     from . import plugins_store
     from .code_commit import confirm
     from .code_commit.ops import FEATURE_ID
+    from .hitl import ACTION_COMMIT, require_confirm_nonce
 
     blocked = plugins_store.require_enabled(FEATURE_ID, capability="人触发提交")
     if blocked:
         return JSONResponse(blocked, status_code=400)
+    gate = require_confirm_nonce(
+        nonce=body.nonce or "",
+        action=ACTION_COMMIT,
+        job_id=body.job_id or "",
+    )
+    if not gate.get("ok"):
+        return JSONResponse(gate, status_code=400)
     out = confirm(
         body.job_id or "",
         message=body.message or "",
@@ -761,6 +912,7 @@ class CodeDeployConfirmBody(BaseModel):
         None,
         description="确认时勾选的单元；全量且不传则同步全部目录单元",
     )
+    nonce: str = Field("", description="确认卡签发的 HITL nonce")
 
 
 @app.get(
@@ -812,17 +964,25 @@ def api_code_deploy_prepare(body: CodeDeployPrepareBody):
     "/api/code-deploy/confirm",
     tags=["按插件增量部署"],
     summary="人确认后全量或按勾选单元 SSH/rsync",
-    description="仅 HITL：mode=full 同步目录全量单元；mode=incremental 仅同步勾选单元。"
-    "模型不得代调本接口完成部署。",
+    description="仅 HITL：须带 nonce。mode=full 同步目录全量单元；mode=incremental 仅同步勾选单元。"
+    "模型不得仅凭 confirmed=true 代调。",
 )
 def api_code_deploy_confirm(body: CodeDeployConfirmBody):
     from . import plugins_store
     from .code_deploy import confirm
     from .code_deploy.ops import FEATURE_ID
+    from .hitl import ACTION_DEPLOY, require_confirm_nonce
 
     blocked = plugins_store.require_enabled(FEATURE_ID, capability="按插件增量部署")
     if blocked:
         return JSONResponse(blocked, status_code=400)
+    gate = require_confirm_nonce(
+        nonce=body.nonce or "",
+        action=ACTION_DEPLOY,
+        job_id=body.job_id or "",
+    )
+    if not gate.get("ok"):
+        return JSONResponse(gate, status_code=400)
     out = confirm(
         body.job_id or "",
         decision=body.decision or "approve",

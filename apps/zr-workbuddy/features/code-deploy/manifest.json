@@ -1,5 +1,5 @@
 {
   "id": "code-deploy",
-  "name": "按插件增量部署",
-  "purpose": "注册 mes_code_deploy_*：Git diff → 勾选 feature/engine/bridge → 人确认后 SSH/rsync（只发改过的插件）"
+  "name": "一体部署",
+  "purpose": "注册 mes_code_deploy_begin|prepare|confirm|status：主聊天确认卡 → 一体部署（增量/全量 SSH + 拉起引擎与聊天壳）"
 }

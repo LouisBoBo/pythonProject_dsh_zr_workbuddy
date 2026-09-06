@@ -1,6 +1,8 @@
 /**
- * ZR-WorkBuddy 聊天面板（业务插件）
- * 引擎地址：下方 RUNTIME 块由 plugin.sh/start-engine.sh 从 engine/config/runtime.yaml 同步。
+ * ZR-WorkBuddy 客户端：
+ * - 主聊天 toolview：审码/提交/写码选目录卡
+ * - 宿主设置同级页：settings.section「WorkBuddy」配置中心（读写引擎 /api/config）
+ * 引擎地址 RUNTIME 块由 plugin.sh 从 runtime.yaml 同步。
  */
 /*RUNTIME_BEGIN*/
 window.__APP_ENGINE__ = { host: "127.0.0.1", port: 8000 };
@@ -9,12 +11,16 @@ window.__ModuleLoader__.load({
   id: "@dsh-external/dsh-mes-bridge",
   factory: (require) => {
     var module = { exports: {} };
-    var exports = module.exports;
+    var React = require("react");
+    var h = React.createElement;
+    var useState = React.useState;
+    var useMemo = React.useMemo;
+    var useEffect = React.useEffect;
 
     function engineHost() {
       try {
-        var h = localStorage.getItem("dsh-mes-engine-host");
-        if (h) return h;
+        var x = localStorage.getItem("dsh-mes-engine-host");
+        if (x) return x;
       } catch (e) {}
       var cfg = window.__APP_ENGINE__ || {};
       return cfg.host || "127.0.0.1";
@@ -30,13 +36,35 @@ window.__ModuleLoader__.load({
     function engineBase() {
       return "http://" + engineHost() + ":" + enginePort();
     }
-    function ENGINE_URL() { return engineBase() + "/api/chat"; }
-    function STATUS_URL() { return engineBase() + "/api/status"; }
-    function RUNTIME_URL() { return engineBase() + "/api/runtime"; }
-    /** 启动时探测 /api/runtime，校正本机地址（优先于仅靠 RUNTIME 同步块） */
-    function discoverEngine(done) {
-      fetch(RUNTIME_URL(), { method: "GET" })
-        .then(function (r) { return r.json(); })
+
+    /** 确认卡点击前签发一次性 HITL nonce；失败抛错（带 detail）。 */
+    function issueHitl(action, bind) {
+      var body = Object.assign({ action: action }, bind || {});
+      return fetch(engineBase() + "/api/hitl/issue", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-WorkBuddy-Hitl": "ui",
+        },
+        body: JSON.stringify(body),
+      }).then(function (r) {
+        return r.json().then(function (d) {
+          if (!r.ok || !d || !d.ok || !d.nonce) {
+            var msg = (d && (d.detail || d.reply)) || "HITL 签发失败 HTTP " + r.status;
+            var err = new Error(msg);
+            err.hitl = d;
+            throw err;
+          }
+          return d.nonce;
+        });
+      });
+    }
+
+    function discoverEngine() {
+      fetch(engineBase() + "/api/runtime")
+        .then(function (r) {
+          return r.json();
+        })
         .then(function (d) {
           if (d && d.ok && d.port) {
             try {
@@ -44,1519 +72,338 @@ window.__ModuleLoader__.load({
               localStorage.setItem("dsh-mes-engine-port", String(d.port));
             } catch (e) {}
           }
-          if (done) done(true);
         })
-        .catch(function () { if (done) done(false); });
+        .catch(function () {});
     }
-    var LS_KEY = "dsh-mes-panel-convs";
-    /** buildPanel 注入：卡内状态写回 localStorage */
-    var persistHitlFromHost = function () {};
-    var SUGGESTIONS = [
-      "今天正在生产的工单有多少个",
-      "PCB有哪些工序",
-      "飞针和 AOI 在短路检测上怎么分工？",
-      "最近7天各产线产量对比",
-      "分析8月30号良率过低的原因",
-    ];
 
-    var CSS =
-      "#dshMesPanelRoot{position:fixed;right:20px;bottom:20px;z-index:2147483000;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif}" +
-      "#dshMesToggle{width:52px;height:52px;border-radius:50%;border:none;background:linear-gradient(135deg,#4d6bfe,#7c5cfc);color:#fff;font-size:22px;cursor:pointer;box-shadow:0 6px 20px rgba(77,107,254,.35);display:flex;align-items:center;justify-content:center}" +
-      "#dshMesPanel{display:none;position:absolute;right:0;bottom:64px;width:420px;max-width:calc(100vw - 40px);height:min(680px,calc(100vh - 120px));background:#fff;border:1px solid #e8e8ea;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.18);flex-direction:column;overflow:hidden}" +
-      "#dshMesPanel.open{display:flex}" +
-      "#dshMesHead{padding:12px 16px;border-bottom:1px solid #eef0f3;display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px}" +
-      "#dshMesHead .dot{width:8px;height:8px;border-radius:50%;background:#9ca3af}" +
-      "#dshMesHead .dot.ok{background:#22c55e}" +
-      "#dshMesHead .close{margin-left:auto;border:none;background:none;font-size:16px;cursor:pointer;color:#6b7280}" +
-      "#dshMesMsgs{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px;font-size:13px;line-height:1.65}" +
-      "#dshMesMsgs .user{align-self:flex-end;background:#f2f2f3;border-radius:12px 12px 4px 12px;padding:8px 12px;max-width:85%;white-space:pre-wrap;word-break:break-word}" +
-      "#dshMesMsgs .assist{align-self:flex-start;max-width:100%}" +
-      "#dshMesMsgs .assist .reply{white-space:normal;word-break:break-word;line-height:1.55}" +
-      "#dshMesMsgs .assist .reply strong{font-weight:600}" +
-      "#dshMesMsgs .assist .reply h1,#dshMesMsgs .assist .reply h2,#dshMesMsgs .assist .reply h3,#dshMesMsgs .assist .reply h4{margin:0.45em 0 0.2em;font-weight:650;line-height:1.35}" +
-      "#dshMesMsgs .assist .reply h1{font-size:1.15em}" +
-      "#dshMesMsgs .assist .reply h2{font-size:1.08em}" +
-      "#dshMesMsgs .assist .reply h3{font-size:1.02em}" +
-      "#dshMesMsgs .assist .reply h4{font-size:1em}" +
-      "#dshMesMsgs .assist .reply .md-inline{font-family:ui-monospace,Menlo,monospace;font-size:0.92em;padding:1px 5px;border-radius:4px;background:#0f172a0d}" +
-      "#dshMesMsgs .assist .reply .md-code{display:block;margin:6px 0 8px;padding:8px 10px;border-radius:8px;background:#0f172a0d;border:1px solid #e5e7eb;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre;overflow-x:auto;line-height:1.45}" +
-      "#dshMesMsgs .assist .reply .md-code code{font-family:inherit;font-size:inherit;background:none;padding:0}" +
-      "#dshMesMsgs .assist .reply .md-hr{border:none;border-top:1px solid #e5e7eb;margin:8px 0}" +
-      "#dshMesMsgs .assist img{max-width:100%;border-radius:10px;border:1px solid #e8e8ea;margin-top:8px;display:block}" +
-      "#dshMesMsgs .assist table{border-collapse:collapse;margin-top:8px;font-size:12px}" +
-      "#dshMesMsgs .assist table td,#dshMesMsgs .assist table th{border:1px solid #e5e7eb;padding:4px 10px}" +
-      "#dshMesMsgs .meta{font-size:11px;color:#9ca3af;margin-top:6px}" +
-      "#dshMesMsgs .think{margin-bottom:10px;border:1px solid #e8ecf4;border-radius:10px;background:#f7f8fc;overflow:hidden}" +
-      "#dshMesMsgs .think summary{cursor:pointer;list-style:none;padding:8px 12px;font-size:12px;color:#5b6475;user-select:none;display:flex;align-items:center;gap:6px}" +
-      "#dshMesMsgs .think summary::-webkit-details-marker{display:none}" +
-      "#dshMesMsgs .think summary:before{content:'▸';font-size:10px;color:#9aa3b2}" +
-      "#dshMesMsgs .think[open] summary:before{content:'▾'}" +
-      "#dshMesMsgs .think .think-body{padding:0 12px 10px;font-size:12px;color:#6b7280;white-space:pre-wrap;word-break:break-word;line-height:1.55;border-top:1px dashed #e5e9f0}" +
-      "#dshMesMsgs .status-line{color:#9ca3af;font-size:12px;font-style:italic}" +
-      "#dshMesMsgs .cd-card{margin-top:10px;border:1px solid #e8ecf4;border-radius:12px;background:#fff;overflow:hidden}" +
-      "#dshMesMsgs .cd-card.done{opacity:.88}" +
-      "#dshMesMsgs .cd-head{padding:10px 12px 6px}" +
-      "#dshMesMsgs .cd-title-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}" +
-      "#dshMesMsgs .cd-badge{font-size:11px;font-weight:600;color:#4d6bfe;background:rgba(77,107,254,.1);padding:2px 8px;border-radius:999px}" +
-      "#dshMesMsgs .cd-hint{font-size:11px;color:#9ca3af}" +
-      "#dshMesMsgs .cd-summary{font-size:13px;font-weight:600;margin:0 0 2px}" +
-      "#dshMesMsgs .cd-desc{font-size:12px;color:#6b7280;margin:0}" +
-      "#dshMesMsgs .cd-group{padding:8px 12px;border-top:1px solid #eef0f3}" +
-      "#dshMesMsgs .cd-group-label{font-size:12px;color:#6b7280;margin-bottom:6px;display:flex;gap:6px;align-items:center}" +
-      "#dshMesMsgs .cd-req{color:#b45309;font-size:11px}" +
-      "#dshMesMsgs .cd-mode{font-size:11px;color:#9ca3af}" +
-      "#dshMesMsgs .cd-opts{display:flex;flex-wrap:wrap;gap:6px}" +
-      "#dshMesMsgs .cd-opt{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;cursor:pointer;background:#f7f8fc}" +
-      "#dshMesMsgs .cd-opt.on{border-color:#4d6bfe;background:rgba(77,107,254,.08)}" +
-      "#dshMesMsgs .cd-field{display:block;padding:8px 12px;border-top:1px solid #eef0f3}" +
-      "#dshMesMsgs .cd-label{display:block;font-size:11px;color:#6b7280;margin-bottom:4px}" +
-      "#dshMesMsgs .cd-input{width:100%;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:8px;padding:7px 9px;font-size:12px;font-family:inherit}" +
-      "#dshMesMsgs .cd-textarea{resize:vertical;min-height:56px}" +
-      "#dshMesMsgs .cd-error{color:#b91c1c;font-size:12px;padding:0 12px 6px;margin:0}" +
-      "#dshMesMsgs .cd-actions{display:flex;gap:8px;justify-content:flex-end;padding:8px 12px 10px;border-top:1px solid #eef0f3}" +
-      "#dshMesMsgs .cd-btn{border:1px solid #e5e7eb;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;background:#fff}" +
-      "#dshMesMsgs .cd-btn.confirm{background:#4d6bfe;color:#fff;border-color:#4d6bfe}" +
-      "#dshMesMsgs .cd-btn:disabled{opacity:.45;cursor:not-allowed}" +
-      "#dshMesMsgs .cd-chosen{padding:6px 12px 10px;font-size:12px}" +
-      "#dshMesMsgs .cd-chosen-row{display:flex;gap:8px;margin:3px 0}" +
-      "#dshMesMsgs .cd-k{color:#9ca3af;min-width:56px;flex:none}" +
-      "#dshMesMsgs .cdp-card .cd-k{min-width:72px}" +
-      "#dshMesMsgs .cc-ok-files{margin:0;padding:0 12px 10px 28px;max-height:200px;overflow:auto;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#374151}" +
-      "#dshMesMsgs .cc-ok-files li{margin:2px 0;word-break:break-all}" +
-      "#dshMesMsgs .cd-path-row{display:flex;gap:8px;align-items:stretch}" +
-      "#dshMesMsgs .cd-path-row .cd-input{flex:1;min-width:0}" +
-      "#dshMesMsgs .cd-btn.browse{flex:none;white-space:nowrap}" +
-      "#dshMesMsgs .cd-suggest{padding:0 12px 8px;margin:0;font-size:12px;color:#6b7280;display:flex;flex-wrap:wrap;gap:6px;align-items:center}" +
-      "#dshMesMsgs .cd-chip{border:1px solid #e5e7eb;border-radius:999px;padding:4px 10px;font-size:11px;cursor:pointer;background:#f7f8fc;color:#374151;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
-      "#dshMesMsgs .cd-chip:hover{border-color:#4d6bfe;color:#4d6bfe}" +
-      "#dshMesMsgs .coding-plan{margin:10px 0 4px;padding:10px 12px;border:1px solid #e8eef5;border-radius:10px;background:#f8fafc;max-width:100%}" +
-      "#dshMesMsgs .coding-plan.is-running{border-color:#bfdbfe;background:#f0f7ff}" +
-      "#dshMesMsgs .coding-plan.is-done{border-color:#bbf7d0;background:#f0fdf4}" +
-      "#dshMesMsgs .cp-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}" +
-      "#dshMesMsgs .cp-badge{font-size:12px;font-weight:700;color:#1e3a5f;flex-shrink:0}" +
-      "#dshMesMsgs .cp-summary{flex:1;font-size:12px;color:#64748b;min-width:100px}" +
-      "#dshMesMsgs .cp-duration{font-size:11px;color:#94a3b8;font-variant-numeric:tabular-nums}" +
-      "#dshMesMsgs .cp-list{margin:8px 0 0;padding:0;list-style:none}" +
-      "#dshMesMsgs .cp-item{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-top:1px solid #eef2f7}" +
-      "#dshMesMsgs .cp-item:first-child{border-top:none;padding-top:2px}" +
-      "#dshMesMsgs .cp-icon{width:22px;height:22px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center}" +
-      "#dshMesMsgs .cp-pending{width:20px;height:20px;border-radius:50%;background:#e2e8f0;color:#64748b;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}" +
-      "#dshMesMsgs .cp-check{width:20px;height:20px;border-radius:50%;background:#dcfce7;color:#15803d;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}" +
-      "#dshMesMsgs .cp-fail{width:20px;height:20px;border-radius:50%;background:#fee2e2;color:#be123c;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}" +
-      "#dshMesMsgs .cp-spinner{width:16px;height:16px;border:2px solid #bfdbfe;border-top-color:#2563eb;border-radius:50%;animation:cp-spin 0.7s linear infinite}" +
-      "@keyframes cp-spin{to{transform:rotate(360deg)}}" +
-      "#dshMesMsgs .cp-body{display:flex;flex-direction:column;gap:2px;min-width:0}" +
-      "#dshMesMsgs .cp-title{font-size:13px;font-weight:600;color:#1f2937;line-height:1.45}" +
-      "#dshMesMsgs .cp-state{font-size:11px;color:#94a3b8;font-weight:500}" +
-      "#dshMesMsgs .cp-item.is-running .cp-title,#dshMesMsgs .cp-item.is-running .cp-state{color:#2563eb}" +
-      "#dshMesMsgs .cd-done-banner{display:flex;align-items:flex-start;gap:10px;margin-top:10px;padding:12px 14px;border-radius:10px;font-size:13px;line-height:1.5}" +
-      "#dshMesMsgs .cd-done-banner.ok{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46}" +
-      "#dshMesMsgs .cd-done-banner.err{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}" +
-      "#dshMesMsgs .cd-done-icon{font-size:18px;font-weight:700;flex:none}" +
-      "#dshMesMsgs .cd-synced{margin-top:6px;font-size:12px;color:#047857;word-break:break-all}" +
-      "#dshMesMsgs .cd-result-details{margin-top:10px;border:1px solid #e8ecf4;border-radius:10px;background:#f7f8fc;overflow:hidden}" +
-      "#dshMesMsgs .cd-result-details summary{cursor:pointer;padding:8px 12px;font-size:12px;font-weight:600;color:#64748b;list-style:none}" +
-      "#dshMesMsgs .cd-result-details summary::-webkit-details-marker{display:none}" +
-      "#dshMesMsgs .cd-result-body{padding:0 12px 12px;font-size:13px;max-height:480px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;line-height:1.55}" +
-      "#dshMesMsgs .cd-result-body h2,#dshMesMsgs .cd-result-body h3,#dshMesMsgs .cd-result-body h4{margin:0.7em 0 0.3em;font-weight:650;line-height:1.35}" +
-      "#dshMesMsgs .cd-result-body .md-code{display:block;margin:6px 0 10px;padding:10px 12px;border-radius:8px;background:#0f172a0d;border:1px solid #e5e7eb;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre;overflow-x:auto;line-height:1.45}" +
-      "#dshMesMsgs .cd-goal-banner{margin:0 12px 8px;padding:10px 12px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;font-size:12px;line-height:1.55}" +
-      "#dshMesMsgs .cd-goal-banner strong{color:#1e40af;display:block;margin-bottom:4px;font-size:11px;text-transform:uppercase;letter-spacing:.04em}" +
-      "#dshMesMsgs .cd-target-row{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 8px}" +
-      "#dshMesMsgs .cd-target-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:11px;color:#166534;font-weight:600}" +
-      "#dshMesMsgs .cd-path-list{margin:0 12px 8px;padding:8px 10px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0;font-size:11px;color:#64748b;line-height:1.5}" +
-      "#dshMesMsgs .cd-path-list code{font-size:10px;color:#475569;background:transparent;padding:0}" +
-      "#dshMesMsgs .cd-warn-box{margin:0 12px 8px;padding:8px 10px;border-radius:8px;background:#fffbeb;border:1px solid #fde68a;font-size:12px;color:#92400e;line-height:1.45}" +
-      "#dshMesMsgs .cd-err-box{margin:0 12px 8px;padding:8px 10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;font-size:12px;color:#991b1b;line-height:1.45}" +
-      "#dshMesMsgs .cd-checklist{margin:0 12px 8px;padding:8px 10px;border-radius:8px;background:#fafafa;border:1px solid #e5e7eb;font-size:12px}" +
-      "#dshMesMsgs .cd-checklist label{display:flex;align-items:flex-start;gap:8px;cursor:pointer;line-height:1.45}" +
-      "#dshMesMsgs .cd-notes-required .cd-label::after{content:' *';color:#dc2626}" +
-      "#dshMesChips{padding:0 16px 8px;display:flex;gap:6px;flex-wrap:wrap}" +
-      "#dshMesChips button{font-size:11px;padding:4px 10px;border-radius:999px;border:1px solid #e5e7eb;background:#fff;color:#374151;cursor:pointer}" +
-      "#dshMesChips button:hover{border-color:#4d6bfe;color:#4d6bfe}" +
-      "#dshMesInput{display:flex;gap:8px;padding:10px 14px 14px;border-top:1px solid #eef0f3}" +
-      "#dshMesInput input{flex:1;padding:9px 14px;border:1px solid #e5e7eb;border-radius:999px;font-size:13px;outline:none}" +
-      "#dshMesInput input:focus{border-color:#4d6bfe}" +
-      "#dshMesInput button{border:none;border-radius:999px;background:#4d6bfe;color:#fff;padding:9px 18px;font-size:13px;cursor:pointer}" +
-      "#dshMesInput button:disabled{opacity:.5}";
+    var cssInjected = false;
+    function ensureCss() {
+      if (cssInjected || typeof document === "undefined") return;
+      cssInjected = true;
+      var s = document.createElement("style");
+      s.dataset.plugin = "@dsh-external/dsh-mes-bridge";
+      s.textContent =
+        ".wb-cr{font:13px/1.5 -apple-system,'PingFang SC','Microsoft YaHei',sans-serif;color:#111827;border:1px solid #e5e7eb;border-radius:12px;background:#fff;overflow:hidden;margin:4px 0 8px}" +
+        ".wb-cr-head{padding:10px 12px;border-bottom:1px solid #eef0f3;display:flex;align-items:center;gap:8px}" +
+        ".wb-cr-badge{font-size:11px;font-weight:700;color:#0f766e;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:999px;padding:2px 8px}" +
+        ".wb-cr-hint{font-size:11px;color:#64748b}" +
+        ".wb-cr-body{padding:12px}" +
+        ".wb-cr-label{display:block;font-size:11px;font-weight:600;color:#374151;margin:0 0 6px}" +
+        ".wb-cr-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}" +
+        ".wb-cr-input{flex:1;min-width:0;border:1px solid #d1d5db;border-radius:8px;padding:8px 10px;font:12px/1.4 ui-monospace,Menlo,monospace}" +
+        ".wb-cr-btn{border:1px solid #d1d5db;background:#f9fafb;border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap}" +
+        ".wb-cr-btn:hover{border-color:#0ea5e9;color:#0369a1}" +
+        ".wb-cr-btn:disabled{opacity:.5;cursor:not-allowed}" +
+        ".wb-cr-btn.primary{background:linear-gradient(135deg,#0f766e,#0ea5e9);border:none;color:#fff;font-weight:600}" +
+        ".wb-cr-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}" +
+        ".wb-cr-chip{border:1px solid #e5e7eb;border-radius:999px;padding:4px 10px;font-size:11px;background:#f8fafc;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis}" +
+        ".wb-cr-chip:hover{border-color:#0ea5e9;color:#0369a1}" +
+        ".wb-cr-err{color:#b91c1c;font-size:12px;margin:8px 0 0;white-space:pre-wrap}" +
+        ".wb-cr-warn{color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:8px 10px;font-size:12px;margin:8px 0 0;white-space:pre-wrap}" +
+        ".wb-cr-dsh{font-size:11px;color:#64748b;margin:0 0 8px}" +
+        ".wb-cr-dsh code{font-size:11px;word-break:break-all}" +
+        ".wb-cr-files{max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:10px;padding:8px;margin:8px 0;font-size:12px}" +
+        ".wb-cr-file{display:flex;gap:8px;align-items:flex-start;margin:4px 0;cursor:pointer}" +
+        ".wb-cr-file span{word-break:break-all;font-family:ui-monospace,Menlo,monospace}" +
+        ".wb-cr-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}" +
+        ".wb-set{font:13px/1.5 -apple-system,'PingFang SC','Microsoft YaHei',sans-serif;color:var(--ds-color-text-primary,#111827);max-width:720px;padding:4px 4px 24px}" +
+        ".wb-set-lead{font-size:12px;color:var(--ds-color-text-secondary,#64748b);margin:0 0 14px}" +
+        ".wb-set-eng{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px;padding:10px 12px;border:1px solid var(--ds-color-border-subtle,#e5e7eb);border-radius:10px;background:var(--ds-color-bg-secondary,#f8fafc)}" +
+        ".wb-set-eng label{font-size:11px;font-weight:600;color:#374151}" +
+        ".wb-set-eng input{width:110px;border:1px solid #d1d5db;border-radius:8px;padding:6px 8px;font:12px/1.4 ui-monospace,Menlo,monospace}" +
+        ".wb-set-card{border:1px solid var(--ds-color-border-subtle,#e5e7eb);border-radius:12px;background:#fff;margin:0 0 12px;overflow:hidden}" +
+        ".wb-set-card h3{margin:0;padding:10px 12px;font-size:13px;font-weight:700;border-bottom:1px solid #eef0f3;background:#fafbfc}" +
+        ".wb-set-card .body{padding:12px}" +
+        ".wb-set-hint{font-size:11px;color:#64748b;margin:0 0 10px}" +
+        ".wb-set-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}" +
+        ".wb-set-grid .full{grid-column:1/-1}" +
+        ".wb-set-field label{display:block;font-size:11px;font-weight:600;color:#374151;margin:0 0 4px}" +
+        ".wb-set-field input,.wb-set-field select{width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:7px 9px;font:12px/1.4 inherit}" +
+        ".wb-set-check{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:12px}" +
+        ".wb-set-radios{display:flex;flex-wrap:wrap;gap:10px 14px;margin:0 0 10px;font-size:12px}" +
+        ".wb-set-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;position:sticky;bottom:0;padding:10px 0 0;background:linear-gradient(180deg,transparent,var(--ds-color-bg-primary,#fff) 28%)}" +
+        ".wb-set-btn{border:1px solid #d1d5db;background:#f9fafb;border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer}" +
+        ".wb-set-btn:hover{border-color:#0ea5e9;color:#0369a1}" +
+        ".wb-set-btn:disabled{opacity:.5;cursor:not-allowed}" +
+        ".wb-set-btn.primary{background:linear-gradient(135deg,#0f766e,#0ea5e9);border:none;color:#fff;font-weight:600}" +
+        ".wb-set-msg{font-size:12px;color:#64748b}" +
+        ".wb-set-msg.ok{color:#047857}" +
+        ".wb-set-msg.err{color:#b91c1c}" +
+        ".wb-set-test{font-size:11px;margin:8px 0 0;white-space:pre-wrap;color:#64748b}" +
+        "@media (max-width:640px){.wb-set-grid{grid-template-columns:1fr}}" +
+        ".wb-cr-progress{font-size:12px;color:#475569;white-space:pre-wrap;max-height:280px;overflow:auto;background:#f8fafc;border-radius:8px;padding:10px;margin-top:8px}" +
+        ".wb-cd-plan{border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;padding:10px;margin:8px 0}" +
+        ".wb-cd-plan-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 8px;font-size:12px}" +
+        ".wb-cd-plan-head .sum{color:#64748b}" +
+        ".wb-cd-plan-head .dur{margin-left:auto;font-variant-numeric:tabular-nums;color:#0f766e;font-weight:600}" +
+        ".wb-cd-ol{list-style:none;margin:0;padding:0}" +
+        ".wb-cd-li{display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid #eef2f7;font-size:12px}" +
+        ".wb-cd-li:first-child{border-top:none}" +
+        ".wb-cd-ico{width:18px;height:18px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;font-size:11px;font-weight:700}" +
+        ".wb-cd-li.is-pending .wb-cd-ico{background:#e5e7eb;color:#6b7280}" +
+        ".wb-cd-li.is-running .wb-cd-ico{background:#cffafe;color:#0e7490}" +
+        ".wb-cd-li.is-done .wb-cd-ico{background:#d1fae5;color:#047857}" +
+        ".wb-cd-li.is-error .wb-cd-ico{background:#fee2e2;color:#b91c1c}" +
+        ".wb-cd-title{font-weight:600;color:#111827;display:block}" +
+        ".wb-cd-state{color:#64748b;font-size:11px}" +
+        ".wb-cd-pulse{display:inline-block;width:8px;height:8px;border-radius:999px;background:#06b6d4;animation:wbCdPulse 1s ease-in-out infinite}" +
+        "@keyframes wbCdPulse{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}" +
+        ".wb-cd-stream{font:12px/1.45 ui-monospace,Menlo,monospace;color:#334155;white-space:pre-wrap;max-height:220px;overflow:auto;background:#0f172a;color:#e2e8f0;border-radius:8px;padding:10px;margin-top:8px}" +
+        ".wb-cd-alive{font-size:12px;color:#0f766e;margin:0 0 8px}" +
+        ".wb-cr-sum{font-size:12px;color:#4b5563;margin:0 0 8px}" +
+        ".wb-cr-kv{display:grid;grid-template-columns:4.5em 1fr;gap:4px 10px;margin:0 0 10px;font-size:12px}" +
+        ".wb-cr-kv dt{margin:0;color:#94a3b8;font-weight:600}" +
+        ".wb-cr-kv dd{margin:0;color:#334155;word-break:break-all}" +
+        ".wb-cr-kv a{color:#0f766e;text-decoration:none}" +
+        ".wb-cr-kv a:hover{text-decoration:underline}" +
+        ".wb-cr-units{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;max-height:140px;overflow:auto}" +
+        ".wb-cr-unit{display:inline-flex;align-items:center;gap:4px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:999px;padding:3px 9px;font-size:11px;color:#334155}" +
+        ".wb-cr-unit .k{color:#94a3b8;font-size:10px}" +
+        ".wb-cr-note{font-size:11px;color:#64748b;margin:0 0 8px;line-height:1.45}";
+      document.head.appendChild(s);
+    }
 
-    function esc(s) {
-      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    function readMeta(block) {
+      if (!block || !("kind" in block)) return null;
+      var meta = block.meta;
+      if (!meta || typeof meta !== "object") return null;
+      var wb = meta.wb;
+      if (!wb || typeof wb !== "object") return null;
+      return wb;
     }
-    function md(s) {
-      var t = esc(s);
-      var blocks = [];
-      t = t.replace(/```([^\n`]*)\n?([\s\S]*?)```/g, function (_, _lang, code) {
-        var i = blocks.length;
-        blocks.push('<pre class="md-code"><code>' + String(code).replace(/\s+$/, "") + "</code></pre>");
-        return "\u0000MDCODE" + i + "\u0000";
-      });
-      t = t.replace(/`([^`\n]+)`/g, '<code class="md-inline">$1</code>');
-      t = t.replace(/^####\s+(.+)$/gm, "<h4>$1</h4>");
-      t = t.replace(/^###\s+(.+)$/gm, "<h3>$1</h3>");
-      t = t.replace(/^##\s+(.+)$/gm, "<h2>$1</h2>");
-      t = t.replace(/^#\s+(.+)$/gm, "<h1>$1</h1>");
-      t = t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-      t = t.replace(/^---\s*$/gm, '<hr class="md-hr">');
-      t = t.replace(/\n/g, "<br>");
-      t = t.replace(/(?:<br>)*(<(?:h[1-4]|pre|hr)\b[^>]*>)/gi, "$1");
-      t = t.replace(/(<\/(?:h[1-4]|pre)>)(?:<br>)*/gi, "$1");
-      t = t.replace(/(?:<br>)*(\u0000MDCODE\d+\u0000)/g, "$1");
-      t = t.replace(/(\u0000MDCODE\d+\u0000)(?:<br>)*/g, "$1");
-      t = t.replace(/(?:<br>){2,}/g, "<br>");
-      t = t.replace(/\u0000MDCODE(\d+)\u0000/g, function (_, i) { return blocks[Number(i)] || ""; });
-      return t;
+
+    /** 展开 ~；去掉尾部 /（根路径除外）。 */
+    function expandHomePath(p, home) {
+      var s = String(p || "").trim();
+      if (!s) return "";
+      var hm = String(home || "").trim().replace(/\/+$/, "");
+      if (s === "~" && hm) return hm;
+      if (s.indexOf("~/") === 0 && hm) s = hm + s.slice(1);
+      if (s.length > 1) s = s.replace(/\/+$/, "");
+      return s;
     }
-    /** 协议标记不得展示给用户（含流式未写完的 <<<… 碎片） */
-    function stripMarks(s) {
-      return String(s || "")
-        .replace(/<<<\s*思考\s*>>>/g, "")
-        .replace(/<<<\s*回答\s*>>>/g, "")
-        .replace(/<<<[^>]*$/g, "");
+
+    function pathsEqual(a, b, home) {
+      var x = expandHomePath(a, home);
+      var y = expandHomePath(b, home);
+      if (!x || !y) return false;
+      return x === y;
     }
-    /** 取事件正文：优先绝对 text，否则追加 delta（兼容 MES 一次性推送） */
-    function eventText(ev, prev) {
-      if (ev && ev.text != null) return stripMarks(ev.text);
-      return stripMarks((prev || "") + (ev && ev.delta || ""));
-    }
-    function dataSourceLabel(ds) {
-      if (ds === "mes") return "MES 实时";
-      if (ds === "assistant") return "助手";
-      if (ds === "pcb_expert") return "PCB 专家";
-      if (ds === "code_dev") return "本机写码";
-      if (ds === "code_review") return "本机审码";
-      if (ds === "code_commit") return "人触发提交";
-      if (ds === "code_deploy") return "按插件增量部署";
-      return "演示数据";
-    }
-    function srcLabel(ev) {
-      if (ev && ev.source === "llm") return "LLM";
-      if (ev && ev.source === "offline") return "离线提示";
-      if (ev && ev.source === "code_dev") return "写码顾问";
-      if (ev && ev.source === "code_review") return "审码顾问";
-      if (ev && ev.source === "code_commit") return "提交顾问";
-      if (ev && ev.source === "code_deploy") return "部署顾问";
-      if (ev && ev.source === "disabled") return "已停用";
-      return "规则引擎";
-    }
-    function formatChatMeta(ev) {
-      var srcTxt = srcLabel(ev);
-      var ds = dataSourceLabel(ev && ev.data_source);
-      var metricMap = {
-        options: "需求选项",
-        propose: "写码确认",
-        code_dev: "本机写码",
-        code_review: "本机审码",
-        code_commit: "人触发提交",
-        code_deploy: "增量部署",
-        need_path: "待填路径",
-        pick: "选目录确认",
-        confirm: "部署确认",
-        success: "部署完成",
-        done: "审码完成",
-        run: "本机审码",
-        disabled: "已停用",
-        blocked: "未就绪",
-      };
-      var it = (ev && ev.intent) || {};
-      var intentTxt =
-        it.type === "code_review"
-          ? "本机审码"
-          : it.type === "code_commit"
-            ? "人触发提交"
-            : it.type === "code_deploy"
-              ? "增量部署"
-              : "本机写码";
-      if (it.type === "code_dev" && it.metric) intentTxt = metricMap[it.metric] || String(it.metric);
-      else if (it.type === "code_review" && it.metric) intentTxt = metricMap[it.metric] || "本机审码";
-      else if (it.type === "code_commit" && it.metric) intentTxt = metricMap[it.metric] || "人触发提交";
-      else if (it.type === "code_deploy" && it.metric) {
-        intentTxt =
-          it.metric === "confirm"
-            ? "部署确认"
-            : metricMap[it.metric] || "增量部署";
-      } else if (it.type) intentTxt = metricMap[it.type] || String(it.type);
-      return "来源：" + srcTxt + " · 数据源：" + ds + " · 意图：" + intentTxt;
-    }
-    var CODE_DEV_PIPELINE = [
-      { id: "boot", title: "任务已排队" },
-      { id: "sandbox-prep", title: "沙箱就绪" },
-      { id: "dev", title: "Cursor 改码" },
-      { id: "sync", title: "同步到本机" },
-    ];
-    var CODE_DEV_STEP_MAP = { "agent-loop": "dev", "cursor-local": "dev" };
-    function initCodingSteps() {
-      return CODE_DEV_PIPELINE.map(function (p) {
-        return { id: p.id, title: p.title, state: p.id === "boot" ? "done" : "pending" };
-      });
-    }
-    function pipelineIndex(id) {
-      for (var i = 0; i < CODE_DEV_PIPELINE.length; i++) {
-        if (CODE_DEV_PIPELINE[i].id === id) return i;
-      }
-      return CODE_DEV_PIPELINE.length + 99;
-    }
-    function normalizeCodeDevStepId(id) {
-      return CODE_DEV_STEP_MAP[id] || id;
-    }
-    function markPriorStepsDone(list, id) {
-      var pIdx = pipelineIndex(id);
-      return list.map(function (s) {
-        if (pipelineIndex(s.id) < pIdx && s.state !== "done" && s.state !== "error") {
-          return Object.assign({}, s, { state: "done" });
+
+    /**
+     * DSH 当前工作区绝对路径（侧栏已选目录 = session cwd）。
+     * tool.call.toolview 的 props.cwd；必要时再读 useSessions。
+     */
+    function resolveDshCwd(props) {
+      if (!props) return "";
+      var direct = String(props.cwd || "").trim();
+      if (direct) return expandHomePath(direct, props.home);
+      try {
+        if (typeof props.useSessions === "function" && props.sessionId) {
+          var cwd = props.useSessions(function (s) {
+            var row = s && s.byId && s.byId[props.sessionId];
+            return row && row.cwd;
+          });
+          if (cwd) return expandHomePath(cwd, props.home);
         }
-        return s;
-      });
+      } catch (e) {}
+      return "";
     }
-    function sealCodingSteps(steps, asError) {
-      return (steps || []).filter(function (s) {
-        return s.id !== "status" && s.id !== "cursor-heartbeat";
-      }).map(function (s) {
-        if (asError) {
-          if (s.state === "running" || s.state === "waiting") return Object.assign({}, s, { state: "error" });
-          return s;
-        }
-        if (s.state !== "error") return Object.assign({}, s, { state: "done" });
-        return s;
-      });
+
+    /** 初始工程路径：优先 DSH 已选工作区，其次工具卡/引擎带回的 workspace。 */
+    function initialWorkspace(props, ui) {
+      var dsh = resolveDshCwd(props);
+      var fromUi = String((ui && ui.workspace) || "").trim();
+      return dsh || fromUi || "";
     }
-    function applyCodingStep(steps, event) {
-      var rawId = event && event.id;
-      if (!rawId || rawId === "status" || rawId === "cursor-heartbeat") return steps;
-      var id = normalizeCodeDevStepId(rawId);
-      var title = String(event.title || "").trim();
-      var nextState = event.state || "running";
-      var list = (steps && steps.length) ? steps.slice() : initCodingSteps();
-      var idx = -1;
-      for (var i = 0; i < list.length; i++) { if (list[i].id === id) { idx = i; break; } }
-      if (idx < 0) return list;
-      var cur = list[idx];
-      var merged = Object.assign({}, cur, { state: nextState });
-      if (title) merged.title = title;
-      if (id === "dev") {
-        if (rawId === "cursor-local" && nextState === "done") {
-          merged.state = "running";
-        } else if (rawId === "agent-loop" && nextState === "done") {
-          merged.state = "done";
-        } else if (nextState === "running") {
-          merged.state = "running";
-        }
-      }
-      list[idx] = merged;
-      if (nextState === "running" || (id === "dev" && rawId === "agent-loop" && nextState === "done") || nextState === "done") {
-        list = markPriorStepsDone(list, id);
-      }
-      if (id === "sync" && nextState === "running") {
-        list = list.map(function (s) {
-          return s.id === "dev" && s.state === "running" ? Object.assign({}, s, { state: "done" }) : s;
-        });
-      }
-      return list;
+
+    function textFromContentBlocks(content) {
+      if (!Array.isArray(content)) return "";
+      return content
+        .map(function (c) {
+          if (!c) return "";
+          if (c.type === "text" || c.kind === "text") return String(c.text || "");
+          return "";
+        })
+        .filter(Boolean)
+        .join("\n")
+        .trim();
     }
-    function codingPlanSummary(steps) {
-      var list = (steps || []).filter(function (s) { return s.state !== "pending"; });
-      if (!list.length) return "准备中…";
-      var total = list.length;
-      var done = list.filter(function (s) { return s.state === "done"; }).length;
-      if (list.some(function (s) { return s.state === "running"; })) return "正在进行 " + done + "/" + total;
-      var err = list.filter(function (s) { return s.state === "error"; }).length;
-      if (err) return "完成 " + done + "/" + total + "（" + err + " 步失败）";
-      if (done === total) return "已全部完成（" + total + " 步）";
-      return "共 " + total + " 步";
-    }
-    function renderCodingPlanHtml(steps, opts) {
-      opts = opts || {};
-      var visible = (steps || []).filter(function (s) { return s.state !== "pending"; });
-      if (!visible.length) visible = [{ id: "boot", title: "任务已排队", state: "running" }];
-      var summary = opts.summary || codingPlanSummary(visible);
-      var running = visible.some(function (s) { return s.state === "running"; });
-      var allDone = visible.length && visible.every(function (s) { return s.state === "done" || s.state === "error"; });
-      var html = '<div class="coding-plan' + (running ? " is-running" : "") + (allDone && !running ? " is-done" : "") + '">';
-      html += '<div class="cp-head"><span class="cp-badge">' + esc(opts.heading || "本轮进度") + "</span>";
-      html += '<span class="cp-summary">' + esc(summary) + "</span>";
-      if (opts.duration) html += '<span class="cp-duration">' + esc(opts.duration) + "</span>";
-      html += '</div><ol class="cp-list">';
-      visible.forEach(function (s, i) {
-        var st = s.state || "pending";
-        var icon = '<span class="cp-pending">' + (i + 1) + "</span>";
-        if (st === "running") icon = '<span class="cp-spinner"></span>';
-        else if (st === "done") icon = '<span class="cp-check">✓</span>';
-        else if (st === "error") icon = '<span class="cp-fail">!</span>';
-        var hint = st === "running" ? "进行中" : st === "done" ? "已完成" : st === "error" ? "失败" : "等待中";
-        html += '<li class="cp-item is-' + st + '"><span class="cp-icon">' + icon + '</span><div class="cp-body"><span class="cp-title">' + esc(s.title) + '</span><span class="cp-state">' + hint + "</span></div></li>";
-      });
-      html += "</ol></div>";
-      return html;
-    }
-    function extractCodeDevResultBody(reply) {
-      var raw = String(reply || "").trim();
+
+    /** 从 tool call argsRaw 取出 message / requirement。 */
+    function toolArgsMessage(block) {
+      if (!block) return "";
+      var raw = "";
+      if (typeof block.argsRaw === "string") raw = block.argsRaw;
+      else if (block.call && typeof block.call.argsRaw === "string") raw = block.call.argsRaw;
       if (!raw) return "";
-      var m = raw.match(/(?:^|\n)(?:##\s*)?(?:改动说明|验收步骤|【同步】)/m);
-      if (m && m.index >= 0) return raw.slice(m.index).replace(/^[\n\r]+/, "").trim();
-      return raw.split("\n").filter(function (l) {
-        return !/^任务\s+ldj-/.test(l.trim()) && !/^已同步\s+\d+/.test(l.trim());
-      }).join("\n").trim() || raw;
+      try {
+        var o = JSON.parse(raw);
+        return String((o && (o.message || o.requirement)) || "").trim();
+      } catch (e) {
+        return "";
+      }
     }
-    function formatDuration(sec) {
-      sec = Math.max(1, Math.round(sec || 0));
-      return sec >= 60 ? Math.floor(sec / 60) + "m " + (sec % 60) + "s" : sec + "s";
-    }
-    function mountCodeDevUi(hostEl, ui, beforeMetaEl, hooks) {
-      if (!hostEl || !ui || !ui.kind) return;
-      var old = hostEl.querySelector(".cd-card:not(.cr-pick)");
-      if (old) old.remove();
-      var card = document.createElement("div");
-      card.className = "cd-card";
-      hooks = hooks || {};
-      if (ui.kind === "options") renderCdOptions(card, ui, hooks.send);
-      else if (ui.kind === "propose") renderCdPropose(card, ui, hooks);
-      else return;
-      if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
-      else hostEl.appendChild(card);
-    }
-    function mountCodeReviewUi(hostEl, ui, beforeMetaEl, hooks) {
-      if (!hostEl || !ui || !ui.kind) return;
-      var old = hostEl.querySelector(".cd-card.cr-pick");
-      if (old) old.remove();
-      var card = document.createElement("div");
-      card.className = "cd-card cr-pick";
-      hooks = hooks || {};
-      if (ui.kind === "pick") renderCrPick(card, ui, hooks);
-      else return;
-      if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
-      else hostEl.appendChild(card);
-    }
-    function mountCodeCommitUi(hostEl, ui, beforeMetaEl, hooks) {
-      if (!hostEl || !ui || !ui.kind) return;
-      var old = hostEl.querySelector(".cd-card.cc-card");
-      if (old) old.remove();
-      var card = document.createElement("div");
-      card.className = "cd-card cc-card";
-      hooks = hooks || {};
-      if (ui.kind === "pick") renderCcPick(card, ui, hooks);
-      else if (ui.kind === "confirm") renderCcConfirm(card, ui, hooks);
-      else if (ui.kind === "blocked") renderCcBlocked(card, ui, hooks);
-      else if (ui.kind === "success") {
-        card.className = "cd-card cc-card done";
-        card.innerHTML = ccSuccessCardHtml(ui);
-      } else return;
-      if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
-      else hostEl.appendChild(card);
-    }
-    function mountCodeDeployUi(hostEl, ui, beforeMetaEl) {
-      if (!hostEl || !ui || !ui.kind) return;
-      var old = hostEl.querySelector(".cd-card.cdp-card");
-      if (old) old.remove();
-      var card = document.createElement("div");
-      card.className = "cd-card cdp-card";
-      if (ui.kind === "confirm") renderCdDeployConfirm(card, ui);
-      else if (ui.kind === "success") {
-        card.className = "cd-card cdp-card done";
-        card.innerHTML = cdpSuccessCardHtml(ui);
-      } else return;
-      if (beforeMetaEl) hostEl.insertBefore(card, beforeMetaEl);
-      else hostEl.appendChild(card);
-    }
-    function renderCdDeployConfirm(card, ui) {
-      var fullUnits = Array.isArray(ui.units_full) ? ui.units_full : [];
-      var incrUnits = Array.isArray(ui.units_incremental)
-        ? ui.units_incremental
-        : Array.isArray(ui.units)
-          ? ui.units
-          : [];
-      var policy = ui.policy && typeof ui.policy === "object" ? ui.policy : {};
-      // 多信号锁定：强制全量时绝不展示可改增量
-      var forceFull = !!(
-        ui.force_full ||
-        policy.force_full ||
-        ui.locked_mode === "full" ||
-        (String(ui.summary || "").indexOf("强制全量") === 0)
-      );
-      var allowUpgrade =
-        !forceFull &&
-        (ui.allow_upgrade_to_full === true || ui.allow_mode_override === true);
-      var mode = forceFull ? "full" : ui.mode === "full" ? "full" : "incremental";
-      var reasons = Array.isArray(ui.reasons)
-        ? ui.reasons
-        : Array.isArray(policy.reasons)
-          ? policy.reasons
-          : [];
-      var warnings = Array.isArray(ui.warnings)
-        ? ui.warnings
-        : Array.isArray(policy.warnings)
-          ? policy.warnings
-          : [];
-      var changed = Array.isArray(ui.changed_paths) ? ui.changed_paths : [];
 
-      function unitsFor(m) {
-        return m === "full" ? fullUnits : incrUnits;
-      }
-      function paint() {
-        if (forceFull) mode = "full";
-        var units = unitsFor(mode);
-        var badge = forceFull
-          ? "强制全量"
-          : mode === "full"
-            ? "全量部署"
-            : "增量部署";
-        var goLabel = mode === "full" ? "确认全量部署" : "确认增量部署";
-        var html =
-          '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">' +
-          badge +
-          '</span><span class="cd-hint">' +
-          esc(ui.hint || "二元判定：全量或增量；人只确认") +
-          '</span></div><p class="cd-summary">' +
-          esc(ui.summary || "") +
-          '</p><p class="cd-desc">' +
-          esc(ui.desc || "") +
-          "</p></div>";
-        if (reasons.length) {
-          html +=
-            '<div class="cd-label" style="padding:0 14px 4px">判定原因</div><ul style="margin:0 14px 8px;padding-left:18px;font-size:12px;color:#374151">';
-          reasons.slice(0, 6).forEach(function (r) {
-            html += "<li>" + esc(r) + "</li>";
-          });
-          html += "</ul>";
-        }
-        if (warnings.length) {
-          html +=
-            '<p class="cd-desc" style="padding:0 14px 8px;color:#b45309">' +
-            esc(warnings.slice(0, 3).join("；")) +
-            "</p>";
-        }
-        html += '<div class="cd-label" style="padding:0 14px 4px">部署方式</div>';
-        if (forceFull) {
-          html +=
-            '<p class="cd-desc" style="padding:0 14px 8px"><strong>全量部署（已锁定）</strong>' +
-            " — 触发全量条件，确认后同步全部单元，不可改增量。</p>";
-        } else if (!allowUpgrade) {
-          html +=
-            '<p class="cd-desc" style="padding:0 14px 8px"><strong>' +
-            (mode === "full" ? "全量部署" : "增量部署") +
-            "</strong></p>";
-        } else {
-          html +=
-            '<div style="padding:0 14px 8px;display:flex;gap:16px;flex-wrap:wrap">' +
-            '<label style="font-size:13px"><input type="radio" name="cdp-mode-' +
-            esc(ui.job_id || "x") +
-            '" value="incremental"' +
-            (mode === "incremental" ? " checked" : "") +
-            "> 增量部署（默认）</label>" +
-            '<label style="font-size:13px"><input type="radio" name="cdp-mode-' +
-            esc(ui.job_id || "x") +
-            '" value="full"' +
-            (mode === "full" ? " checked" : "") +
-            "> 升级为全量</label></div>" +
-            '<p class="cd-desc" style="padding:0 14px 8px">增量只同步命中单元；升级全量将同步目录全部单元。</p>';
-        }
-        html +=
-          '<div class="cd-chosen">' +
-          '<div class="cd-chosen-row"><span class="cd-k">环境</span><span class="cd-v">' +
-          esc(ui.env || "") +
-          "</span></div>" +
-          '<div class="cd-chosen-row"><span class="cd-k">主机</span><span class="cd-v">' +
-          esc(ui.ssh_host || "") +
-          "</span></div>" +
-          '<div class="cd-chosen-row"><span class="cd-k">远端</span><span class="cd-v">' +
-          esc(ui.ssh_app_path || "") +
-          "</span></div>" +
-          '<div class="cd-chosen-row"><span class="cd-k">对比</span><span class="cd-v">' +
-          esc(
-            (ui.last_deploy_sha ? String(ui.last_deploy_sha).slice(0, 10) : ui.base_ref || "?") +
-              " → " +
-              (ui.head_ref || "HEAD")
-          ) +
-          "</span></div></div>";
-        if (changed.length && mode === "incremental") {
-          html +=
-            '<div class="cd-label" style="padding:0 14px">变更文件（节选）</div><div style="padding:4px 14px 8px;max-height:100px;overflow:auto;font-size:11px;color:#6b7280">';
-          changed.slice(0, 20).forEach(function (p) {
-            html += "<div>" + esc(p) + "</div>";
-          });
-          if (changed.length > 20) html += "<div>…共 " + changed.length + " 个</div>";
-          html += "</div>";
-        }
-        if (mode === "full") {
-          html +=
-            '<div class="cd-label" style="padding:0 14px">将同步全部单元（' +
-            units.length +
-            "）</div>";
-          html +=
-            '<div class="cdp-units" style="padding:4px 14px 8px;max-height:160px;overflow:auto">';
-          units.forEach(function (u) {
-            html +=
-              '<div style="font-size:12px;margin:3px 0"><b>' +
-              esc(u.id || "") +
-              "</b> · " +
-              esc(u.label || "") +
-              "</div>";
-          });
-          html += "</div>";
-        } else {
-          html += '<div class="cd-label" style="padding:0 14px">自动选中的增量单元</div>';
-          if (!units.length) {
-            html +=
-              '<p class="cd-desc" style="padding:0 14px">无增量单元；确认不会 rsync</p>';
-          } else {
-            html += '<div class="cdp-units" style="padding:4px 14px 8px">';
-            units.forEach(function (u) {
-              html +=
-                '<div style="font-size:12px;margin:4px 0"><b>' +
-                esc(u.id || "") +
-                "</b> · " +
-                esc(u.label || "") +
-                "<br><span class=\"cd-hint\">" +
-                esc(u.action_hint || u.action || "") +
-                "</span></div>";
-            });
-            html += "</div>";
+    /** 会话里最近一条用户原话（Agent 未传 message 时兜底预填）。 */
+    function lastUserUtterance(props) {
+      try {
+        if (!props || typeof props.useSession !== "function") return "";
+        var text = props.useSession(function (s) {
+          var list =
+            (s && Array.isArray(s.nodes) && s.nodes) ||
+            (s && s.chat && s.chat.legacy && Array.isArray(s.chat.legacy.nodes) && s.chat.legacy.nodes) ||
+            null;
+          if (!list) return "";
+          for (var i = list.length - 1; i >= 0; i--) {
+            var n = list[i];
+            if (n && n.kind === "user") return textFromContentBlocks(n.content);
           }
-        }
-        var canGo =
-          ui.can_deploy !== false &&
-          (mode === "full" ? fullUnits.length > 0 : units.length > 0);
-        html +=
-          '<p class="cd-error" style="display:none"></p><div class="cd-actions">' +
-          '<button type="button" class="cd-btn cd-cancel">取消</button>' +
-          '<button type="button" class="cd-btn confirm cd-go"' +
-          (canGo ? "" : " disabled") +
-          ">" +
-          goLabel +
-          "</button></div>";
-        card.innerHTML = html;
-        bind();
-      }
-      function bind() {
-        var errEl = card.querySelector(".cd-error");
-        var goBtn = card.querySelector(".cd-go");
-        var radioName = "cdp-mode-" + (ui.job_id || "x");
-        Array.prototype.forEach.call(
-          card.querySelectorAll('input[name="' + radioName + '"]'),
-          function (el) {
-            el.onchange = function () {
-              if (el.checked && allowUpgrade && !forceFull) {
-                mode = el.value === "full" ? "full" : "incremental";
-                paint();
-              }
-            };
-          }
-        );
-        card.querySelector(".cd-cancel").onclick = async function () {
-          try {
-            await fetch(engineBase() + "/api/code-deploy/confirm", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ job_id: ui.job_id, decision: "reject" }),
-            });
-          } catch (_) {}
-          card.className = "cd-card cdp-card done";
-          card.innerHTML =
-            '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">部署</span></div>' +
-            '<p class="cd-summary">已取消，未执行同步</p></div>';
-        };
-        goBtn.onclick = async function () {
-          var sendMode = forceFull ? "full" : mode;
-          var ids =
-            sendMode === "full"
-              ? fullUnits.map(function (u) { return u.id; }).filter(Boolean)
-              : incrUnits.map(function (u) { return u.id; }).filter(Boolean);
-          if (!ids.length) {
-            errEl.style.display = "";
-            errEl.textContent =
-              sendMode === "full" ? "全量目录为空" : "无增量单元可部署";
-            return;
-          }
-          goBtn.disabled = true;
-          goBtn.textContent = "部署中…";
-          errEl.style.display = "none";
-          try {
-            var r = await fetch(engineBase() + "/api/code-deploy/confirm", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                job_id: ui.job_id,
-                decision: "approve",
-                mode: sendMode,
-                unit_ids: ids,
-              }),
-            });
-            var d = await r.json();
-            var host = card.closest(".assist") || card.parentElement;
-            var replyEl = host && host.querySelector(".reply");
-            card.className = "cd-card cdp-card done";
-            if (!d.ok) {
-              card.innerHTML =
-                '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">部署失败</span></div>' +
-                '<p class="cd-summary">' +
-                esc(d.detail || d.reply || "失败") +
-                "</p></div>";
-              if (replyEl) replyEl.innerHTML = md(d.reply || d.detail || "部署失败");
-              return;
-            }
-            var doneMode = d.mode === "full" || sendMode === "full" ? "全量" : "增量";
-            var succ = d.deploy_success || d.code_deploy_ui || {};
-            var unitList = Array.isArray(d.units)
-              ? d.units
-              : Array.isArray(succ.units)
-                ? succ.units
-                : ids;
-            var successUi = {
-              kind: "success",
-              job_id: ui.job_id || d.job_id || "",
-              title: succ.title || doneMode + "部署完成",
-              mode: d.mode || sendMode,
-              mode_label: succ.mode_label || doneMode,
-              env: succ.env || d.env || ui.env || "",
-              ssh_host: succ.ssh_host || d.ssh_host || ui.ssh_host || "",
-              ssh_app_path: succ.ssh_app_path || d.ssh_app_path || ui.ssh_app_path || "",
-              remote: succ.remote || "",
-              access_url:
-                succ.access_url ||
-                d.access_url ||
-                d.health_url ||
-                ui.access_url ||
-                ui.health_url ||
-                "",
-              units: unitList,
-              engine_restart: !!(succ.engine_restart != null
-                ? succ.engine_restart
-                : (d.deploy_result && d.deploy_result.engine_restart)),
-              bridge_restart: !!(succ.bridge_restart != null
-                ? succ.bridge_restart
-                : (d.deploy_result && d.deploy_result.bridge_restart)),
-              remote_engine_port:
-                succ.remote_engine_port ||
-                (d.deploy_result && d.deploy_result.remote_engine_port) ||
-                "",
-              head_sha: succ.head_sha || d.head_sha || ui.head_sha || "",
-              actions: succ.actions || [],
-              health: succ.health || (d.deploy_result && d.deploy_result.health) || null,
-              remote_receipt_path:
-                succ.remote_receipt_path ||
-                (d.deploy_result && d.deploy_result.remote_receipt_path) ||
-                "",
-              synced_rels: succ.synced_rels || [],
-            };
-            var hostCard = card.closest(".assist") || card.closest(".msg-assistant") || host;
-            var metaEl = hostCard ? hostCard.querySelector(".meta") : null;
-            if (hostCard) {
-              mountCodeDeployUi(hostCard, successUi, metaEl);
-            } else {
-              card.className = "cd-card cdp-card done";
-              card.innerHTML = cdpSuccessCardHtml(successUi);
-            }
-            if (metaEl) {
-              metaEl.textContent =
-                "来源：部署顾问 · 数据源：按插件增量部署 · 意图：部署完成";
-            }
-            if (replyEl) {
-              var unitTxt =
-                unitList.slice(0, 4).join("、") + (unitList.length > 4 ? "…" : "");
-              var healthObj =
-                succ.health || (d.deploy_result && d.deploy_result.health) || null;
-              var healthBit =
-                healthObj && healthObj.ok
-                  ? "探活通过"
-                  : healthObj && healthObj.ok === false
-                    ? "探活未通过"
-                    : "探活未配置";
-              var remoteTxt =
-                succ.remote ||
-                ((succ.ssh_host || d.ssh_host || ui.ssh_host || "") +
-                  (succ.ssh_app_path || d.ssh_app_path || ui.ssh_app_path
-                    ? ":" + (succ.ssh_app_path || d.ssh_app_path || ui.ssh_app_path)
-                    : ""));
-              var deployReply =
-                "**" +
-                (succ.title || doneMode + "部署完成") +
-                "** · `" +
-                (unitTxt || "—") +
-                "`\n- 环境：`" +
-                (succ.env || d.env || ui.env || "—") +
-                "` · " +
-                healthBit +
-                "\n- 远端：`" +
-                (remoteTxt || "—") +
-                "`";
-              replyEl.innerHTML = md(deployReply);
-              persistHitlFromHost(hostCard || host, {
-                code_deploy_ui: successUi,
-                text: deployReply,
-                meta: metaEl ? metaEl.textContent : undefined,
-              });
-            } else {
-              persistHitlFromHost(hostCard || host, { code_deploy_ui: successUi });
-            }
-          } catch (e) {
-            errEl.style.display = "";
-            errEl.textContent = "请求失败：" + e.message;
-            goBtn.disabled = false;
-            goBtn.textContent = sendMode === "full" ? "确认全量部署" : "确认增量部署";
-          }
-        };
-      }
-      paint();
-    }
-    function ccFindingsHtml(findings, limit) {
-      var list = Array.isArray(findings) ? findings : [];
-      if (!list.length) return '<p class="cd-desc">无 findings</p>';
-      var html = '<ul class="cd-findings" style="margin:8px 0;padding-left:18px;font-size:13px;">';
-      list.slice(0, limit || 12).forEach(function (f) {
-        html +=
-          "<li><b>[" +
-          esc(f.severity || "?") +
-          "]</b> " +
-          esc(f.path || "") +
-          " — " +
-          esc(f.message || "") +
-          "</li>";
-      });
-      html += "</ul>";
-      return html;
-    }
-    function renderCcBlocked(card, ui, hooks) {
-      hooks = hooks || {};
-      var files = Array.isArray(ui.files) ? ui.files : [];
-      var html =
-        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交阻断</span><span class="cd-hint">请先修复</span></div>' +
-        '<p class="cd-summary">' + esc(ui.summary || "门禁未通过，禁止提交") + "</p></div>";
-      html += '<div class="cd-chosen"><div class="cd-chosen-row"><span class="cd-k">路径</span><span class="cd-v">' + esc(ui.workspace || "") + "</span></div>";
-      if (ui.work_branch) {
-        html += '<div class="cd-chosen-row"><span class="cd-k">分支</span><span class="cd-v">' + esc(ui.work_branch) + "</span></div>";
-      }
-      html += '<div class="cd-chosen-row"><span class="cd-k">阻断</span><span class="cd-v">' + esc(String(ui.blocking_count || 0)) + " 条</span></div></div>";
-      if (files.length) {
-        html += '<p class="cd-desc" style="padding:0 12px;">待提交文件 ' + files.length + " 个</p>";
-      }
-      html += '<div style="padding:0 12px 12px">' + ccFindingsHtml(ui.findings, 15) + "</div>";
-      html +=
-        '<div class="cd-done-banner err" style="margin:0 12px 8px"><span class="cd-done-icon">!</span><div><strong>不可提交</strong> · 可点下方用写码修复，或在输入框说「修复这些问题」</div></div>';
-      html +=
-        '<div class="cd-actions" style="padding:0 12px 12px">' +
-        '<button type="button" class="cd-btn confirm cd-fix">用写码修复这些问题</button></div>';
-      card.className = "cd-card cc-card done";
-      card.innerHTML = html;
-      var fixBtn = card.querySelector(".cd-fix");
-      if (fixBtn) {
-        fixBtn.onclick = function () {
-          var msg = "【门禁阻断修复】请按提交门禁结果修复问题代码";
-          if (ui.job_id) msg += " job_id=" + ui.job_id;
-          if (ui.workspace) msg += "\n工程：" + ui.workspace;
-          if (typeof hooks.send === "function") {
-            hooks.send(msg);
-            return;
-          }
-          fixBtn.disabled = true;
-          fixBtn.textContent = "准备修复卡…";
-          fetch(engineBase() + "/api/code-commit/prepare-fix", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ workspace: ui.workspace || "", job_id: ui.job_id || "" }),
-          })
-            .then(function (r) { return r.json(); })
-            .then(function (d) {
-              if (!d.ok || !d.code_dev_ui) {
-                fixBtn.disabled = false;
-                fixBtn.textContent = "用写码修复这些问题";
-                alert(d.detail || d.reply || "无法生成修复确认卡");
-                return;
-              }
-              renderCdPropose(card, d.code_dev_ui, hooks);
-              var host = card.closest(".assist") || card.parentElement;
-              var replyEl = host ? host.querySelector(".reply") : null;
-              if (replyEl) replyEl.innerHTML = md(d.reply || "请确认后写码修复");
-            })
-            .catch(function (e) {
-              fixBtn.disabled = false;
-              fixBtn.textContent = "用写码修复这些问题";
-              alert("请求失败：" + e.message);
-            });
-        };
+          return "";
+        });
+        return String(text || "").trim();
+      } catch (e) {
+        return "";
       }
     }
-    function renderCcPushRetryCard(card, d, hooks) {
-      hooks = hooks || {};
-      var cr = d.commit_result || {};
-      var push = cr.push || {};
-      var jobId = d.job_id || "";
-      var html =
-        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">推送失败</span>' +
-        '<span class="cd-hint" style="color:#b91c1c">本地已提交，可重试推送</span></div>' +
-        '<p class="cd-summary">' + esc(d.reply || d.detail || "本地已提交，但推送失败") + "</p></div>";
-      html +=
-        '<div class="cd-chosen">' +
-        '<div class="cd-chosen-row"><span class="cd-k">分支</span><span class="cd-v">' + esc(cr.branch || "") + "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">本地 commit</span><span class="cd-v">' + esc(cr.commit || "") + "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">待推送</span><span class="cd-v">仅 push（不重新 commit）</span></div></div>';
-      if (push.error || push.raw_error) {
-        html +=
-          '<p class="cd-desc" style="padding:0 12px;color:#991b1b"><code>' +
-          esc(String(push.error || push.raw_error || "").slice(0, 280)) +
-          "</code></p>";
-      }
-      html +=
-        '<p class="cd-error" style="display:none"></p>' +
-        '<div class="cd-actions" style="padding:0 12px 12px">' +
-        '<button type="button" class="cd-btn confirm cd-push-retry">重试推送</button></div>';
-      card.className = "cd-card cc-card";
-      card.innerHTML = html;
-      var errEl = card.querySelector(".cd-error");
-      var btn = card.querySelector(".cd-push-retry");
-      btn.onclick = function () {
-        btn.disabled = true;
-        btn.textContent = "推送中…";
-        errEl.style.display = "none";
-        fetch(engineBase() + "/api/code-commit/push-retry", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ job_id: jobId }),
-        })
-          .then(function (r) { return r.json(); })
-          .then(function (out) {
-            var host = card.closest(".assist") || card.parentElement;
-            var replyEl = host ? host.querySelector(".reply") : null;
-            if (!out.ok) {
-              errEl.style.display = "";
-              errEl.textContent = out.detail || out.reply || "重试推送失败";
-              btn.disabled = false;
-              btn.textContent = "重试推送";
-              if (replyEl) replyEl.innerHTML = md(out.reply || out.detail || "重试推送失败");
-              return;
-            }
-            var cr2 = out.commit_result || cr || {};
-            var fileList =
-              Array.isArray(cr2.files) && cr2.files.length
-                ? cr2.files
-                : Array.isArray(out.files)
-                  ? out.files
-                  : Array.isArray(d.files)
-                    ? d.files
-                    : [];
-            var title = "已提交并推送";
-            card.className = "cd-card cc-card done";
-            var successUi = {
-              kind: "success",
-              job_id: jobId || (d && d.job_id) || (out && out.job_id) || "",
-              title: title,
-              workspace: out.workspace || d.workspace || "",
-              branch: cr2.branch || cr.branch || "",
-              commit: cr2.commit || cr.commit || "",
-              remote: "已推送",
-              files: fileList,
-              message: out.message || cr2.message || d.message || "",
-            };
-            card.innerHTML = ccSuccessCardHtml(successUi);
-            var proj =
-              String(out.workspace || d.workspace || "")
-                .replace(/\\/g, "/")
-                .split("/")
-                .filter(Boolean)
-                .pop() || "—";
-            var successReply =
-              "**" +
-              title +
-              "** · `" +
-              (cr2.branch || cr.branch || "") +
-              "`\n- 项目：`" +
-              proj +
-              "`\n- 文件：" +
-              fileList.length +
-              " 个 · 已推送";
-            if (replyEl) replyEl.innerHTML = md(successReply);
-            persistHitlFromHost(host, { code_commit_ui: successUi, text: successReply });
-            if (typeof hooks.onCommitted === "function") hooks.onCommitted(out);
-          })
-          .catch(function (e) {
-            errEl.style.display = "";
-            errEl.textContent = "请求失败：" + e.message;
-            btn.disabled = false;
-            btn.textContent = "重试推送";
-          });
-      };
+
+    /** 原始写码诉求：ui → 工具参数 → 用户刚发的那句话。 */
+    function initialRequirement(props, ui) {
+      var fromUi = String((ui && (ui.requirement || ui.original_goal)) || "").trim();
+      if (fromUi) return fromUi;
+      var fromArgs = toolArgsMessage(props && props.block);
+      if (fromArgs) return fromArgs;
+      return lastUserUtterance(props) || "";
     }
-    function ccSuccessCardHtml(info) {
-      info = info || {};
-      var ws = info.workspace || "";
-      var proj = String(ws).replace(/\\/g, "/").replace(/\/+$/, "");
-      var slash = proj.lastIndexOf("/");
-      proj = slash >= 0 ? proj.slice(slash + 1) : proj || "—";
-      var files = Array.isArray(info.files) ? info.files : [];
-      var title = info.title || "已提交";
-      var html =
-        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交完成</span></div>' +
-        '<p class="cd-summary">' +
-        esc(title) +
-        "</p></div>" +
-        '<div class="cd-done-banner ok" style="margin:0 12px 8px"><span class="cd-done-icon">✓</span><div><strong>' +
-        esc(title) +
-        "</strong></div></div>" +
-        '<div class="cd-chosen">' +
-        '<div class="cd-chosen-row"><span class="cd-k">项目</span><span class="cd-v">' +
-        esc(proj) +
-        "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">路径</span><span class="cd-v">' +
-        esc(ws) +
-        "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">分支</span><span class="cd-v">' +
-        esc(info.branch || "—") +
-        "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">Commit</span><span class="cd-v">' +
-        esc(info.commit || "—") +
-        "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">远程</span><span class="cd-v">' +
-        esc(info.remote || "—") +
-        "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">文件</span><span class="cd-v">' +
-        files.length +
-        " 个</span></div>";
-      if (info.message) {
-        html +=
-          '<div class="cd-chosen-row"><span class="cd-k">说明</span><span class="cd-v">' +
-          esc(info.message) +
-          "</span></div>";
-      }
-      html += "</div>";
-      if (files.length) {
-        html += '<div class="cd-label" style="padding:0 12px 4px">本批文件</div><ul class="cc-ok-files">';
-        for (var i = 0; i < Math.min(files.length, 30); i++) {
-          html += "<li>" + esc(String(files[i])) + "</li>";
-        }
-        if (files.length > 30) html += "<li>…另有 " + (files.length - 30) + " 个</li>";
-        html += "</ul>";
-      }
-      return html;
-    }
-    function cdpAccessLinkHtml(url) {
-      var u = String(url || "").trim();
-      if (!u) return esc("（未配置访问地址）");
-      if (/^https?:\/\//i.test(u)) {
-        return (
-          '<a href="' +
-          esc(u) +
-          '" target="_blank" rel="noopener noreferrer" style="color:#047857;text-decoration:underline;word-break:break-all">' +
-          esc(u) +
-          "</a>"
+
+    function WorkspaceMismatchHint(hintProps) {
+      var dshCwd = hintProps.dshCwd;
+      var workspace = hintProps.workspace;
+      var home = hintProps.home;
+      var onUseDsh = hintProps.onUseDsh;
+      if (!dshCwd) {
+        return h(
+          "p",
+          { className: "wb-cr-dsh" },
+          "未检测到侧栏工作区路径；请先在左侧选择工作区，或手动填写/浏览目录。",
         );
       }
-      return esc(u);
+      var mismatch =
+        !!String(workspace || "").trim() && !pathsEqual(workspace, dshCwd, home);
+      return h(
+        "div",
+        null,
+        h(
+          "p",
+          { className: "wb-cr-dsh" },
+          "当前工作区：",
+          h("code", null, dshCwd),
+          mismatch ? null : "（已默认填入，可改）",
+        ),
+        mismatch
+          ? h(
+              "div",
+              { className: "wb-cr-warn" },
+              "填写目录与侧栏工作区不一致。将按上方输入路径执行，请确认是否搞错工程。",
+              onUseDsh
+                ? h(
+                    "div",
+                    { style: { marginTop: 8 } },
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "wb-cr-btn",
+                        onClick: onUseDsh,
+                      },
+                      "改用当前工作区",
+                    ),
+                  )
+                : null,
+            )
+          : null,
+      );
     }
-    function cdpSuccessCardHtml(info) {
-      info = info || {};
-      var units = Array.isArray(info.units) ? info.units : [];
-      var rels = Array.isArray(info.synced_rels) ? info.synced_rels : [];
-      var title = info.title || ((info.mode_label || "部署") + "完成");
-      var modeLabel =
-        info.mode_label || (info.mode === "full" ? "全量" : info.mode === "incremental" ? "增量" : "—");
-      var remote =
-        info.remote ||
-        ((info.ssh_host || "") + (info.ssh_app_path ? ":" + info.ssh_app_path : ""));
-      var access = info.access_url || info.health_url || "";
-      var appName = String(info.ssh_app_path || remote || "")
-        .replace(/\\/g, "/")
-        .replace(/\/+$/, "");
-      var slash = appName.lastIndexOf("/");
-      appName = slash >= 0 ? appName.slice(slash + 1) : appName || "—";
-      var actions = Array.isArray(info.actions) ? info.actions.slice() : [];
-      if (!actions.length) {
-        if (info.engine_restart) {
-          actions.push(
-            "已重启引擎" +
-              (info.remote_engine_port ? "（:" + info.remote_engine_port + "）" : "")
-          );
-        }
-        if (info.bridge_restart) actions.push("已重装 bridge");
-        if (!actions.length) actions.push("仅同步文件（未重启 DSH）");
-      }
-      var health = info.health || null;
-      var healthTxt = "—";
-      if (health && health.ok != null) {
-        healthTxt =
-          (health.ok ? "通过" : "未通过") +
-          (health.status != null ? "（" + health.status + "）" : "");
-      }
-      var unitShort = units.slice(0, 4).join("、") + (units.length > 4 ? "…" : "");
-      var banner = title + (unitShort ? " · " + unitShort : "");
-      var html =
-        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">部署完成</span></div>' +
-        '<p class="cd-summary">' +
-        esc(title) +
-        "</p></div>" +
-        '<div class="cd-done-banner ok" style="margin:0 12px 8px"><span class="cd-done-icon">✓</span><div><strong>' +
-        esc(banner) +
-        "</strong></div></div>" +
-        '<div class="cd-chosen">' +
-        '<div class="cd-chosen-row"><span class="cd-k">项目</span><span class="cd-v">' +
-        esc(appName) +
-        "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">远端</span><span class="cd-v">' +
-        esc(remote || "—") +
-        "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">环境</span><span class="cd-v">' +
-        esc(info.env || "—") +
-        "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">方式</span><span class="cd-v">' +
-        esc(modeLabel) +
-        "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">访问</span><span class="cd-v">' +
-        cdpAccessLinkHtml(access) +
-        "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">探活</span><span class="cd-v">' +
-        esc(healthTxt) +
-        "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">动作</span><span class="cd-v">' +
-        esc(actions.join("；")) +
-        "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">单元</span><span class="cd-v">' +
-        units.length +
-        " 个</span></div>";
-      if (info.head_sha) {
-        html +=
-          '<div class="cd-chosen-row"><span class="cd-k">基线</span><span class="cd-v">' +
-          esc(String(info.head_sha).slice(0, 12)) +
-          "</span></div>";
-      }
-      if (info.remote_receipt_path) {
-        html +=
-          '<div class="cd-chosen-row"><span class="cd-k">回执</span><span class="cd-v" style="word-break:break-all">' +
-          esc(info.remote_receipt_path) +
-          "</span></div>";
-      }
-      html += "</div>";
-      if (units.length) {
-        html +=
-          '<div class="cd-label" style="padding:0 12px 4px">本批单元</div><ul class="cc-ok-files">';
-        for (var i = 0; i < Math.min(units.length, 40); i++) {
-          html += "<li>" + esc(String(units[i])) + "</li>";
-        }
-        if (units.length > 40) html += "<li>…另有 " + (units.length - 40) + " 个</li>";
-        html += "</ul>";
-      }
-      if (rels.length) {
-        html +=
-          '<div class="cd-label" style="padding:0 12px 4px">同步路径</div><ul class="cc-ok-files">';
-        for (var j = 0; j < Math.min(rels.length, 40); j++) {
-          html += "<li>" + esc(String(rels[j])) + "</li>";
-        }
-        if (rels.length > 40) html += "<li>…另有 " + (rels.length - 40) + " 个</li>";
-        html += "</ul>";
-      }
-      return html;
-    }
-    function renderCcConfirm(card, ui, hooks) {
-      hooks = hooks || {};
-      var files = Array.isArray(ui.files) ? ui.files : [];
-      var pushOn = ui.push !== false;
-      var html =
-        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">确认提交</span><span class="cd-hint">' +
-        esc(ui.hint || "确认后才会 git commit / push") +
-        '</span></div><p class="cd-summary">' +
-        esc(ui.summary || "门禁已通过") +
-        '</p><p class="cd-desc">' +
-        esc(ui.desc || "填写中文提交说明；默认推送到远程。") +
-        "</p></div>";
-      html +=
-        '<div class="cd-chosen">' +
-        '<div class="cd-chosen-row"><span class="cd-k">路径</span><span class="cd-v">' + esc(ui.workspace || "") + "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">分支</span><span class="cd-v">' + esc(ui.work_branch || "") + "</span></div>" +
-        '<div class="cd-chosen-row"><span class="cd-k">文件</span><span class="cd-v">' + files.length + " 个</span></div></div>";
-      if (files.length) {
-        html += '<p class="cd-desc" style="padding:0 12px;"><code>' + esc(files.slice(0, 12).join(", ")) + (files.length > 12 ? "…" : "") + "</code></p>";
-      }
-      if ((ui.findings || []).length) {
-        html += '<div style="padding:0 12px">' + ccFindingsHtml(ui.findings, 8) + "</div>";
-      }
-      html +=
-        '<label class="cd-field"><span class="cd-label">中文提交说明</span>' +
-        '<input class="cd-input cd-msg" value="' + esc(ui.message || "") + '" placeholder="概括本次修改"></label>';
-      html +=
-        '<label class="cd-field" style="flex-direction:row;align-items:center;gap:8px;">' +
-        '<input type="checkbox" class="cd-push"' + (pushOn ? " checked" : "") + ">" +
-        "<span>推送到远程</span></label>";
-      html +=
-        '<p class="cd-error" style="display:none"></p><div class="cd-actions">' +
-        '<button type="button" class="cd-btn cd-cancel">取消</button>' +
-        '<button type="button" class="cd-btn confirm cd-go">确认提交并推送</button></div>';
-      card.innerHTML = html;
-      var errEl = card.querySelector(".cd-error");
-      var goBtn = card.querySelector(".cd-go");
-      function syncGoLabel() {
-        var push = card.querySelector(".cd-push").checked;
-        goBtn.textContent = push ? "确认提交并推送" : "确认仅本地提交";
-      }
-      card.querySelector(".cd-push").onchange = syncGoLabel;
-      syncGoLabel();
-      card.querySelector(".cd-cancel").onclick = function () {
-        fetch(engineBase() + "/api/code-commit/confirm", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ job_id: ui.job_id, decision: "reject" }),
-        }).catch(function () {});
-        card.className = "cd-card cc-card done";
-        card.innerHTML =
-          '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交代码</span></div>' +
-          '<p class="cd-summary">已取消，未执行 commit</p></div>';
-      };
-      goBtn.onclick = function () {
-        var message = (card.querySelector(".cd-msg").value || "").trim();
-        var push = card.querySelector(".cd-push").checked;
-        if (!message) {
-          errEl.style.display = "";
-          errEl.textContent = "请填写中文提交说明";
-          return;
-        }
-        goBtn.disabled = true;
-        goBtn.textContent = "提交中…";
-        errEl.style.display = "none";
-        fetch(engineBase() + "/api/code-commit/confirm", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ job_id: ui.job_id, message: message, push: push, decision: "approve" }),
-        })
-          .then(function (r) { return r.json(); })
-          .then(function (d) {
-            var host = card.closest(".assist") || card.parentElement;
-            var replyEl = host ? host.querySelector(".reply") : null;
-            if (d.push_retry_needed || (d.commit_result && d.commit_result.commit && d.commit_result.push && !d.commit_result.push.ok)) {
-              renderCcPushRetryCard(card, d, hooks);
-              if (replyEl) replyEl.innerHTML = md(d.reply || d.detail || "本地已提交，推送失败");
-              return;
-            }
-            card.className = "cd-card cc-card done";
-            if (!d.ok) {
-              card.innerHTML =
-                '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交失败</span></div>' +
-                '<p class="cd-summary">' + esc(d.detail || d.reply || "失败") + "</p></div>";
-              if (replyEl) replyEl.innerHTML = md(d.reply || d.detail || "提交失败");
-              return;
-            }
-            var cr = d.commit_result || {};
-            var remoteLabel = !push
-              ? "仅本地提交"
-              : cr.push && cr.push.ok
-                ? "已推送"
-                : "未推送";
-            var title = push && cr.push && cr.push.ok ? "已提交并推送" : "已提交";
-            var fileList = Array.isArray(cr.files) && cr.files.length ? cr.files : files;
-            var successUi = {
-              kind: "success",
-              job_id: ui.job_id || d.job_id || "",
-              title: title,
-              workspace: ui.workspace || "",
-              branch: cr.branch || ui.work_branch || "",
-              commit: cr.commit || "",
-              remote: remoteLabel,
-              files: fileList,
-              message: message,
-            };
-            card.innerHTML = ccSuccessCardHtml(successUi);
-            var successReply =
-              "**" +
-              title +
-              "** · `" +
-              (cr.branch || ui.work_branch || "") +
-              "`\n- 项目：`" +
-              String(ui.workspace || "")
-                .replace(/\\/g, "/")
-                .split("/")
+
+    function CodeReviewBeginCard(props) {
+      ensureCss();
+      var block = props.block;
+      var wb = useMemo(function () {
+        return readMeta(block);
+      }, [block]);
+      var ui = (wb && wb.ui) || {};
+      var dshCwd = resolveDshCwd(props);
+
+      var _phase = useState("dir"); // dir | files | running | done
+      var phase = _phase[0];
+      var setPhase = _phase[1];
+      var _ws = useState(initialWorkspace(props, ui));
+      var workspace = _ws[0];
+      var setWorkspace = _ws[1];
+      var _scope = useState(String(ui.scope || ""));
+      var scope = _scope[0];
+      var setScope = _scope[1];
+      var _focus = useState(String(ui.focus || ""));
+      var focus = _focus[0];
+      var setFocus = _focus[1];
+      var _err = useState("");
+      var err = _err[0];
+      var setErr = _err[1];
+      var _busy = useState(false);
+      var busy = _busy[0];
+      var setBusy = _busy[1];
+      var _files = useState([]);
+      var files = _files[0];
+      var setFiles = _files[1];
+      var _sample = useState([]);
+      var sample = _sample[0];
+      var setSample = _sample[1];
+      var _selected = useState({});
+      var selected = _selected[0];
+      var setSelected = _selected[1];
+      var _count = useState(0);
+      var count = _count[0];
+      var setCount = _count[1];
+      var _log = useState("");
+      var log = _log[0];
+      var setLog = _log[1];
+      var _report = useState("");
+      var report = _report[0];
+      var setReport = _report[1];
+      var _pathTicket = useState("");
+      var pathTicket = _pathTicket[0];
+      var setPathTicket = _pathTicket[1];
+
+      var suggestions = Array.isArray(ui.suggestions) ? ui.suggestions : [];
+
+      useEffect(
+        function () {
+          if (dshCwd && !String(workspace || "").trim()) setWorkspace(dshCwd);
+        },
+        [dshCwd],
+      );
+
+      if (!wb || wb.t !== "cr-pick") {
+        var out =
+          block && "kind" in block
+            ? (block.content || [])
+                .map(function (c) {
+                  return c && c.type === "text" ? c.text : "";
+                })
                 .filter(Boolean)
-                .pop() +
-              "`\n- 文件：" +
-              fileList.length +
-              " 个 · " +
-              remoteLabel;
-            if (replyEl) replyEl.innerHTML = md(successReply);
-            persistHitlFromHost(host, { code_commit_ui: successUi, text: successReply });
-            if (typeof hooks.onCommitted === "function") hooks.onCommitted(d);
-          })
-          .catch(function (e) {
-            errEl.style.display = "";
-            errEl.textContent = "请求失败：" + e.message;
-            goBtn.disabled = false;
-            syncGoLabel();
-          });
-      };
-    }
-    function renderCcPick(card, ui, hooks) {
-      hooks = hooks || {};
-      var ws0 = ui.workspace || "";
-      var br0 = ui.work_branch || "";
-      var brHint0 = ui.branch_hint || "";
-      var suggestions = Array.isArray(ui.suggestions) ? ui.suggestions : [];
-      var html =
-        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交代码</span><span class="cd-hint">' +
-        esc(ui.hint || "选择目录 · 开始门禁审核") +
-        '</span></div><p class="cd-summary">' +
-        esc(ui.summary || "请确认要提交的本机 Git 工程") +
-        '</p><p class="cd-desc">' +
-        esc(ui.desc || "") +
-        "</p></div>";
-      html +=
-        '<label class="cd-field"><span class="cd-label">本机 Git 工程目录</span><div class="cd-path-row">' +
-        '<input class="cd-input cd-ws" value="' + esc(ws0) + '" placeholder="/Users/你/项目" autocomplete="off">' +
-        '<button type="button" class="cd-btn browse cd-browse">浏览…</button></div></label>';
-      html +=
-        '<label class="cd-field"><span class="cd-label">提交分支</span>' +
-        '<input class="cd-input cd-branch" value="' + esc(br0) + '" placeholder="如 feature/xxx（当前分支 → 配置中心 → 手填）" autocomplete="off">' +
-        '<p class="cd-desc cd-branch-hint" style="margin:4px 0 0;padding:0;">' + esc(brHint0) + "</p></label>";
-      if (suggestions.length) {
-        html += '<p class="cd-suggest">常用：';
-        suggestions.forEach(function (s) {
-          var p = typeof s === "string" ? s : (s && s.path) || "";
-          var lab = (typeof s === "object" && s.label) ? s.label + " · " : "";
-          if (!p) return;
-          html += '<button type="button" class="cd-chip" data-path="' + esc(p) + '" title="' + esc(p) + '">' + esc(lab + p) + "</button>";
-        });
-        html += "</p>";
+                .join("\n")
+            : "审码进行中…";
+        return h(
+          "div",
+          { className: "wb-cr" },
+          h("div", { className: "wb-cr-head" }, h("span", { className: "wb-cr-badge" }, "代码审核"), h("span", { className: "wb-cr-hint" }, "结果")),
+          h("div", { className: "wb-cr-body" }, h("pre", { className: "wb-cr-progress", style: { margin: 0 } }, out || "（无详情）")),
+        );
       }
-      html +=
-        '<p class="cd-error" style="display:none"></p><div class="cd-actions">' +
-        '<button type="button" class="cd-btn cd-cancel">取消</button>' +
-        '<button type="button" class="cd-btn confirm cd-go">开始门禁审核</button></div>';
-      card.innerHTML = html;
-      var errEl = card.querySelector(".cd-error");
-      var wsEl = card.querySelector(".cd-ws");
-      var brEl = card.querySelector(".cd-branch");
-      var hintEl = card.querySelector(".cd-branch-hint");
-      var refreshTimer = null;
-      function applyBranchInfo(d) {
-        if (!d) return;
-        brEl.value = d.work_branch || "";
-        hintEl.textContent = d.branch_hint || (d.need_user_branch ? "请填写要提交的分支" : "") || "";
-      }
-      function refreshBranch() {
-        var workspace = (wsEl.value || "").trim();
-        if (!workspace) {
-          brEl.value = "";
-          hintEl.textContent = "请先选择工程目录；分支将自动填入当前分支或配置中心分支。";
-          return;
-        }
-        hintEl.textContent = "正在识别分支…";
-        fetch(engineBase() + "/api/code-commit/check", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workspace: workspace }),
-        })
-          .then(function (r) { return r.json(); })
-          .then(function (d) {
-            if (!d.ok) {
-              brEl.value = "";
-              hintEl.textContent = d.detail || d.reply || "路径不可用，无法识别分支";
-              return;
-            }
-            applyBranchInfo(d);
-          })
-          .catch(function () {
-            hintEl.textContent = "分支识别失败，请手动填写";
-          });
-      }
-      function scheduleRefreshBranch() {
-        if (refreshTimer) clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(refreshBranch, 350);
-      }
-      Array.prototype.forEach.call(card.querySelectorAll(".cd-chip"), function (btn) {
-        btn.onclick = function () {
-          wsEl.value = btn.getAttribute("data-path") || "";
-          refreshBranch();
-        };
-      });
-      wsEl.addEventListener("change", refreshBranch);
-      wsEl.addEventListener("blur", refreshBranch);
-      wsEl.addEventListener("input", scheduleRefreshBranch);
-      card.querySelector(".cd-browse").onclick = function () {
-        var browseBtn = card.querySelector(".cd-browse");
-        browseBtn.disabled = true;
-        browseBtn.textContent = "选择中…";
-        errEl.style.display = "";
-        errEl.textContent = "请在弹出的系统对话框中选择目录（若看不到，请看 Dock / 其它窗口后面）";
-        var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-        var timer = setTimeout(function () {
-          try {
-            if (ctrl) ctrl.abort();
-          } catch (e0) {}
-        }, 120000);
-        fetch(engineBase() + "/api/pick-folder", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: "选择要提交的 Git 工程目录" }),
-          signal: ctrl ? ctrl.signal : undefined,
-        })
-          .then(function (r) { return r.json(); })
-          .then(function (d) {
-            errEl.style.display = "none";
-            if (d.ok && d.path) {
-              wsEl.value = d.path;
-              refreshBranch();
-            } else if (d.error && d.error !== "已取消选择") {
-              errEl.style.display = "";
-              errEl.textContent = d.error || "选文件夹失败";
-            } else {
-              errEl.style.display = "none";
-            }
-          })
-          .catch(function (e) {
-            errEl.style.display = "";
-            errEl.textContent =
-              e && e.name === "AbortError"
-                ? "选择超时：请点击「常用」路径或手动粘贴目录，也可再点「浏览…」"
-                : "浏览失败：" + e.message;
-          })
-          .finally(function () {
-            clearTimeout(timer);
-            browseBtn.disabled = false;
-            browseBtn.textContent = "浏览…";
-          });
-      };
-      card.querySelector(".cd-cancel").onclick = function () {
-        card.className = "cd-card cc-card done";
-        card.innerHTML =
-          '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交代码</span></div>' +
-          '<p class="cd-summary">已取消，未开始门禁</p></div>';
-      };
-      card.querySelector(".cd-go").onclick = function () {
-        var workspace = (wsEl.value || "").trim();
-        var work_branch = (brEl.value || "").trim();
-        if (!workspace) {
-          errEl.style.display = "";
-          errEl.textContent = "请填写或浏览选择本机 Git 工程目录";
-          return;
-        }
-        if (!work_branch) {
-          errEl.style.display = "";
-          errEl.textContent = "请填写要提交的分支（当前分支与配置中心均不可用时须手填）";
-          return;
-        }
-        var goBtn = card.querySelector(".cd-go");
-        goBtn.disabled = true;
-        goBtn.textContent = "门禁审核中…";
-        errEl.style.display = "none";
-        fetch(engineBase() + "/api/code-commit/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workspace: workspace, work_branch: work_branch }),
-        })
-          .then(function (r) { return r.json(); })
-          .then(function (d) {
-            if (!d.ok && !d.job_id) {
-              errEl.style.display = "";
-              errEl.textContent = d.detail || d.reply || "门禁失败";
-              goBtn.disabled = false;
-              goBtn.textContent = "开始门禁审核";
-              if (d.need_user_branch) {
-                hintEl.textContent = d.branch_hint || d.detail || "请填写要提交的分支";
-              }
-              return;
-            }
-            var host = card.closest(".assist") || card.parentElement;
-            var replyEl = host ? host.querySelector(".reply") : null;
-            if (!d.can_commit) {
-              var blockN = d.blocking_count || 0;
-              var warnN = d.warning_count || 0;
-              var blockedSummary =
-                blockN > 0
-                  ? ("提交批审：" + blockN + " 条阻断、" + warnN + " 条警告 —— 禁止提交")
-                  : (d.summary || d.reply || "门禁未通过，禁止提交");
-              renderCcBlocked(card, {
-                kind: "blocked",
-                workspace: workspace,
-                job_id: d.job_id,
-                files: d.files || [],
-                findings: d.findings || [],
-                summary: blockedSummary,
-                blocking_count: blockN,
-                work_branch: d.work_branch || work_branch,
-              }, hooks);
-              var blockedReply = d.reply || blockedSummary;
-              if (replyEl) replyEl.innerHTML = md(blockedReply);
-              persistHitlFromHost(host, {
-                code_commit_ui: {
-                  kind: "blocked",
-                  workspace: workspace,
-                  job_id: d.job_id,
-                  files: d.files || [],
-                  findings: d.findings || [],
-                  summary: blockedSummary,
-                  blocking_count: blockN,
-                  work_branch: d.work_branch || work_branch,
-                },
-                text: blockedReply,
-              });
-              return;
-            }
-            var confirmUi = d.code_commit_ui || {
-              kind: "confirm",
-              job_id: d.job_id,
-              workspace: workspace,
-              files: d.files || [],
-              work_branch: d.work_branch || work_branch,
-              message: d.draft_message || "",
-              push: d.default_push !== false,
-              findings: d.findings || [],
-              summary: d.summary || "",
-            };
-            renderCcConfirm(card, confirmUi, hooks);
-            var confirmReply = d.reply || "门禁通过，请确认后提交。";
-            if (replyEl) replyEl.innerHTML = md(confirmReply);
-            persistHitlFromHost(host, { code_commit_ui: confirmUi, text: confirmReply });
-          })
-          .catch(function (e) {
-            errEl.style.display = "";
-            errEl.textContent = "请求失败：" + e.message;
-            goBtn.disabled = false;
-            goBtn.textContent = "开始门禁审核";
-          });
-      };
-    }
-    function renderCrPick(card, ui, hooks) {
-      hooks = hooks || {};
-      var ws0 = ui.workspace || "";
-      var scope0 = ui.scope || "";
-      var focus0 = ui.focus || "";
-      var suggestions = Array.isArray(ui.suggestions) ? ui.suggestions : [];
-      var html =
-        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">代码审核</span><span class="cd-hint">' +
-        esc(ui.hint || "选择目录 · 确认后开始") +
-        '</span></div><p class="cd-summary">' +
-        esc(ui.summary || "请确认要审核的本机工程") +
-        '</p><p class="cd-desc">' +
-        esc(ui.desc || "直读本机磁盘源码（不走 Git / VS Code Bridge），确认后开始审查。") +
-        "</p></div>";
-      html +=
-        '<label class="cd-field"><span class="cd-label">本机工程目录</span><div class="cd-path-row">' +
-        '<input class="cd-input cd-ws" value="' + esc(ws0) + '" placeholder="/Users/你/项目" autocomplete="off">' +
-        '<button type="button" class="cd-btn browse cd-browse">浏览…</button></div></label>';
-      if (suggestions.length) {
-        html += '<p class="cd-suggest">常用：';
-        suggestions.forEach(function (s) {
-          var p = typeof s === "string" ? s : (s && s.path) || "";
-          var lab = (typeof s === "object" && s.label) ? s.label + " · " : "";
-          if (!p) return;
-          html += '<button type="button" class="cd-chip" data-path="' + esc(p) + '" title="' + esc(p) + '">' + esc(lab + p) + "</button>";
-        });
-        html += "</p>";
-      }
-      html +=
-        '<label class="cd-field"><span class="cd-label">范围（可选，相对子路径）</span>' +
-        '<input class="cd-input cd-scope" value="' + esc(scope0) + '" placeholder="如 frontend/src"></label>';
-      html +=
-        '<label class="cd-field"><span class="cd-label">审查重点（可选）</span>' +
-        '<input class="cd-input cd-focus" value="' + esc(focus0) + '" placeholder="如 SQL 注入、权限校验"></label>';
-      html +=
-        '<p class="cd-error" style="display:none"></p><div class="cd-actions">' +
-        '<button type="button" class="cd-btn cd-cancel">取消</button>' +
-        '<button type="button" class="cd-btn confirm cd-go">开始审核</button></div>';
-      card.innerHTML = html;
-      var errEl = card.querySelector(".cd-error");
-      var wsEl = card.querySelector(".cd-ws");
-      var goBtn = card.querySelector(".cd-go");
-      Array.prototype.forEach.call(card.querySelectorAll(".cd-chip"), function (btn) {
-        btn.onclick = function () { wsEl.value = btn.getAttribute("data-path") || ""; };
-      });
-      card.querySelector(".cd-browse").onclick = function () {
-        var browseBtn = card.querySelector(".cd-browse");
-        browseBtn.disabled = true;
-        browseBtn.textContent = "选择中…";
-        errEl.style.display = "";
-        errEl.textContent = "请在弹出的系统对话框中选择目录（若看不到，请看 Dock / 其它窗口后面）";
+
+      function browse() {
+        setBusy(true);
+        setErr("请在弹出的系统对话框中选择目录（若看不到，请看 Dock / 其它窗口后面）");
         var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
         var timer = setTimeout(function () {
           try {
@@ -1569,1091 +416,3689 @@ window.__ModuleLoader__.load({
           body: JSON.stringify({ prompt: "选择要审核的工程目录" }),
           signal: ctrl ? ctrl.signal : undefined,
         })
-          .then(function (r) { return r.json(); })
+          .then(function (r) {
+            return r.json();
+          })
           .then(function (d) {
-            errEl.style.display = "none";
-            if (d.ok && d.path) wsEl.value = d.path;
-            else if (d.error && d.error !== "已取消选择") {
-              errEl.style.display = "";
-              errEl.textContent = d.error || "选文件夹失败";
+            if (d && d.ok && d.path) {
+              setWorkspace(d.path);
+              setErr("");
+            } else if (d && d.error && d.error !== "已取消选择") {
+              setErr(d.error || "选文件夹失败");
             } else {
-              errEl.style.display = "none";
+              setErr("");
             }
           })
           .catch(function (e) {
-            errEl.style.display = "";
-            errEl.textContent =
+            setErr(
               e && e.name === "AbortError"
-                ? "选择超时：请点击「常用」路径或手动粘贴目录，也可再点「浏览…」"
-                : "浏览失败：" + e.message;
+                ? "选择超时：请点常用路径或手动粘贴目录"
+                : "浏览失败：" + (e && e.message ? e.message : e),
+            );
           })
           .finally(function () {
             clearTimeout(timer);
-            browseBtn.disabled = false;
-            browseBtn.textContent = "浏览…";
+            setBusy(false);
           });
-      };
-      card.querySelector(".cd-cancel").onclick = function () {
-        card.className = "cd-card cr-pick done";
-        card.innerHTML =
-          '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">代码审核</span></div>' +
-          '<p class="cd-summary">已取消，未开始审核</p></div>';
-      };
-      goBtn.onclick = function () {
-        var local_path = (wsEl.value || "").trim();
-        var scope = (card.querySelector(".cd-scope").value || "").trim();
-        var focus = (card.querySelector(".cd-focus").value || "").trim();
+      }
+
+      function goList() {
+        var local_path = String(workspace || "").trim();
         if (!local_path) {
-          errEl.style.display = "";
-          errEl.textContent = "请填写或浏览选择本机工程目录";
+          setErr("请填写或浏览选择本机工程目录");
           return;
         }
-        var parts = local_path.split(/[/\\]/).filter(Boolean);
-        var name = parts.length ? parts[parts.length - 1] : local_path;
-        card.className = "cd-card cr-pick done";
-        card.innerHTML =
-          '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">代码审核</span><span class="cd-hint">进行中</span></div>' +
-          '<p class="cd-summary">已确认本机工程，正在审核</p></div>' +
-          '<div class="cd-chosen">' +
-          '<div class="cd-chosen-row"><span class="cd-k">来源</span><span class="cd-v">本机目录直读</span></div>' +
-          '<div class="cd-chosen-row"><span class="cd-k">项目</span><span class="cd-v">' + esc(name) + "</span></div>" +
-          '<div class="cd-chosen-row"><span class="cd-k">路径</span><span class="cd-v">' + esc(local_path) + "</span></div></div>" +
-          '<div class="cd-plan-host" style="padding:0 12px 8px"></div>' +
-          '<div class="cd-done-banner" style="display:none;margin:0 12px 10px"></div>';
-        var host = card.closest(".assist") || card.parentElement;
-        if (host) {
-          var replyEl = host.querySelector(".reply");
-          if (replyEl && replyEl.nextElementSibling === card) host.insertBefore(card, replyEl);
-          if (replyEl) replyEl.innerHTML = md("正在审核本机工程 `" + local_path + "` …");
-          var metaEl0 = host.querySelector(".meta");
-          if (metaEl0) metaEl0.textContent = "来源：审码顾问 · 数据源：本机审码 · 意图：审码进行中";
-        }
-        startCodeReviewWatch(local_path, scope, focus, {
-          planHost: card.querySelector(".cd-plan-host"),
-          bannerEl: card.querySelector(".cd-done-banner"),
-          metaEl: host ? host.querySelector(".meta") : null,
-          replyEl: host ? host.querySelector(".reply") : null,
-        });
-      };
-    }
-    var CR_PIPELINE = [
-      { id: "validate", title: "校验工程路径" },
-      { id: "list", title: "筛选功能源码" },
-      { id: "read", title: "读取源码" },
-      { id: "llm", title: "Viprasol Skill 审查" },
-      { id: "report", title: "汇总审核报告" },
-    ];
-    function initCrSteps() {
-      return CR_PIPELINE.map(function (p) { return { id: p.id, title: p.title, state: "pending" }; });
-    }
-    function applyCrStep(steps, event) {
-      var id = event && event.id;
-      if (!id) return steps;
-      var list = (steps && steps.length) ? steps.slice() : initCrSteps();
-      var idx = -1;
-      for (var i = 0; i < list.length; i++) { if (list[i].id === id) { idx = i; break; } }
-      if (idx < 0) return list;
-      var nextState = event.state || "running";
-      var title = String(event.title || "").trim();
-      var merged = Object.assign({}, list[idx], { state: nextState });
-      if (title) merged.title = title;
-      list[idx] = merged;
-      if (nextState === "running" || nextState === "done") {
-        for (var j = 0; j < idx; j++) {
-          if (list[j].state !== "done" && list[j].state !== "error") {
-            list[j] = Object.assign({}, list[j], { state: "done" });
-          }
-        }
-      }
-      return list;
-    }
-    function startCodeReviewWatch(local_path, scope, focus, hosts) {
-      hosts = hosts || {};
-      var planHost = hosts.planHost;
-      var bannerEl = hosts.bannerEl;
-      var metaEl = hosts.metaEl;
-      var replyEl = hosts.replyEl;
-      var msgs = document.getElementById("dshMesMsgs");
-      if (!planHost || !replyEl) {
-        if (!msgs) return;
-        var wrap = document.createElement("div");
-        wrap.className = "assist cr-job-msg";
-        wrap.innerHTML =
-          '<div class="reply"></div>' +
-          '<div class="cd-job-shell">' +
-          '  <div class="cd-plan-host"></div>' +
-          '  <div class="cd-done-banner" style="display:none"></div>' +
-          "</div>" +
-          '<div class="meta">来源：审码顾问 · 数据源：本机审码 · 意图：审码进行中</div>';
-        msgs.appendChild(wrap);
-        if (!planHost) planHost = wrap.querySelector(".cd-plan-host");
-        if (!bannerEl) bannerEl = wrap.querySelector(".cd-done-banner");
-        if (!replyEl) replyEl = wrap.querySelector(".reply");
-        if (!metaEl) metaEl = wrap.querySelector(".meta");
-      }
-      var startedAt = Date.now();
-      var steps = initCrSteps();
-      steps[0] = Object.assign({}, steps[0], { state: "running" });
-      var finished = false;
-      var durationText = "0s";
-      var streamedText = "";
-      var tokenQueue = [];
-      var tokenDraining = false;
-      var pendingDoneEv = null;
-      function paintPlan() {
-        planHost.innerHTML = renderCodingPlanHtml(steps, { heading: "审码进度", duration: durationText, summary: "进行中…" });
-      }
-      function paintReport(text) {
-        if (!replyEl) return;
-        replyEl.innerHTML = md(stripMarks(text || ""));
-        if (msgs) msgs.scrollTop = msgs.scrollHeight;
-      }
-      function sleepMs(ms) {
-        return new Promise(function (r) { setTimeout(r, ms); });
-      }
-      function finish(ev) {
-        if (finished) return;
-        if (tokenQueue.length || tokenDraining) {
-          pendingDoneEv = ev;
-          drainTokens();
-          return;
-        }
-        finished = true;
-        clearInterval(durTimer);
-        durationText = formatDuration((Date.now() - startedAt) / 1000);
-        var ok = !!(ev && ev.ok);
-        steps = (steps || []).map(function (s) {
-          if (s.state === "running" || s.state === "waiting") return Object.assign({}, s, { state: ok ? "done" : "error" });
-          if (ok && s.state !== "error") return Object.assign({}, s, { state: "done" });
-          return s;
-        });
-        paintPlan();
-        var reply = (ev && ev.reply) || streamedText || (ok ? "审查完成。" : ((ev && ev.detail) || "审核失败"));
-        streamedText = reply;
-        if (bannerEl) {
-          bannerEl.style.display = "";
-          bannerEl.className = "cd-done-banner " + (ok ? "ok" : "err");
-          var n = (ev && ev.file_count) || ((ev && ev.files_reviewed) || []).length || 0;
-          bannerEl.innerHTML =
-            '<span class="cd-done-icon">' + (ok ? "✓" : "!") + "</span>" +
-            "<div><strong>" + (ok ? "审核报告已生成" : "审核未完成") + "</strong> · 用时 " + esc(durationText) +
-            (ok ? " · 已审 " + n + " 个文件" : " · " + esc((ev && ev.detail) || "")) +
-            (ev && ev.report_id ? '<div class="cd-synced">报告 ID：' + esc(ev.report_id) + "</div>" : "") +
-            "</div>";
-        }
-        paintReport(reply);
-        if (metaEl) metaEl.textContent = "来源：审码顾问 · 数据源：本机审码 · 意图：审码完成" + (ev && ev.report_id ? " · " + ev.report_id : "");
-      }
-      function drainTokens() {
-        if (tokenDraining) return;
-        tokenDraining = true;
-        (async function () {
-          while (tokenQueue.length) {
-            var ev = tokenQueue.shift();
-            var text = ev && ev.text != null ? ev.text : (streamedText + ((ev && ev.delta) || ""));
-            streamedText = text;
-            paintReport(text);
-            await sleepMs(28);
-          }
-          tokenDraining = false;
-          if (pendingDoneEv && !finished) {
-            var doneEv = pendingDoneEv;
-            pendingDoneEv = null;
-            finish(doneEv);
-          }
-        })();
-      }
-      paintPlan();
-      var durTimer = setInterval(function () {
-        if (finished) { clearInterval(durTimer); return; }
-        durationText = formatDuration((Date.now() - startedAt) / 1000);
-        paintPlan();
-      }, 1000);
-      fetch(engineBase() + "/api/code-review/run/stream", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({ local_path: local_path, scope: scope || "", focus: focus || "" }),
-      })
-        .then(function (r) {
-          if (!r.ok) {
-            return r.json().catch(function () { return {}; }).then(function (j) {
-              finish({ ok: false, detail: (j && (j.detail || j.reply)) || ("HTTP " + r.status), reply: (j && j.reply) || "" });
-            });
-          }
-          var reader = r.body.getReader();
-          var decoder = new TextDecoder();
-          var pending = "";
-          function pump() {
-            return reader.read().then(function (res) {
-              if (res.done) {
-                if (!finished) {
-                  if (pendingDoneEv) drainTokens();
-                  else finish({ ok: false, detail: "流式结束但未收到完成事件", reply: "审码流中断，请重试" });
-                }
-                return;
-              }
-              pending += decoder.decode(res.value, { stream: true });
-              var chunks = pending.split("\n\n");
-              pending = chunks.pop() || "";
-              chunks.forEach(function (block) {
-                block.split("\n").forEach(function (line) {
-                  if (line.indexOf("data:") !== 0) return;
-                  var raw = line.slice(5).trim();
-                  if (!raw) return;
-                  var ev;
-                  try { ev = JSON.parse(raw); } catch (e) { return; }
-                  if (ev.type === "step") {
-                    steps = applyCrStep(steps, ev);
-                    paintPlan();
-                  } else if (ev.type === "status" && ev.detail) {
-                    for (var i = 0; i < steps.length; i++) {
-                      if (steps[i].state === "running") {
-                        steps[i] = Object.assign({}, steps[i], { title: ev.detail });
-                        break;
-                      }
-                    }
-                    paintPlan();
-                    if (!streamedText || streamedText.indexOf("代码审核汇总报告") !== 0) {
-                      paintReport(
-                        "⏳ **审码进行中**（尚未生成正式报告）\n\n" + ev.detail
-                      );
-                    }
-                  } else if (ev.type === "token") {
-                    tokenQueue.push(ev);
-                    drainTokens();
-                  } else if (ev.type === "done") {
-                    pendingDoneEv = ev;
-                    drainTokens();
-                  }
-                });
-              });
-              return pump();
-            });
-          }
-          return pump();
-        })
-        .catch(function (e) {
-          finish({ ok: false, detail: e.message, reply: "请求失败：" + e.message });
-        });
-    }
-    function parseCodeDevUiFromText(text, fallbackWs) {
-      var s = String(text || "");
-      function tryJson(body) {
-        try {
-          var o = JSON.parse(body);
-          return o && typeof o === "object" ? o : null;
-        } catch (e) {
-          var a = body.indexOf("{"), b = body.lastIndexOf("}");
-          if (a >= 0 && b > a) {
-            try { return JSON.parse(body.slice(a, b + 1)); } catch (e2) { return null; }
-          }
-          return null;
-        }
-      }
-      var mOpt = s.match(/:::cursor_dev_options\b([\s\S]*?)(?:\n[ \t]*:::|$)/i);
-      if (mOpt) {
-        var options = tryJson(mOpt[1].trim());
-        if (options) return { kind: "options", workspace: fallbackWs || "", options: options };
-      }
-      var mProp = s.match(/:::cursor_dev_propose\b([\s\S]*?)(?:\n[ \t]*:::|$)/i);
-      if (mProp) {
-        var prop = tryJson(mProp[1].trim()) || {};
-        return {
-          kind: "propose",
-          workspace: String(prop.workspace || fallbackWs || "").trim(),
-          requirement: String(prop.requirement || "").trim(),
-          target: String(prop.target || "local"),
-          propose: prop,
-        };
-      }
-      return null;
-    }
-    function renderCdOptions(card, ui, sendFn) {
-      var opts = ui.options || {};
-      var groups = Array.isArray(opts.groups) ? opts.groups : [];
-      var selected = {};
-      groups.forEach(function (g) { selected[g.id] = []; });
-      var html = '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">需求选项</span><span class="cd-hint">勾选即可 · 少打字</span></div>';
-      html += '<p class="cd-summary">' + esc(opts.title || "请确认以下关键项") + "</p>";
-      if (opts.summary) html += '<p class="cd-desc">' + esc(opts.summary) + "</p>";
-      if (ui.original_goal || (ui.brief && ui.brief.original_goal)) {
-        html += '<div class="cd-goal-banner"><strong>原始诉求</strong>' + esc(ui.original_goal || ui.brief.original_goal) + "</div>";
-      }
-      html += "</div>";
-      groups.forEach(function (g) {
-        html += '<div class="cd-group" data-gid="' + esc(g.id) + '"><div class="cd-group-label">' + esc(g.label || g.id);
-        if (g.required !== false) html += '<span class="cd-req">必选</span>';
-        html += '<span class="cd-mode">' + (g.multi ? "可多选" : "单选") + '</span></div><div class="cd-opts">';
-        (g.options || []).forEach(function (o) {
-          var typ = g.multi ? "checkbox" : "radio";
-          html += '<label class="cd-opt"><input type="' + typ + '" name="cd-' + esc(g.id) + '" value="' + esc(o.id) + '"><span>' + esc(o.label || o.id) + "</span></label>";
-        });
-        html += "</div></div>";
-      });
-      html += '<label class="cd-field' + (opts.notes_required ? " cd-notes-required" : "") + '"><span class="cd-label">备注' +
-        (opts.notes_required ? "（必填）" : "（可选）") + '</span><textarea class="cd-input cd-textarea cd-notes" rows="3" placeholder="' +
-        esc(opts.notes_placeholder || "补充约束、验收点…") + '"></textarea></label>';
-      html += '<p class="cd-error" style="display:none"></p>';
-      html += '<div class="cd-actions"><button type="button" class="cd-btn cd-skip">跳过本卡</button><button type="button" class="cd-btn confirm cd-ok">确认选项</button></div>';
-      card.innerHTML = html;
-      Array.prototype.forEach.call(card.querySelectorAll(".cd-opt input"), function (inp) {
-        inp.addEventListener("change", function () {
-          var gEl = inp.closest(".cd-group");
-          var gid = gEl.getAttribute("data-gid");
-          var g = groups.find(function (x) { return x.id === gid; });
-          if (!g) return;
-          if (g.multi) {
-            selected[gid] = Array.prototype.map.call(gEl.querySelectorAll("input:checked"), function (x) { return x.value; });
-          } else {
-            selected[gid] = inp.checked ? [inp.value] : [];
-          }
-          Array.prototype.forEach.call(gEl.querySelectorAll(".cd-opt"), function (lab) {
-            lab.classList.toggle("on", !!lab.querySelector("input:checked"));
-          });
-        });
-      });
-      var errEl = card.querySelector(".cd-error");
-      card.querySelector(".cd-skip").onclick = function () {
-        card.className = "cd-card done";
-        card.innerHTML = '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">需求选项</span></div><p class="cd-summary">已跳过本卡，可继续文字补充</p></div>';
-      };
-      card.querySelector(".cd-ok").onclick = function () {
-        for (var i = 0; i < groups.length; i++) {
-          var g = groups[i];
-          if (g.required === false) continue;
-          if (!(selected[g.id] || []).length) {
-            errEl.style.display = "";
-            errEl.textContent = "请先选择：「" + (g.label || g.id) + "」";
-            return;
-          }
-        }
-        errEl.style.display = "none";
-        var notes = (card.querySelector(".cd-notes").value || "").trim();
-        if (opts.notes_required && !notes) {
-          errEl.style.display = "";
-          errEl.textContent = "请填写备注：业务模块、页面名称、接口路径等（必填）";
-          return;
-        }
-        var lines = ["【写码需求选项已确认】"];
-        if (ui.workspace) lines.push("工程路径：" + ui.workspace);
-        groups.forEach(function (g) {
-          var ids = selected[g.id] || [];
-          var labels = (g.options || []).filter(function (o) { return ids.indexOf(o.id) >= 0; }).map(function (o) { return o.label || o.id; });
-          if (labels.length) lines.push((g.label || g.id) + "：" + labels.join("、"));
-        });
-        if (notes) lines.push("备注：" + notes);
-        card.className = "cd-card done";
-        Array.prototype.forEach.call(card.querySelectorAll("input,textarea,button"), function (el) { el.disabled = true; });
-        if (sendFn) sendFn(lines.join("\n"));
-      };
-    }
-    function renderCdPropose(card, ui, hooks) {
-      hooks = hooks || {};
-      var ws0 = ui.workspace || "";
-      var req0 = ui.requirement || (ui.propose && ui.propose.requirement) || "";
-      var goal = ui.original_goal || (ui.brief && ui.brief.original_goal) || (ui.propose && ui.propose.original_goal) || "";
-      var mod = (ui.target_hints && ui.target_hints.module) || (ui.propose && ui.propose.target_module) || "";
-      var paths = (ui.target_hints && ui.target_hints.expected_paths) || (ui.propose && ui.propose.expected_paths) || [];
-      var val = ui.validation || {};
-      var html =
-        '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">写码确认</span><span class="cd-hint">核对后再开工</span></div>' +
-        '<p class="cd-summary">请确认原始诉求、目标模块与需求摘要</p></div>';
-      if (goal) {
-        html += '<div class="cd-goal-banner"><strong>原始诉求</strong>' + esc(goal) + "</div>";
-      }
-      if (mod) {
-        html += '<div class="cd-target-row"><span class="cd-target-chip">🎯 目标模块：' + esc(mod) + "</span></div>";
-      }
-      if (paths && paths.length) {
-        html += '<div class="cd-path-list"><div>预期改动区域：</div>' +
-          paths.slice(0, 6).map(function (p) { return "<code>" + esc(p) + "</code>"; }).join(" · ") + "</div>";
-      }
-      if (val.errors && val.errors.length) {
-        html += '<div class="cd-err-box">' + val.errors.map(esc).join("<br>") + "</div>";
-      } else if (val.warnings && val.warnings.length) {
-        html += '<div class="cd-warn-box">' + val.warnings.map(esc).join("<br>") + "</div>";
-      }
-      html +=
-        '<label class="cd-field"><span class="cd-label">本机工程绝对路径</span><input class="cd-input cd-ws" value="' + esc(ws0) + '"></label>' +
-        '<label class="cd-field"><span class="cd-label">需求摘要（可编辑，须含原始业务名称）</span><textarea class="cd-input cd-textarea cd-req" rows="8">' + esc(req0) + "</textarea></label>";
-      if (val.warnings && val.warnings.length && !(val.errors && val.errors.length)) {
-        html += '<div class="cd-checklist"><label><input type="checkbox" class="cd-ack"><span>我已核对原始诉求与目标模块，确认摘要不偏离业务目标</span></label></div>';
-      }
-      html += '<p class="cd-error" style="display:none"></p>' +
-        '<div class="cd-actions"><button type="button" class="cd-btn cd-cancel">取消</button>' +
-        '<button type="button" class="cd-btn confirm cd-go">确认并用 Cursor 写入本机</button></div>';
-      card.innerHTML = html;
-      var errEl = card.querySelector(".cd-error");
-      var ackEl = card.querySelector(".cd-ack");
-      var goBtn = card.querySelector(".cd-go");
-      if (val.errors && val.errors.length) goBtn.disabled = true;
-      card.querySelector(".cd-cancel").onclick = function () {
-        card.className = "cd-card done";
-        card.innerHTML = '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">写码确认</span></div><p class="cd-summary">已取消，未启动写码</p></div>';
-      };
-      goBtn.onclick = function () {
-        var workspace = (card.querySelector(".cd-ws").value || "").trim();
-        var requirement = (card.querySelector(".cd-req").value || "").trim();
-        if (!workspace || !requirement) {
-          errEl.style.display = "";
-          errEl.textContent = "请填写工程路径与需求摘要";
-          return;
-        }
-        if (ackEl && !ackEl.checked) {
-          errEl.style.display = "";
-          errEl.textContent = "请先勾选确认：摘要与原始诉求一致";
-          return;
-        }
-        var btn = goBtn;
-        btn.disabled = true;
-        btn.textContent = "启动中…";
-        errEl.style.display = "none";
-        var briefPayload = (typeof hooks.getBrief === "function" ? hooks.getBrief() : null) || ui.brief || null;
-        var payload = {
-          workspace: workspace,
-          requirement: requirement,
-          code_dev_brief: briefPayload,
-        };
-        if (ui.write_scope && ui.write_scope.length) payload.write_scope = ui.write_scope;
-        if (ui.source_gate_job_id) payload.source_gate_job_id = ui.source_gate_job_id;
-        fetch(engineBase() + "/api/code-dev/confirm", {
+        setBusy(true);
+        setErr("正在列出可审文件…");
+        fetch(engineBase() + "/api/code-review/list", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        })
-          .then(function (r) { return r.json(); })
-          .then(function (d) {
-            if (!d.ok) {
-              errEl.style.display = "";
-              errEl.textContent = d.detail || d.reply || "启动失败";
-              btn.disabled = false;
-              btn.textContent = "确认并用 Cursor 写入本机";
-              return;
-            }
-            card.className = "cd-card done";
-            card.innerHTML =
-              '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">写码确认</span></div><p class="cd-summary">已启动</p></div>' +
-              '<div class="cd-chosen"><div class="cd-chosen-row"><span class="cd-k">任务</span><span class="cd-v">' + esc(d.job_id || "") +
-              '</span></div><div class="cd-chosen-row"><span class="cd-k">工程</span><span class="cd-v">' + esc(workspace) + "</span></div></div>";
-            if (typeof hooks.onStarted === "function") hooks.onStarted(d);
-            else startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")), {
-              workspace: workspace,
-              resumeCommit: !!(d.resume_commit || d.from_gate_fix || ui.source_gate_job_id || (ui.write_scope && ui.write_scope.length)),
-            });
-          })
-          .catch(function (e) {
-            errEl.style.display = "";
-            errEl.textContent = "请求失败：" + e.message;
-            btn.disabled = false;
-            btn.textContent = "确认并用 Cursor 写入本机";
-          });
-      };
-    }
-
-    function buildPanel() {
-      var root = document.createElement("div");
-      root.id = "dshMesPanelRoot";
-      root.innerHTML =
-        '<button id="dshMesToggle" title="ZR-WorkBuddy">📊</button>' +
-        '<div id="dshMesPanel">' +
-        '  <div id="dshMesHead"><span class="dot" id="dshMesDot"></span>ZR-WorkBuddy' +
-        '    <button class="close" id="dshMesClose">×</button></div>' +
-        '  <div id="dshMesMsgs"></div>' +
-        '  <div id="dshMesChips"></div>' +
-        '  <div id="dshMesInput"><input id="dshMesQ" placeholder="问点什么…（查数或 PCB 工艺）" />' +
-        '    <button id="dshMesSend">发送</button></div>' +
-        "</div>";
-      document.body.appendChild(root);
-
-      var style = document.createElement("style");
-      style.id = "dsh-mes-panel-css";
-      style.textContent = CSS;
-      document.head.appendChild(style);
-
-      var panel = document.getElementById("dshMesPanel");
-      var msgs = document.getElementById("dshMesMsgs");
-      var input = document.getElementById("dshMesQ");
-      var sendBtn = document.getElementById("dshMesSend");
-
-      document.getElementById("dshMesToggle").onclick = function () {
-        panel.classList.toggle("open");
-      };
-      document.getElementById("dshMesClose").onclick = function () {
-        panel.classList.remove("open");
-      };
-
-      var convs = [];
-      try { convs = JSON.parse(localStorage.getItem(LS_KEY) || "[]"); } catch (e) { convs = []; }
-      var cur = null;
-
-      function save() {
-        try { localStorage.setItem(LS_KEY, JSON.stringify(convs.slice(-50))); } catch (e) {}
-      }
-      function newConv() {
-        cur = { id: Date.now(), msgs: [], codeDevBrief: null };
-        convs.push(cur);
-        save();
-      }
-      function touchCodeDevBrief(text, isCodeDevFlow) {
-        if (!cur) return null;
-        if (!cur.codeDevBrief) {
-          cur.codeDevBrief = { original_goal: "", workspace: "", selections: [], notes: [], option_rounds: 0 };
-        }
-        var b = cur.codeDevBrief;
-        var raw = String(text || "").trim();
-        if (raw.indexOf("【写码需求选项已确认】") === 0) {
-          b.option_rounds = (b.option_rounds || 0) + 1;
-          var lines = raw.replace(/^【写码需求选项已确认】\n?/, "").split("\n").filter(function (x) { return x.trim(); });
-          b.selections = b.selections || [];
-          b.selections.push({ round: b.option_rounds, lines: lines });
-          lines.forEach(function (ln) {
-            if (ln.indexOf("工程路径：") === 0) b.workspace = ln.slice(5).trim();
-            if (ln.indexOf("备注：") === 0) {
-              b.notes = b.notes || [];
-              var n = ln.slice(3).trim();
-              if (n && b.notes.indexOf(n) < 0) b.notes.push(n);
-            }
-          });
-        } else if (isCodeDevFlow && raw.indexOf("【写码确认】") !== 0) {
-          if ((!b.original_goal || raw.length > b.original_goal.length) && raw.length >= 6) {
-            b.original_goal = raw;
-          }
-        }
-        return b;
-      }
-      function getCodeDevBrief() {
-        return (cur && cur.codeDevBrief) ? cur.codeDevBrief : null;
-      }
-      function renderMsg(role, text, chart, table, meta, persist, thinking) {
-        var div = document.createElement("div");
-        div.className = role === "user" ? "user" : "assist";
-        if (role === "user") {
-          div.textContent = text;
-        } else {
-          var html = "";
-          if (thinking) {
-            html += '<details class="think"><summary>已完成思考（点击展开）</summary><div class="think-body">' +
-              md(stripMarks(thinking)) + "</div></details>";
-          }
-          html += '<div class="reply">' + md(stripMarks(text || "")) + "</div>";
-          if (chart) html += '<img src="' + chart + '" alt="图表" />';
-          if (table && table.length) {
-            html += "<table><tr><th>项目</th><th>数值</th></tr>" +
-              table.map(function (r) { return "<tr><td>" + esc(r.label) + "</td><td>" + esc(r.value) + "</td></tr>"; }).join("") +
-              "</table>";
-          }
-          if (meta) html += '<div class="meta">' + esc(meta) + "</div>";
-          div.innerHTML = html;
-        }
-        msgs.appendChild(div);
-        msgs.scrollTop = msgs.scrollHeight;
-        if (persist && cur) {
-          cur.msgs.push({
-            role: role, text: text, chart: chart || null, table: table || null,
-            meta: meta || null, thinking: thinking || null,
-          });
-          save();
-        }
-        return div;
-      }
-      function hitlHooks() {
-        return {
-          send: send,
-          renderMsg: renderMsg,
-          getBrief: getCodeDevBrief,
-          onStarted: function (d) {
-            startCodeDevJobWatch(d.job_id, d.reply || ("已启动 " + (d.job_id || "")), {
-              workspace: (d.workspace || (d.job && d.job.workspace) || "") || undefined,
-              resumeCommit: !!(d.resume_commit || d.from_gate_fix || (d.job && d.job.resume_commit)),
-            });
-          },
-        };
-      }
-      function hydrateHitlCards(hostEl, m) {
-        if (!hostEl || !m || m.role === "user") return;
-        var metaEl = hostEl.querySelector(".meta");
-        var hooks = hitlHooks();
-        if (m.code_dev_ui) mountCodeDevUi(hostEl, m.code_dev_ui, metaEl, hooks);
-        if (m.code_review_ui) mountCodeReviewUi(hostEl, m.code_review_ui, metaEl, hooks);
-        if (m.code_commit_ui) mountCodeCommitUi(hostEl, m.code_commit_ui, metaEl, hooks);
-        if (m.code_deploy_ui) mountCodeDeployUi(hostEl, m.code_deploy_ui, metaEl);
-      }
-      function persistHitlFromHostInner(hostEl, patch) {
-        if (!cur || !cur.msgs || !patch) return;
-        var jobId = String(
-          (patch.code_commit_ui && patch.code_commit_ui.job_id) ||
-            (patch.code_deploy_ui && patch.code_deploy_ui.job_id) ||
-            ""
-        ).trim();
-        function applyPatch(m) {
-          Object.keys(patch).forEach(function (k) {
-            m[k] = patch[k];
-          });
-          save();
-        }
-        var i;
-        if (jobId) {
-          for (i = cur.msgs.length - 1; i >= 0; i--) {
-            if (cur.msgs[i].role !== "assistant") continue;
-            var cid = cur.msgs[i].code_commit_ui && cur.msgs[i].code_commit_ui.job_id;
-            var did = cur.msgs[i].code_deploy_ui && cur.msgs[i].code_deploy_ui.job_id;
-            if (String(cid || "") === jobId || String(did || "") === jobId) {
-              applyPatch(cur.msgs[i]);
-              return;
-            }
-          }
-        }
-        for (i = cur.msgs.length - 1; i >= 0; i--) {
-          if (cur.msgs[i].role === "assistant") {
-            applyPatch(cur.msgs[i]);
-            return;
-          }
-        }
-      }
-      persistHitlFromHost = persistHitlFromHostInner;
-      function restoreLastConv() {
-        if (!convs.length) return false;
-        cur = convs[convs.length - 1];
-        if (!cur.msgs || !cur.msgs.length) return false;
-        msgs.innerHTML = "";
-        cur.msgs.forEach(function (m) {
-          var el = renderMsg(m.role, m.text, m.chart, m.table, m.meta, false, m.thinking);
-          hydrateHitlCards(el, m);
-        });
-        return true;
-      }
-
-      function startCodeDevJobWatch(jobId, startReply, opts) {
-        opts = opts || {};
-        // 兼容旧调用：第三参为 workspace 字符串
-        if (typeof opts === "string") opts = { workspace: opts };
-        var workspaceHint = opts.workspace || "";
-        var resumeCommit = !!opts.resumeCommit;
-        if (!jobId) {
-          renderMsg("assistant", startReply || "已启动", null, null,
-            "来源：写码顾问 · 数据源：本机写码 · 意图：本机写码", true, "");
-          return;
-        }
-        if (!cur) newConv();
-        var wrap = document.createElement("div");
-        wrap.className = "assist cd-job-msg";
-        wrap.innerHTML =
-          '<div class="cd-job-shell">' +
-          '  <div class="cd-plan-host"></div>' +
-          '  <div class="cd-done-banner" style="display:none"></div>' +
-          '  <details class="cd-result-details" style="display:none"><summary>改动说明与验收步骤</summary><div class="cd-result-body"></div></details>' +
-          "</div>" +
-          '<div class="meta">来源：写码顾问 · 数据源：本机写码 · 意图：本机写码 · ' + esc(jobId) + "</div>";
-        msgs.appendChild(wrap);
-        msgs.scrollTop = msgs.scrollHeight;
-        var planHost = wrap.querySelector(".cd-plan-host");
-        var bannerEl = wrap.querySelector(".cd-done-banner");
-        var detailsEl = wrap.querySelector(".cd-result-details");
-        var resultBody = wrap.querySelector(".cd-result-body");
-        var startedAt = Date.now();
-        var steps = initCodingSteps();
-        var finished = false;
-        var durationText = "0s";
-        function paintPlan() {
-          planHost.innerHTML = renderCodingPlanHtml(steps, { heading: "写码进度 · " + jobId, duration: durationText });
-        }
-        paintPlan();
-        var durTimer = setInterval(function () {
-          if (finished) { clearInterval(durTimer); return; }
-          durationText = formatDuration((Date.now() - startedAt) / 1000);
-          paintPlan();
-        }, 1000);
-        function openCommitPick(ws) {
-          var workspace = (ws || workspaceHint || "").trim();
-          fetch(engineBase() + "/api/code-commit/pick-ui", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ workspace: workspace }),
-          })
-            .then(function (r) { return r.json(); })
-            .then(function (d) {
-              if (!d.ok || !d.code_commit_ui) return;
-              var host = document.createElement("div");
-              host.className = "assist";
-              host.innerHTML =
-                '<div class="reply">' +
-                md("修复已同步到本机。请确认下方**提交目录与分支**，开始门禁；通过后再点确认才会 commit/push。") +
-                "</div>" +
-                '<div class="meta">来源：提交顾问 · 数据源：人触发提交 · 意图：修复后继续提交</div>';
-              msgs.appendChild(host);
-              mountCodeCommitUi(host, d.code_commit_ui, host.querySelector(".meta"), {
-                send: send,
-                getBrief: getCodeDevBrief,
-              });
-              msgs.scrollTop = msgs.scrollHeight;
-            })
-            .catch(function () {});
-        }
-        function finish(ev) {
-          if (finished) return;
-          finished = true;
-          clearInterval(durTimer);
-          durationText = formatDuration((Date.now() - startedAt) / 1000);
-          var ok = !!(ev && ev.ok);
-          var mismatch = (ev && ev.job && ev.job.sync_mismatch) || "";
-          if (ok && mismatch) ok = false;
-          steps = sealCodingSteps(steps, !ok);
-          paintPlan();
-          var synced = (ev && ev.synced_files) || (ev && ev.job && ev.job.synced_files) || [];
-          var n = synced.length;
-          var job = (ev && ev.job) || {};
-          var shouldResume =
-            resumeCommit ||
-            !!job.resume_commit ||
-            !!job.source_gate_job_id ||
-            !!(job.write_scope && job.write_scope.length);
-          var wsDone = workspaceHint || job.workspace || "";
-          bannerEl.style.display = "";
-          bannerEl.className = "cd-done-banner " + (ok ? "ok" : "err");
-          bannerEl.innerHTML =
-            '<span class="cd-done-icon">' + (ok ? "✓" : "!") + "</span>" +
-            "<div><strong>" + (ok ? "写码完成" : (mismatch ? "写码完成但模块可能不对" : "写码结束")) + "</strong> · 用时 " + esc(durationText) +
-            (ok ? " · 已同步 " + n + " 个文件到本机（未自动 commit）" : " · " + esc(mismatch || (ev && ev.error) || "失败")) +
-            (n && ok ? '<div class="cd-synced">' + esc(synced.slice(0, 8).join("、")) + (n > 8 ? " …" : "") + "</div>" : "") +
-            (mismatch ? '<div class="cd-warn-box" style="margin-top:8px">' + esc(mismatch) + "</div>" : "") +
-            (ok ? '<div class="cd-desc" style="margin-top:8px">' +
-              (shouldResume
-                ? "下一步：正在打开提交确认卡（须您确认后才会 commit/push）。"
-                : "下一步：可点「继续提交代码」对本工程重新门禁并确认提交。") +
-              "</div>" : "") +
-            "</div>";
-          if (ok) {
-            var nextRow = document.createElement("div");
-            nextRow.className = "cd-actions";
-            nextRow.style.cssText = "margin-top:8px;padding:0;";
-            nextRow.innerHTML = '<button type="button" class="cd-btn confirm cd-resubmit">继续提交代码</button>';
-            bannerEl.appendChild(nextRow);
-            var rs = nextRow.querySelector(".cd-resubmit");
-            if (rs) {
-              rs.onclick = function () { openCommitPick(wsDone); };
-            }
-            if (shouldResume) openCommitPick(wsDone);
-          }
-          var body = extractCodeDevResultBody((ev && ev.reply) || "");
-          if (body) {
-            detailsEl.style.display = "";
-            resultBody.innerHTML = md(stripMarks(body));
-          }
-          var summaryText = (ok ? "✅ 写码完成" : "❌ 写码结束") + "（" + jobId + "，" + durationText + (n ? "，同步 " + n + " 个文件" : "") + "）";
-          var meta = "来源：写码顾问 · 数据源：本机写码 · 意图：本机写码 · " + jobId;
-          if (cur) {
-            cur.msgs.push({
-              role: "assistant", text: summaryText + (body ? "\n\n" + body : ""),
-              thinking: null, chart: null, table: null, meta: meta,
-            });
-            save();
-          }
-          msgs.scrollTop = msgs.scrollHeight;
-        }
-        function onStreamEvent(ev) {
-          if (!ev || !ev.type) return;
-          if (ev.type === "step") {
-            steps = applyCodingStep(steps, ev);
-            paintPlan();
-          } else if (ev.type === "done") {
-            finish(ev);
-          } else if (ev.type === "error") {
-            finish({ ok: false, status: "failed", error: ev.message || ev.detail, reply: ev.message || ev.detail });
-          }
-        }
-        fetch(engineBase() + "/api/code-dev/jobs/" + encodeURIComponent(jobId) + "/stream", {
-          method: "GET",
-          headers: { Accept: "text/event-stream" },
+          body: JSON.stringify({ local_path: local_path, scope: String(scope || "").trim() }),
         })
           .then(function (r) {
-            if (!r.ok) throw new Error("HTTP " + r.status);
-            if (!r.body || !r.body.getReader) throw new Error("不支持流式");
+            return r.json();
+          })
+          .then(function (d) {
+            if (!d || !d.ok) {
+              setErr((d && (d.detail || d.reply)) || "列文件失败");
+              setBusy(false);
+              return;
+            }
+            var list = Array.isArray(d.files) ? d.files : [];
+            var samp = Array.isArray(d.sample_selected) ? d.sample_selected : [];
+            var paths = [];
+            var seen = {};
+            var sel = {};
+            function add(p, check) {
+              var rel = typeof p === "string" ? p : (p && p.path) || "";
+              if (!rel || seen[rel]) return;
+              seen[rel] = true;
+              paths.push(rel);
+              if (check) sel[rel] = true;
+            }
+            samp.forEach(function (p) {
+              add(p, true);
+            });
+            list.forEach(function (p) {
+              add(p, false);
+            });
+            setFiles(paths.slice(0, 80));
+            setSample(
+              samp
+                .map(function (p) {
+                  return typeof p === "string" ? p : (p && p.path) || "";
+                })
+                .filter(Boolean),
+            );
+            setSelected(sel);
+            setCount(d.count || paths.length);
+            if (d.local_path) setWorkspace(String(d.local_path));
+            setPathTicket(String(d.path_ticket || ""));
+            setPhase("files");
+            setErr("");
+            setBusy(false);
+          })
+          .catch(function (e) {
+            setErr("列文件失败：" + (e && e.message ? e.message : e));
+            setBusy(false);
+          });
+      }
+
+      function toggle(rel) {
+        setSelected(function (prev) {
+          var next = Object.assign({}, prev);
+          if (next[rel]) delete next[rel];
+          else next[rel] = true;
+          return next;
+        });
+      }
+
+      function selectedList() {
+        return Object.keys(selected).filter(function (k) {
+          return selected[k];
+        });
+      }
+
+      function runReview(fileList) {
+        var local_path = String(workspace || "").trim();
+        var ticket = String(pathTicket || "").trim();
+        if (!ticket) {
+          setErr("缺少 path_ticket：请重新列出文件后再开始审核");
+          return;
+        }
+        setPhase("running");
+        setBusy(true);
+        setErr("");
+        setLog("正在审核…\n");
+        setReport("");
+        // token.text 是引擎累计全文（非增量）；错误拼接会平方膨胀卡死页面
+        var reportAcc = "";
+        var logAcc = "正在审核…\n";
+        var flushTimer = null;
+        var finished = false;
+        function flushUi() {
+          flushTimer = null;
+          setLog(logAcc);
+          setReport(reportAcc);
+        }
+        function scheduleFlush() {
+          if (flushTimer != null) return;
+          flushTimer = setTimeout(flushUi, 150);
+        }
+        fetch(engineBase() + "/api/code-review/run/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+          body: JSON.stringify({
+            local_path: local_path,
+            scope: String(scope || "").trim(),
+            focus: String(focus || "").trim(),
+            files: fileList && fileList.length ? fileList : null,
+            path_ticket: ticket,
+          }),
+        })
+          .then(function (r) {
+            if (!r.ok) {
+              return r
+                .json()
+                .catch(function () {
+                  return {};
+                })
+                .then(function (j) {
+                  finished = true;
+                  setPhase("done");
+                  setBusy(false);
+                  setErr((j && (j.detail || j.reply)) || "HTTP " + r.status);
+                });
+            }
             var reader = r.body.getReader();
             var decoder = new TextDecoder();
             var pending = "";
-            var terminal = false;
+            function onEvent(ev) {
+              if (!ev || typeof ev !== "object") return;
+              if (ev.type === "step" || ev.type === "status") {
+                var line =
+                  ev.title || ev.detail || ev.text || ev.id || "";
+                if (line) {
+                  logAcc += line + "\n";
+                  scheduleFlush();
+                }
+              } else if (ev.type === "token") {
+                // 优先用累计全文覆盖；仅有 delta 时才追加
+                if (typeof ev.text === "string") reportAcc = ev.text;
+                else if (typeof ev.delta === "string") reportAcc += ev.delta;
+                scheduleFlush();
+              } else if (ev.type === "done" || ev.type === "error" || ev.ok === true || ev.ok === false) {
+                finished = true;
+                if (flushTimer != null) {
+                  clearTimeout(flushTimer);
+                  flushTimer = null;
+                }
+                if (ev.reply) reportAcc = ev.reply;
+                flushUi();
+                setPhase("done");
+                setBusy(false);
+                if (ev.ok === false || ev.type === "error") {
+                  setErr(ev.detail || ev.message || ev.reply || "审核失败");
+                } else {
+                  setErr("");
+                }
+              }
+            }
             function pump() {
               return reader.read().then(function (res) {
                 if (res.done) {
+                  if (flushTimer != null) {
+                    clearTimeout(flushTimer);
+                    flushTimer = null;
+                  }
+                  flushUi();
                   if (!finished) {
-                    return fetch(engineBase() + "/api/code-dev/jobs/" + encodeURIComponent(jobId))
-                      .then(function (jr) { return jr.json(); })
-                      .then(function (jd) {
-                        if (jd && jd.job && ["succeeded", "failed", "cancelled"].indexOf(jd.job.status) >= 0) {
-                          finish({
-                            ok: jd.job.status === "succeeded", status: jd.job.status,
-                            reply: jd.reply, error: jd.job.error,
-                            synced_files: jd.job.synced_files, job: jd.job,
-                          });
-                        }
-                      })
-                      .catch(function () {});
+                    setBusy(false);
+                    setPhase("done");
+                    if (!reportAcc) setErr("流式结束但未收到完成事件");
                   }
                   return;
                 }
                 pending += decoder.decode(res.value, { stream: true });
-                var parts = pending.split("\n\n");
-                pending = parts.pop() || "";
-                parts.forEach(function (chunk) {
-                  var line = chunk.split("\n").filter(function (l) { return l.indexOf("data:") === 0; }).map(function (l) { return l.slice(5).trim(); }).join("");
-                  if (!line) return;
-                  try {
-                    var ev = JSON.parse(line);
-                    if (ev.type === "done" || ev.type === "error") terminal = true;
-                    onStreamEvent(ev);
-                  } catch (e1) {}
+                var chunks = pending.split("\n\n");
+                pending = chunks.pop() || "";
+                chunks.forEach(function (block) {
+                  block.split("\n").forEach(function (line) {
+                    if (line.indexOf("data:") !== 0) return;
+                    var raw = line.slice(5).trim();
+                    if (!raw) return;
+                    try {
+                      onEvent(JSON.parse(raw));
+                    } catch (e1) {}
+                  });
                 });
-                if (!terminal) return pump();
+                return pump();
               });
             }
             return pump();
           })
           .catch(function (e) {
-            finish({ ok: false, reply: "进度订阅失败：" + e.message, error: e.message });
+            finished = true;
+            setPhase("done");
+            setBusy(false);
+            setErr("请求失败：" + (e && e.message ? e.message : e));
           });
       }
 
-      function createStreamBubble() {
-        var div = document.createElement("div");
-        div.className = "assist";
-        div.innerHTML =
-          '<div class="status-line">正在连接…</div>' +
-          '<details class="think" style="display:none" open><summary class="think-sum">思考中…</summary><div class="think-body"></div></details>' +
-          '<div class="reply"></div>' +
-          '<div class="meta" style="display:none"></div>';
-        msgs.appendChild(div);
-        msgs.scrollTop = msgs.scrollHeight;
-        return {
-          el: div,
-          status: div.querySelector(".status-line"),
-          thinkWrap: div.querySelector(".think"),
-          thinkSum: div.querySelector(".think-sum"),
-          thinkBody: div.querySelector(".think-body"),
-          reply: div.querySelector(".reply"),
-          meta: div.querySelector(".meta"),
-          thinkingText: "",
-          replyText: "",
-          replyStarted: false,
-        };
+      if (phase === "running" || phase === "done") {
+        // 进行中只展示尾部，避免超长报告反复重排卡死
+        var reportView = report;
+        if (phase === "running" && report && report.length > 3500) {
+          reportView =
+            "…（报告生成中，已 " +
+            report.length +
+            " 字，完成后显示全文）\n\n" +
+            report.slice(-2800);
+        }
+        return h(
+          "div",
+          { className: "wb-cr" },
+          h(
+            "div",
+            { className: "wb-cr-head" },
+            h("span", { className: "wb-cr-badge" }, "代码审核"),
+            h("span", { className: "wb-cr-hint" }, phase === "running" ? "进行中（勿重复点击）" : "完成"),
+          ),
+          h(
+            "div",
+            { className: "wb-cr-body" },
+            h("p", { className: "wb-cr-sum" }, "路径：" + workspace),
+            log ? h("pre", { className: "wb-cr-progress" }, log) : null,
+            reportView
+              ? h("pre", { className: "wb-cr-progress", style: { maxHeight: phase === "done" ? "420px" : "220px" } }, reportView)
+              : phase === "running"
+                ? h("p", { className: "wb-cr-sum" }, "正在审查源码，请稍候…")
+                : null,
+            err ? h("p", { className: "wb-cr-err" }, err) : null,
+            phase === "done"
+              ? h(
+                  "div",
+                  { className: "wb-cr-actions" },
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "wb-cr-btn",
+                      onClick: function () {
+                        setPhase("dir");
+                        setErr("");
+                        setLog("");
+                        setReport("");
+                      },
+                    },
+                    "重新选择",
+                  ),
+                )
+              : null,
+          ),
+        );
       }
 
-      function send(pre) {
-        var text = String(pre || input.value || "").trim();
-        if (!text) return;
-        input.value = "";
-        if (!cur) newConv();
-        var isOpt = text.indexOf("【写码需求选项已确认】") === 0;
-        var isCodeDevFlow = isOpt || /写码|改界面|改代码|报表中心|消息中心|开发|菜单|页面|接口|工时/.test(text);
-        touchCodeDevBrief(text, isCodeDevFlow);
-        var payload = { message: text };
-        if (cur && cur.codeDevBrief && isCodeDevFlow) payload.code_dev_brief = cur.codeDevBrief;
-        renderMsg("user", text, null, null, null, true);
-        sendBtn.disabled = true;
-        var bubble = createStreamBubble();
+      if (phase === "files") {
+        var sampleSet = {};
+        sample.forEach(function (p) {
+          sampleSet[p] = true;
+        });
+        return h(
+          "div",
+          { className: "wb-cr" },
+          h(
+            "div",
+            { className: "wb-cr-head" },
+            h("span", { className: "wb-cr-badge" }, "代码审核"),
+            h("span", { className: "wb-cr-hint" }, "勾选文件"),
+          ),
+          h(
+            "div",
+            { className: "wb-cr-body" },
+            h(
+              "p",
+              { className: "wb-cr-sum" },
+              workspace + " · 共 " + count + " 个可审，展示 " + files.length,
+            ),
+            h(
+              "div",
+              { className: "wb-cr-actions", style: { marginTop: 0 } },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  onClick: function () {
+                    var next = {};
+                    sample.forEach(function (p) {
+                      next[p] = true;
+                    });
+                    setSelected(next);
+                  },
+                },
+                "勾选默认抽样",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  onClick: function () {
+                    var next = {};
+                    files.forEach(function (p) {
+                      next[p] = true;
+                    });
+                    setSelected(next);
+                  },
+                },
+                "全选当前列表",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  onClick: function () {
+                    setSelected({});
+                  },
+                },
+                "清空",
+              ),
+            ),
+            h(
+              "div",
+              { className: "wb-cr-files" },
+              files.length
+                ? files.map(function (rel) {
+                    return h(
+                      "label",
+                      { key: rel, className: "wb-cr-file" },
+                      h("input", {
+                        type: "checkbox",
+                        checked: !!selected[rel],
+                        onChange: function () {
+                          toggle(rel);
+                        },
+                      }),
+                      h("span", null, rel + (sampleSet[rel] ? " · 抽样" : "")),
+                    );
+                  })
+                : h("p", { className: "wb-cr-sum" }, "没有可审文件，可用默认抽样开审。"),
+            ),
+            err ? h("p", { className: "wb-cr-err" }, err) : null,
+            h(
+              "div",
+              { className: "wb-cr-actions" },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  disabled: busy,
+                  onClick: function () {
+                    setPhase("dir");
+                    setErr("");
+                  },
+                },
+                "返回改目录",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn primary",
+                  disabled: busy,
+                  onClick: function () {
+                    var sel = selectedList();
+                    if (!sel.length) {
+                      setErr("请至少勾选一个文件，或点「不选文件·默认抽样」");
+                      return;
+                    }
+                    runReview(sel);
+                  },
+                },
+                "开始审核所选",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn primary",
+                  disabled: busy,
+                  onClick: function () {
+                    runReview(null);
+                  },
+                },
+                "不选文件·默认抽样",
+              ),
+            ),
+          ),
+        );
+      }
 
-        fetch(engineBase() + "/api/chat/stream", {
+      // phase === dir
+      return h(
+        "div",
+        { className: "wb-cr" },
+        h(
+          "div",
+          { className: "wb-cr-head" },
+          h("span", { className: "wb-cr-badge" }, "代码审核"),
+          h("span", { className: "wb-cr-hint" }, "选择目录 · 下一步勾选文件"),
+        ),
+        h(
+          "div",
+          { className: "wb-cr-body" },
+          h("p", { className: "wb-cr-sum" }, "在主聊天工具卡里选目录与文件（不是答题壳、也不是浮层面板）。"),
+          h(WorkspaceMismatchHint, {
+            dshCwd: dshCwd,
+            workspace: workspace,
+            home: props.home,
+            onUseDsh: function () {
+              setWorkspace(dshCwd);
+            },
+          }),
+          h("label", { className: "wb-cr-label" }, "本机工程目录"),
+          h(
+            "div",
+            { className: "wb-cr-row" },
+            h("input", {
+              className: "wb-cr-input",
+              value: workspace,
+              placeholder: "/Users/你/项目",
+              onChange: function (e) {
+                setWorkspace(e.target.value);
+              },
+            }),
+            h(
+              "button",
+              { type: "button", className: "wb-cr-btn", disabled: busy, onClick: browse },
+              busy ? "选择中…" : "浏览…",
+            ),
+          ),
+          suggestions.length
+            ? h(
+                "div",
+                { className: "wb-cr-chips" },
+                suggestions.map(function (s, i) {
+                  var p = typeof s === "string" ? s : (s && s.path) || "";
+                  var lab = typeof s === "object" && s.label ? s.label + " · " : "";
+                  if (!p) return null;
+                  return h(
+                    "button",
+                    {
+                      key: i + p,
+                      type: "button",
+                      className: "wb-cr-chip",
+                      title: p,
+                      onClick: function () {
+                        setWorkspace(p);
+                      },
+                    },
+                    lab + p,
+                  );
+                }),
+              )
+            : null,
+          h("label", { className: "wb-cr-label" }, "范围（可选，相对子路径）"),
+          h("input", {
+            className: "wb-cr-input",
+            style: { width: "100%", marginBottom: 10, boxSizing: "border-box" },
+            value: scope,
+            placeholder: "如 frontend/src",
+            onChange: function (e) {
+              setScope(e.target.value);
+            },
+          }),
+          h("label", { className: "wb-cr-label" }, "审查重点（可选）"),
+          h("input", {
+            className: "wb-cr-input",
+            style: { width: "100%", marginBottom: 10, boxSizing: "border-box" },
+            value: focus,
+            placeholder: "如 SQL 注入、权限校验",
+            onChange: function (e) {
+              setFocus(e.target.value);
+            },
+          }),
+          err ? h("p", { className: "wb-cr-err" }, err) : null,
+          h(
+            "div",
+            { className: "wb-cr-actions" },
+            h(
+              "button",
+              {
+                type: "button",
+                className: "wb-cr-btn primary",
+                disabled: busy,
+                onClick: goList,
+              },
+              busy ? "列出文件…" : "下一步：选文件",
+            ),
+          ),
+        ),
+      );
+    }
+
+    function CodeCommitBeginCard(props) {
+      ensureCss();
+      var block = props.block;
+      var wb = useMemo(function () {
+        return readMeta(block);
+      }, [block]);
+      var ui = (wb && wb.ui) || {};
+      var dshCwd = resolveDshCwd(props);
+
+      var _phase = useState("dir"); // dir | files | gating | blocked | confirm | done
+      var phase = _phase[0];
+      var setPhase = _phase[1];
+      var _ws = useState(initialWorkspace(props, ui));
+      var workspace = _ws[0];
+      var setWorkspace = _ws[1];
+      var _branch = useState(String(ui.work_branch || ""));
+      var branch = _branch[0];
+      var setBranch = _branch[1];
+      var _branchHint = useState(String(ui.branch_hint || ""));
+      var branchHint = _branchHint[0];
+      var setBranchHint = _branchHint[1];
+      var _err = useState("");
+      var err = _err[0];
+      var setErr = _err[1];
+      var _busy = useState(false);
+      var busy = _busy[0];
+      var setBusy = _busy[1];
+      var _files = useState([]);
+      var files = _files[0];
+      var setFiles = _files[1];
+      var _selected = useState({});
+      var selected = _selected[0];
+      var setSelected = _selected[1];
+      var _draft = useState("");
+      var draft = _draft[0];
+      var setDraft = _draft[1];
+      var _push = useState(ui.default_push !== false);
+      var push = _push[0];
+      var setPush = _push[1];
+      var _jobId = useState("");
+      var jobId = _jobId[0];
+      var setJobId = _jobId[1];
+      var _findings = useState([]);
+      var findings = _findings[0];
+      var setFindings = _findings[1];
+      var _summary = useState("");
+      var summary = _summary[0];
+      var setSummary = _summary[1];
+      var _result = useState("");
+      var result = _result[0];
+      var setResult = _result[1];
+
+      var suggestions = Array.isArray(ui.suggestions) ? ui.suggestions : [];
+
+      // 目录预填（DSH 工作区 / 上次路径）时自动识别当前分支；须在任何 early return 之前挂 effect。
+      useEffect(
+        function () {
+          var ws = String(workspace || "").trim();
+          if (dshCwd && !ws) {
+            setWorkspace(dshCwd);
+            ws = dshCwd;
+          }
+          if (!ws) return;
+          setBranchHint("正在识别分支…");
+          fetch(engineBase() + "/api/code-commit/check", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ workspace: ws }),
+          })
+            .then(function (r) {
+              return r.json();
+            })
+            .then(function (d) {
+              if (!d || !d.ok) {
+                setBranch("");
+                setBranchHint((d && (d.detail || d.reply)) || "路径不可用");
+                return;
+              }
+              setBranch(String(d.work_branch || ""));
+              setBranchHint(String(d.branch_hint || (d.need_user_branch ? "请填写要提交的分支" : "") || ""));
+            })
+            .catch(function () {
+              setBranchHint("分支识别失败，请手动填写");
+            });
+        },
+        [dshCwd],
+      );
+
+      if (!wb || (wb.t !== "cc-pick" && String(wb.t || "").indexOf("cc-") !== 0)) {
+        // 非 pick 元数据：仍尝试用 ui.kind===pick；否则展示正文
+        if (!(ui && ui.kind === "pick")) {
+          var out =
+            block && "kind" in block
+              ? (block.content || [])
+                  .map(function (c) {
+                    return c && c.type === "text" ? c.text : "";
+                  })
+                  .filter(Boolean)
+                  .join("\n")
+              : "提交进行中…";
+          return h(
+            "div",
+            { className: "wb-cr" },
+            h(
+              "div",
+              { className: "wb-cr-head" },
+              h("span", { className: "wb-cr-badge" }, "提交代码"),
+              h("span", { className: "wb-cr-hint" }, "结果"),
+            ),
+            h("div", { className: "wb-cr-body" }, h("pre", { className: "wb-cr-progress", style: { margin: 0 } }, out || "（无详情）")),
+          );
+        }
+      }
+
+      function refreshBranch(path) {
+        var workspacePath = String(path || workspace || "").trim();
+        if (!workspacePath) {
+          setBranch("");
+          setBranchHint("请先选择工程目录");
+          return;
+        }
+        setBranchHint("正在识别分支…");
+        fetch(engineBase() + "/api/code-commit/check", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-          body: JSON.stringify(payload),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace: workspacePath }),
         })
           .then(function (r) {
-            if (!r.ok) throw new Error("HTTP " + r.status);
-            if (!r.body || !r.body.getReader) throw new Error("浏览器不支持流式读取");
+            return r.json();
+          })
+          .then(function (d) {
+            if (!d || !d.ok) {
+              setBranch("");
+              setBranchHint((d && (d.detail || d.reply)) || "路径不可用");
+              return;
+            }
+            setBranch(String(d.work_branch || ""));
+            setBranchHint(String(d.branch_hint || (d.need_user_branch ? "请填写要提交的分支" : "") || ""));
+          })
+          .catch(function () {
+            setBranchHint("分支识别失败，请手动填写");
+          });
+      }
+
+      function browse() {
+        setBusy(true);
+        setErr("请在弹出的系统对话框中选择目录（若看不到，请看 Dock / 其它窗口后面）");
+        var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+        var timer = setTimeout(function () {
+          try {
+            if (ctrl) ctrl.abort();
+          } catch (e0) {}
+        }, 120000);
+        fetch(engineBase() + "/api/pick-folder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: "选择要提交的 Git 工程目录" }),
+          signal: ctrl ? ctrl.signal : undefined,
+        })
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (d) {
+            if (d && d.ok && d.path) {
+              setWorkspace(d.path);
+              setErr("");
+              refreshBranch(d.path);
+            } else if (d && d.error && d.error !== "已取消选择") {
+              setErr(d.error || "选文件夹失败");
+            } else {
+              setErr("");
+            }
+          })
+          .catch(function (e) {
+            setErr(
+              e && e.name === "AbortError"
+                ? "选择超时：请点常用路径或手动粘贴目录"
+                : "浏览失败：" + (e && e.message ? e.message : e),
+            );
+          })
+          .finally(function () {
+            clearTimeout(timer);
+            setBusy(false);
+          });
+      }
+
+      function runPrepare(local_path, work_branch) {
+        setBusy(true);
+        setErr("正在列出待提交文件…");
+        fetch(engineBase() + "/api/code-commit/prepare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace: local_path, work_branch: work_branch }),
+        })
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (d) {
+            if (!d || !d.ok) {
+              setErr((d && (d.detail || d.reply)) || "列文件失败");
+              setBusy(false);
+              return;
+            }
+            var list = Array.isArray(d.pending_files)
+              ? d.pending_files
+              : Array.isArray(d.files)
+                ? d.files
+                : [];
+            var paths = list
+              .map(function (p) {
+                return typeof p === "string" ? p : (p && p.path) || "";
+              })
+              .filter(Boolean);
+            if (!paths.length) {
+              setErr((d && d.reply) || "没有待提交的业务文件（工作区可能干净）");
+              setBusy(false);
+              return;
+            }
+            var sel = {};
+            paths.forEach(function (p) {
+              sel[p] = true;
+            });
+            setFiles(paths.slice(0, 120));
+            setSelected(sel);
+            setDraft(String(d.draft_message || ""));
+            if (d.work_branch) setBranch(String(d.work_branch));
+            setPhase("files");
+            setErr("");
+            setBusy(false);
+          })
+          .catch(function (e) {
+            setErr("列文件失败：" + (e && e.message ? e.message : e));
+            setBusy(false);
+          });
+      }
+
+      function goPrepare() {
+        var local_path = String(workspace || "").trim();
+        var work_branch = String(branch || "").trim();
+        if (!local_path) {
+          setErr("请填写或浏览选择本机 Git 工程目录");
+          return;
+        }
+        if (work_branch) {
+          runPrepare(local_path, work_branch);
+          return;
+        }
+        // 分支空时先按工程当前分支识别，再进入选文件（避免目录已填却卡在手填）
+        setBusy(true);
+        setErr("正在识别分支…");
+        fetch(engineBase() + "/api/code-commit/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace: local_path }),
+        })
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (d) {
+            if (!d || !d.ok) {
+              setErr((d && (d.detail || d.reply)) || "路径不可用");
+              setBusy(false);
+              return;
+            }
+            var wb = String(d.work_branch || "").trim();
+            setBranch(wb);
+            setBranchHint(String(d.branch_hint || (d.need_user_branch ? "请填写要提交的分支" : "") || ""));
+            if (!wb) {
+              setErr(d.branch_hint || "请填写要提交的分支");
+              setBusy(false);
+              return;
+            }
+            runPrepare(local_path, wb);
+          })
+          .catch(function (e) {
+            setErr("分支识别失败：" + (e && e.message ? e.message : e));
+            setBusy(false);
+          });
+      }
+
+      function selectedList() {
+        return Object.keys(selected).filter(function (k) {
+          return selected[k];
+        });
+      }
+
+      function toggle(rel) {
+        setSelected(function (prev) {
+          var next = Object.assign({}, prev);
+          if (next[rel]) delete next[rel];
+          else next[rel] = true;
+          return next;
+        });
+      }
+
+      function runGate(fileList) {
+        var local_path = String(workspace || "").trim();
+        var work_branch = String(branch || "").trim();
+        setPhase("gating");
+        setBusy(true);
+        setErr("");
+        setSummary("门禁审核中…");
+        setFindings([]);
+        fetch(engineBase() + "/api/code-commit/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            workspace: local_path,
+            work_branch: work_branch,
+            files: fileList && fileList.length ? fileList : null,
+          }),
+        })
+          .then(function (r) {
+            return r.json().then(function (d) {
+              return { status: r.status, d: d };
+            });
+          })
+          .then(function (pack) {
+            var d = pack.d || {};
+            if (!d.ok && !d.job_id) {
+              setPhase("dir");
+              setBusy(false);
+              setErr(d.detail || d.reply || "门禁失败");
+              if (d.need_user_branch) setBranchHint(d.branch_hint || d.detail || "请填写分支");
+              return;
+            }
+            setJobId(String(d.job_id || ""));
+            setFindings(Array.isArray(d.findings) ? d.findings : []);
+            if (d.work_branch) setBranch(String(d.work_branch));
+            if (!d.can_commit) {
+              setPhase("blocked");
+              setBusy(false);
+              setSummary(
+                d.summary ||
+                  d.reply ||
+                  "门禁未通过，禁止提交（阻断 " + (d.blocking_count || 0) + "）",
+              );
+              return;
+            }
+            var cui = d.code_commit_ui || {};
+            setDraft(String(cui.message || d.draft_message || draft || ""));
+            setPush(cui.push !== false && d.default_push !== false);
+            setPhase("confirm");
+            setBusy(false);
+            setSummary(d.summary || "门禁通过，请确认提交说明后推送");
+            setErr("");
+          })
+          .catch(function (e) {
+            setPhase("dir");
+            setBusy(false);
+            setErr("门禁请求失败：" + (e && e.message ? e.message : e));
+          });
+      }
+
+      function doConfirm(doPush) {
+        var jid = String(jobId || "").trim();
+        var message = String(draft || "").trim();
+        if (!jid) {
+          setErr("缺少 job_id");
+          return;
+        }
+        if (!message) {
+          setErr("请填写中文提交说明");
+          return;
+        }
+        setBusy(true);
+        setErr("");
+        issueHitl("code-commit.confirm", { job_id: jid })
+          .then(function (nonce) {
+            return fetch(engineBase() + "/api/code-commit/confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                job_id: jid,
+                message: message,
+                push: !!doPush,
+                decision: "approve",
+                nonce: nonce,
+              }),
+            });
+          })
+          .then(function (r) {
+            return r.json().then(function (d) {
+              return { status: r.status, d: d };
+            });
+          })
+          .then(function (pack) {
+            var d = pack.d || {};
+            setBusy(false);
+            setPhase("done");
+            if (d.ok) {
+              setResult(d.reply || "提交成功" + (doPush ? "并已推送" : "（仅本地）"));
+              setErr("");
+            } else if (d.push_retry_needed) {
+              setResult(d.reply || "本地已 commit，推送失败，可稍后重试推送");
+              setErr(d.detail || d.reply || "push 失败");
+            } else {
+              setResult("");
+              setErr(d.detail || d.reply || "确认失败");
+            }
+          })
+          .catch(function (e) {
+            setBusy(false);
+            setPhase("done");
+            setErr("确认请求失败：" + (e && e.message ? e.message : e));
+          });
+      }
+
+      function head(hint) {
+        return h(
+          "div",
+          { className: "wb-cr-head" },
+          h("span", { className: "wb-cr-badge" }, "提交代码"),
+          h("span", { className: "wb-cr-hint" }, hint),
+        );
+      }
+
+      if (phase === "gating") {
+        return h(
+          "div",
+          { className: "wb-cr" },
+          head("门禁中"),
+          h("div", { className: "wb-cr-body" }, h("p", { className: "wb-cr-sum" }, summary || "门禁审核中，请稍候…")),
+        );
+      }
+
+      if (phase === "done") {
+        return h(
+          "div",
+          { className: "wb-cr" },
+          head("完成"),
+          h(
+            "div",
+            { className: "wb-cr-body" },
+            result ? h("pre", { className: "wb-cr-progress" }, result) : null,
+            err ? h("p", { className: "wb-cr-err" }, err) : null,
+            h(
+              "div",
+              { className: "wb-cr-actions" },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  onClick: function () {
+                    setPhase("dir");
+                    setErr("");
+                    setResult("");
+                    setSummary("");
+                    setFindings([]);
+                  },
+                },
+                "重新选择",
+              ),
+            ),
+          ),
+        );
+      }
+
+      if (phase === "blocked") {
+        return h(
+          "div",
+          { className: "wb-cr" },
+          head("门禁阻断"),
+          h(
+            "div",
+            { className: "wb-cr-body" },
+            h("p", { className: "wb-cr-sum" }, summary),
+            h(
+              "div",
+              { className: "wb-cr-files" },
+              findings.length
+                ? findings.slice(0, 20).map(function (f, i) {
+                    return h(
+                      "div",
+                      { key: i, style: { margin: "6px 0" } },
+                      h("b", null, "[" + (f.severity || "?") + "] "),
+                      (f.path || f.file || "") + " — " + (f.message || f.title || ""),
+                    );
+                  })
+                : h("p", { className: "wb-cr-sum" }, "无 findings 详情"),
+            ),
+            h(
+              "div",
+              { className: "wb-cr-actions" },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  onClick: function () {
+                    setPhase("files");
+                  },
+                },
+                "返回改文件",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  onClick: function () {
+                    setPhase("dir");
+                  },
+                },
+                "改目录",
+              ),
+            ),
+          ),
+        );
+      }
+
+      if (phase === "confirm") {
+        return h(
+          "div",
+          { className: "wb-cr" },
+          head("确认提交并推送"),
+          h(
+            "div",
+            { className: "wb-cr-body" },
+            h("p", { className: "wb-cr-sum" }, summary || ("job：" + jobId)),
+            h("p", { className: "wb-cr-sum" }, "分支：" + branch + " · 目录：" + workspace),
+            h("label", { className: "wb-cr-label" }, "中文提交说明"),
+            h("textarea", {
+              className: "wb-cr-input",
+              style: { width: "100%", minHeight: 72, boxSizing: "border-box", fontFamily: "inherit" },
+              value: draft,
+              onChange: function (e) {
+                setDraft(e.target.value);
+              },
+            }),
+            h(
+              "label",
+              { className: "wb-cr-file", style: { marginTop: 8 } },
+              h("input", {
+                type: "checkbox",
+                checked: !!push,
+                onChange: function () {
+                  setPush(!push);
+                },
+              }),
+              h("span", null, "同时推送到远程（push）"),
+            ),
+            err ? h("p", { className: "wb-cr-err" }, err) : null,
+            h(
+              "div",
+              { className: "wb-cr-actions" },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn primary",
+                  disabled: busy,
+                  onClick: function () {
+                    doConfirm(!!push);
+                  },
+                },
+                busy ? "提交中…" : push ? "确认提交并推送" : "确认仅本地提交",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  disabled: busy,
+                  onClick: function () {
+                    doConfirm(false);
+                  },
+                },
+                "仅本地提交",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  disabled: busy,
+                  onClick: function () {
+                    setPhase("done");
+                    setResult("已取消，未执行 git commit。");
+                  },
+                },
+                "取消",
+              ),
+            ),
+          ),
+        );
+      }
+
+      if (phase === "files") {
+        return h(
+          "div",
+          { className: "wb-cr" },
+          head("勾选待提交文件"),
+          h(
+            "div",
+            { className: "wb-cr-body" },
+            h("p", { className: "wb-cr-sum" }, workspace + " · " + branch + " · " + files.length + " 个待提交"),
+            h(
+              "div",
+              { className: "wb-cr-actions", style: { marginTop: 0 } },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  onClick: function () {
+                    var next = {};
+                    files.forEach(function (p) {
+                      next[p] = true;
+                    });
+                    setSelected(next);
+                  },
+                },
+                "全选",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  onClick: function () {
+                    setSelected({});
+                  },
+                },
+                "清空",
+              ),
+            ),
+            h(
+              "div",
+              { className: "wb-cr-files" },
+              files.map(function (rel) {
+                return h(
+                  "label",
+                  { key: rel, className: "wb-cr-file" },
+                  h("input", {
+                    type: "checkbox",
+                    checked: !!selected[rel],
+                    onChange: function () {
+                      toggle(rel);
+                    },
+                  }),
+                  h("span", null, rel),
+                );
+              }),
+            ),
+            err ? h("p", { className: "wb-cr-err" }, err) : null,
+            h(
+              "div",
+              { className: "wb-cr-actions" },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  disabled: busy,
+                  onClick: function () {
+                    setPhase("dir");
+                    setErr("");
+                  },
+                },
+                "返回改目录",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn primary",
+                  disabled: busy,
+                  onClick: function () {
+                    var sel = selectedList();
+                    if (!sel.length) {
+                      setErr("请至少勾选一个文件");
+                      return;
+                    }
+                    runGate(sel);
+                  },
+                },
+                "开始门禁审核",
+              ),
+            ),
+          ),
+        );
+      }
+
+      // dir
+      return h(
+        "div",
+        { className: "wb-cr" },
+        head("选择目录 · 下一步勾选文件"),
+        h(
+          "div",
+          { className: "wb-cr-body" },
+          h("p", { className: "wb-cr-sum" }, "主聊天工具卡：选目录 → 勾选文件 → 门禁 → 确认后才 commit/push。"),
+          h(WorkspaceMismatchHint, {
+            dshCwd: dshCwd,
+            workspace: workspace,
+            home: props.home,
+            onUseDsh: function () {
+              setWorkspace(dshCwd);
+            },
+          }),
+          h("label", { className: "wb-cr-label" }, "本机 Git 工程目录"),
+          h(
+            "div",
+            { className: "wb-cr-row" },
+            h("input", {
+              className: "wb-cr-input",
+              value: workspace,
+              placeholder: "/Users/你/项目",
+              onChange: function (e) {
+                setWorkspace(e.target.value);
+              },
+              onBlur: function () {
+                refreshBranch();
+              },
+            }),
+            h(
+              "button",
+              { type: "button", className: "wb-cr-btn", disabled: busy, onClick: browse },
+              busy ? "选择中…" : "浏览…",
+            ),
+          ),
+          suggestions.length
+            ? h(
+                "div",
+                { className: "wb-cr-chips" },
+                suggestions.map(function (s, i) {
+                  var p = typeof s === "string" ? s : (s && s.path) || "";
+                  var lab = typeof s === "object" && s.label ? s.label + " · " : "";
+                  if (!p) return null;
+                  return h(
+                    "button",
+                    {
+                      key: i + p,
+                      type: "button",
+                      className: "wb-cr-chip",
+                      title: p,
+                      onClick: function () {
+                        setWorkspace(p);
+                        refreshBranch(p);
+                      },
+                    },
+                    lab + p,
+                  );
+                }),
+              )
+            : null,
+          h("label", { className: "wb-cr-label" }, "提交分支"),
+          h("input", {
+            className: "wb-cr-input",
+            style: { width: "100%", marginBottom: 4, boxSizing: "border-box" },
+            value: branch,
+            placeholder: "如 feature/xxx",
+            onChange: function (e) {
+              setBranch(e.target.value);
+            },
+          }),
+          h("p", { className: "wb-cr-sum" }, branchHint || "选目录后自动识别当前分支"),
+          err ? h("p", { className: "wb-cr-err" }, err) : null,
+          h(
+            "div",
+            { className: "wb-cr-actions" },
+            h(
+              "button",
+              {
+                type: "button",
+                className: "wb-cr-btn primary",
+                disabled: busy,
+                onClick: goPrepare,
+              },
+              busy ? "列出文件…" : "下一步：选文件",
+            ),
+          ),
+        ),
+      );
+    }
+
+
+    var CD_PIPELINE = [
+      { id: "boot", title: "任务已排队" },
+      { id: "sandbox-prep", title: "沙箱就绪" },
+      { id: "dev", title: "Cursor 改码" },
+      { id: "sync", title: "同步到本机" },
+    ];
+    var CD_STEP_MAP = { "agent-loop": "dev", "cursor-local": "dev" };
+
+    function cdInitSteps() {
+      return CD_PIPELINE.map(function (p) {
+        return {
+          id: p.id,
+          title: p.title,
+          state: p.id === "boot" ? "done" : "pending",
+        };
+      });
+    }
+
+    function cdPipelineIndex(id) {
+      for (var i = 0; i < CD_PIPELINE.length; i++) {
+        if (CD_PIPELINE[i].id === id) return i;
+      }
+      return CD_PIPELINE.length + 99;
+    }
+
+    function cdNormalizeStepId(id) {
+      return CD_STEP_MAP[id] || id;
+    }
+
+    function cdMarkPriorDone(list, id) {
+      var pIdx = cdPipelineIndex(id);
+      return list.map(function (s) {
+        if (cdPipelineIndex(s.id) < pIdx && s.state !== "done" && s.state !== "error") {
+          return Object.assign({}, s, { state: "done" });
+        }
+        return s;
+      });
+    }
+
+    function cdSealSteps(steps, asError) {
+      return (steps || [])
+        .filter(function (s) {
+          return s.id !== "status" && s.id !== "cursor-heartbeat";
+        })
+        .map(function (s) {
+          if (asError) {
+            if (s.state === "running" || s.state === "waiting") {
+              return Object.assign({}, s, { state: "error" });
+            }
+            return s;
+          }
+          if (s.state !== "error") return Object.assign({}, s, { state: "done" });
+          return s;
+        });
+    }
+
+    function cdApplyStep(steps, event) {
+      var rawId = event && event.id;
+      if (!rawId || rawId === "status" || rawId === "cursor-heartbeat") return steps;
+      var id = cdNormalizeStepId(rawId);
+      var title = String(event.title || "").trim();
+      var nextState = event.state || "running";
+      var list = steps && steps.length ? steps.slice() : cdInitSteps();
+      var idx = -1;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx < 0) return list;
+      var cur = list[idx];
+      var merged = Object.assign({}, cur, { state: nextState });
+      if (title) merged.title = title;
+      if (id === "dev") {
+        if (rawId === "cursor-local" && nextState === "done") merged.state = "running";
+        else if (rawId === "agent-loop" && nextState === "done") merged.state = "done";
+        else if (nextState === "running") merged.state = "running";
+      }
+      list[idx] = merged;
+      if (
+        nextState === "running" ||
+        (id === "dev" && rawId === "agent-loop" && nextState === "done") ||
+        nextState === "done"
+      ) {
+        list = cdMarkPriorDone(list, id);
+      }
+      if (id === "sync" && nextState === "running") {
+        list = list.map(function (s) {
+          return s.id === "dev" && s.state === "running"
+            ? Object.assign({}, s, { state: "done" })
+            : s;
+        });
+      }
+      return list;
+    }
+
+    function cdPlanSummary(steps) {
+      var list = (steps || []).filter(function (s) {
+        return s.state !== "pending";
+      });
+      if (!list.length) return "准备中…";
+      var total = list.length;
+      var done = list.filter(function (s) {
+        return s.state === "done";
+      }).length;
+      if (
+        list.some(function (s) {
+          return s.state === "running";
+        })
+      ) {
+        return "正在进行 " + done + "/" + total;
+      }
+      var err = list.filter(function (s) {
+        return s.state === "error";
+      }).length;
+      if (err) return "完成 " + done + "/" + total + "（" + err + " 步失败）";
+      if (done === total) return "已全部完成（" + total + " 步）";
+      return "共 " + total + " 步";
+    }
+
+    function cdFormatDuration(sec) {
+      sec = Math.max(0, Number(sec) || 0);
+      var m = Math.floor(sec / 60);
+      var s = sec % 60;
+      return m > 0 ? m + "分" + s + "秒" : s + "秒";
+    }
+
+    function CdPlanView(planProps) {
+      var steps = planProps.steps || [];
+      var duration = planProps.duration || "";
+      var visible = steps.filter(function (s) {
+        return s.state !== "pending";
+      });
+      var list = visible.length
+        ? visible
+        : [{ id: "boot", title: "任务已排队", state: "running" }];
+      var summary = planProps.summary || cdPlanSummary(list);
+      return h(
+        "div",
+        { className: "wb-cd-plan" },
+        h(
+          "div",
+          { className: "wb-cd-plan-head" },
+          h("span", { className: "wb-cr-badge" }, "本轮进度"),
+          h("span", { className: "sum" }, summary),
+          duration ? h("span", { className: "dur" }, duration) : null,
+        ),
+        h(
+          "ol",
+          { className: "wb-cd-ol" },
+          list.map(function (s, i) {
+            var st = s.state || "pending";
+            var icon =
+              st === "running"
+                ? h("span", { className: "wb-cd-pulse" })
+                : st === "done"
+                  ? "✓"
+                  : st === "error"
+                    ? "!"
+                    : String(i + 1);
+            var hint =
+              st === "running"
+                ? "进行中"
+                : st === "done"
+                  ? "已完成"
+                  : st === "error"
+                    ? "失败"
+                    : "等待中";
+            return h(
+              "li",
+              { key: s.id, className: "wb-cd-li is-" + st },
+              h("span", { className: "wb-cd-ico" }, icon),
+              h(
+                "div",
+                null,
+                h("span", { className: "wb-cd-title" }, s.title || s.id),
+                h("span", { className: "wb-cd-state" }, hint),
+              ),
+            );
+          }),
+        ),
+      );
+    }
+
+    function CodeDevBeginCard(props) {
+      ensureCss();
+      var block = props.block;
+      var wb = useMemo(function () {
+        return readMeta(block);
+      }, [block]);
+      var ui = (wb && wb.ui) || {};
+      var dshCwd = resolveDshCwd(props);
+
+      // 对齐原 WorkBuddy：form(原始诉求) → options → propose → confirm 开工
+      var _phase = useState("form"); // form | options | propose | running | done
+      var phase = _phase[0];
+      var setPhase = _phase[1];
+      var _ws = useState(initialWorkspace(props, ui));
+      var workspace = _ws[0];
+      var setWorkspace = _ws[1];
+      var _req = useState(initialRequirement(props, ui));
+      var requirement = _req[0];
+      var setRequirement = _req[1];
+      var _goal = useState(initialRequirement(props, ui));
+      var goal = _goal[0];
+      var setGoal = _goal[1];
+      var _brief = useState(ui.brief || null);
+      var brief = _brief[0];
+      var setBrief = _brief[1];
+      var _optionsUi = useState(null);
+      var optionsUi = _optionsUi[0];
+      var setOptionsUi = _optionsUi[1];
+      var _proposeUi = useState(null);
+      var proposeUi = _proposeUi[0];
+      var setProposeUi = _proposeUi[1];
+      var _sel = useState({});
+      var selectedOpts = _sel[0];
+      var setSelectedOpts = _sel[1];
+      var _notes = useState("");
+      var notes = _notes[0];
+      var setNotes = _notes[1];
+      var _ack = useState(false);
+      var ackWarn = _ack[0];
+      var setAckWarn = _ack[1];
+      var _err = useState("");
+      var err = _err[0];
+      var setErr = _err[1];
+      var _busy = useState(false);
+      var busy = _busy[0];
+      var setBusy = _busy[1];
+      var _jobId = useState("");
+      var jobId = _jobId[0];
+      var setJobId = _jobId[1];
+      var _log = useState("");
+      var log = _log[0];
+      var setLog = _log[1];
+      var _result = useState("");
+      var result = _result[0];
+      var setResult = _result[1];
+      var _synced = useState([]);
+      var synced = _synced[0];
+      var setSynced = _synced[1];
+      var _deferred = useState([]);
+      var deferred = _deferred[0];
+      var setDeferred = _deferred[1];
+      var _steps = useState(cdInitSteps());
+      var steps = _steps[0];
+      var setSteps = _steps[1];
+      var _stream = useState("");
+      var streamText = _stream[0];
+      var setStreamText = _stream[1];
+      var _elapsed = useState(0);
+      var elapsed = _elapsed[0];
+      var setElapsed = _elapsed[1];
+      var _alive = useState("准备启动…");
+      var aliveHint = _alive[0];
+      var setAliveHint = _alive[1];
+
+      var suggestions = Array.isArray(ui.suggestions) ? ui.suggestions : [];
+
+      useEffect(
+        function () {
+          if (dshCwd && !String(workspace || "").trim()) setWorkspace(dshCwd);
+        },
+        [dshCwd],
+      );
+
+      if (!wb || (wb.t !== "cd-pick" && !(ui && ui.kind === "pick"))) {
+        if (!(ui && (ui.kind === "pick" || ui.kind === "propose" || ui.kind === "options"))) {
+          var out =
+            block && "kind" in block
+              ? (block.content || [])
+                  .map(function (c) {
+                    return c && c.type === "text" ? c.text : "";
+                  })
+                  .filter(Boolean)
+                  .join("\n")
+              : "写码进行中…";
+          return h(
+            "div",
+            { className: "wb-cr" },
+            h(
+              "div",
+              { className: "wb-cr-head" },
+              h("span", { className: "wb-cr-badge" }, "本机写码"),
+              h("span", { className: "wb-cr-hint" }, "结果"),
+            ),
+            h("div", { className: "wb-cr-body" }, h("pre", { className: "wb-cr-progress", style: { margin: 0 } }, out || "（无详情）")),
+          );
+        }
+      }
+
+      function head(hint) {
+        return h(
+          "div",
+          { className: "wb-cr-head" },
+          h("span", { className: "wb-cr-badge" }, "本机写码"),
+          h("span", { className: "wb-cr-hint" }, hint),
+        );
+      }
+
+      function browse() {
+        setBusy(true);
+        setErr("请在弹出的系统对话框中选择目录（若看不到，请看 Dock / 其它窗口后面）");
+        var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+        var timer = setTimeout(function () {
+          try {
+            if (ctrl) ctrl.abort();
+          } catch (e0) {}
+        }, 120000);
+        fetch(engineBase() + "/api/pick-folder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: "选择要写码的本机工程目录" }),
+          signal: ctrl ? ctrl.signal : undefined,
+        })
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (d) {
+            clearTimeout(timer);
+            setBusy(false);
+            if (d && d.ok && d.path) {
+              setWorkspace(String(d.path));
+              setErr("");
+            } else {
+              setErr((d && (d.detail || d.message)) || "未选择目录");
+            }
+          })
+          .catch(function (e) {
+            clearTimeout(timer);
+            setBusy(false);
+            setErr("选目录失败：" + (e && e.name === "AbortError" ? "超时或已取消" : e && e.message ? e.message : e));
+          });
+      }
+
+      function applyDiscussResult(d) {
+        if (d && d.code_dev_brief) setBrief(d.code_dev_brief);
+        var nextUi = (d && d.code_dev_ui) || null;
+        if (!nextUi || !nextUi.kind) {
+          setErr((d && (d.reply || d.detail)) || "未返回选项卡/确认卡，请补充诉求后再试");
+          return;
+        }
+        if (nextUi.workspace) setWorkspace(String(nextUi.workspace));
+        if (nextUi.original_goal) setGoal(String(nextUi.original_goal));
+        else if (d.code_dev_brief && d.code_dev_brief.original_goal) {
+          setGoal(String(d.code_dev_brief.original_goal));
+        }
+        if (nextUi.kind === "options") {
+          setOptionsUi(nextUi);
+          setSelectedOpts({});
+          setNotes("");
+          setPhase("options");
+          return;
+        }
+        if (nextUi.kind === "propose") {
+          var req0 =
+            nextUi.requirement ||
+            (nextUi.propose && nextUi.propose.requirement) ||
+            requirement ||
+            "";
+          setProposeUi(nextUi);
+          setRequirement(String(req0));
+          setAckWarn(false);
+          setPhase("propose");
+          return;
+        }
+        setErr("未知写码卡片：" + nextUi.kind);
+      }
+
+      function runDiscuss(messageOverride, briefOverride) {
+        var ws = String(workspace || "").trim();
+        var msg = String(messageOverride != null ? messageOverride : requirement || "").trim();
+        if (!ws) {
+          setErr("请填写或浏览选择本机工程目录");
+          return;
+        }
+        if (!msg) {
+          setErr("请先填写原始写码诉求");
+          return;
+        }
+        setBusy(true);
+        setErr("");
+        var briefPayload =
+          briefOverride ||
+          brief || {
+            original_goal: goal || msg,
+            workspace: ws,
+            selections: [],
+            notes: [],
+            option_rounds: 0,
+          };
+        if (!briefPayload.original_goal) briefPayload.original_goal = goal || msg;
+        if (!briefPayload.workspace) briefPayload.workspace = ws;
+        fetch(engineBase() + "/api/code-dev/discuss", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: msg,
+            workspace: ws,
+            code_dev_brief: briefPayload,
+          }),
+        })
+          .then(function (r) {
+            return r.json().then(function (d) {
+              return { ok: r.ok, d: d };
+            });
+          })
+          .then(function (pack) {
+            setBusy(false);
+            var d = pack.d || {};
+            if (!pack.ok && d.ok === false) {
+              setErr(d.detail || d.reply || "需求讨论失败");
+              return;
+            }
+            if (d.ok === false && !d.code_dev_ui) {
+              setErr(d.detail || d.reply || "需求讨论失败");
+              return;
+            }
+            applyDiscussResult(d);
+          })
+          .catch(function (e) {
+            setBusy(false);
+            setErr("需求讨论失败：" + (e && e.message ? e.message : e));
+          });
+      }
+
+      function submitOptions() {
+        var nextUi = optionsUi || {};
+        var opts = nextUi.options || {};
+        var groups = Array.isArray(opts.groups) ? opts.groups : [];
+        for (var i = 0; i < groups.length; i++) {
+          var g = groups[i];
+          if (g.required === false) continue;
+          if (!(selectedOpts[g.id] || []).length) {
+            setErr("请先选择：「" + (g.label || g.id) + "」");
+            return;
+          }
+        }
+        var noteText = String(notes || "").trim();
+        if (opts.notes_required && !noteText) {
+          setErr("请填写备注：业务模块、页面名称、接口路径等（必填）");
+          return;
+        }
+        var lines = ["【写码需求选项已确认】"];
+        var ws = String(workspace || "").trim();
+        if (ws) lines.push("工程路径：" + ws);
+        groups.forEach(function (g) {
+          var ids = selectedOpts[g.id] || [];
+          var labels = (g.options || [])
+            .filter(function (o) {
+              return ids.indexOf(o.id) >= 0;
+            })
+            .map(function (o) {
+              return o.label || o.id;
+            });
+          if (labels.length) lines.push((g.label || g.id) + "：" + labels.join("、"));
+        });
+        if (noteText) lines.push("备注：" + noteText);
+        runDiscuss(lines.join("\n"), brief || nextUi.brief || null);
+      }
+
+      function watchJob(jid) {
+        setPhase("running");
+        setBusy(true);
+        setSteps(cdInitSteps());
+        setStreamText("");
+        setElapsed(0);
+        setAliveHint("任务已启动，正在连接进度流…");
+        setLog("");
+        setErr("");
+        var logAcc = "";
+        var streamAcc = "";
+        var stepState = cdInitSteps();
+        var finished = false;
+        var startedAt = Date.now();
+        var lastFlush = 0;
+        var tickTimer = setInterval(function () {
+          if (finished) {
+            clearInterval(tickTimer);
+            return;
+          }
+          var sec = Math.floor((Date.now() - startedAt) / 1000);
+          setElapsed(sec);
+          setAliveHint("Cursor 仍在工作 · 已运行 " + cdFormatDuration(sec) + "（界面未卡住，请稍候）");
+        }, 1000);
+        function flushStream(force) {
+          var now = Date.now();
+          if (!force && now - lastFlush < 200) return;
+          lastFlush = now;
+          setStreamText(streamAcc);
+        }
+        function pushLog(line) {
+          if (!line) return;
+          logAcc += line + "\n";
+          setLog(logAcc);
+        }
+        function finish(ev) {
+          if (finished) return;
+          finished = true;
+          clearInterval(tickTimer);
+          flushStream(true);
+          setBusy(false);
+          setPhase("done");
+          var asError = !!(ev && (ev.ok === false || ev.error));
+          setSteps(cdSealSteps(stepState, asError));
+          setAliveHint(
+            asError
+              ? "任务结束（失败）· 共 " + cdFormatDuration(Math.floor((Date.now() - startedAt) / 1000))
+              : "任务完成 · 共 " + cdFormatDuration(Math.floor((Date.now() - startedAt) / 1000)),
+          );
+          if (ev && ev.synced_files) setSynced(ev.synced_files || []);
+          if (ev && ev.deferred_files) setDeferred(ev.deferred_files || []);
+          if (ev && ev.job) {
+            if (ev.job.synced_files) setSynced(ev.job.synced_files || []);
+            if (ev.job.deferred_files) setDeferred(ev.job.deferred_files || []);
+          }
+          var ok = !asError;
+          setResult(
+            (ev && (ev.reply || ev.error || ev.detail)) ||
+              (ok ? "写码任务已结束" : "写码失败"),
+          );
+          if (!ok) setErr((ev && (ev.error || ev.detail || ev.reply)) || "写码失败");
+          else if (ev && (ev.deferred_files || []).length) {
+            setErr(
+              "有 " +
+                ev.deferred_files.length +
+                " 个文件因写范围未同步（含路由/菜单时会导致刷新看不到新界面）：" +
+                ev.deferred_files.slice(0, 6).join("、"),
+            );
+          }
+        }
+        fetch(engineBase() + "/api/code-dev/jobs/" + encodeURIComponent(jid) + "/stream", {
+          headers: { Accept: "text/event-stream" },
+        })
+          .then(function (r) {
+            if (!r.ok || !r.body || !r.body.getReader) {
+              throw new Error("无法订阅进度流");
+            }
+            setAliveHint("已连接进度流 · Cursor 写码过程会实时刷新");
             var reader = r.body.getReader();
             var decoder = new TextDecoder();
             var pending = "";
+            function onEvent(ev) {
+              if (!ev || typeof ev !== "object") return;
+              if (ev.type === "step") {
+                stepState = cdApplyStep(stepState, ev);
+                setSteps(stepState.slice());
+                var line = ev.title || ev.detail || ev.id || "";
+                if (line) pushLog(line);
+                if (ev.state === "running" && line) {
+                  setAliveHint(line + " · 已运行 " + cdFormatDuration(Math.floor((Date.now() - startedAt) / 1000)));
+                }
+              } else if (ev.type === "status") {
+                var st = ev.text || ev.detail || "";
+                if (st) {
+                  pushLog(st);
+                  setAliveHint(st + " · 已运行 " + cdFormatDuration(Math.floor((Date.now() - startedAt) / 1000)));
+                }
+              } else if (ev.type === "token") {
+                // SSE 可能推增量，也可能是 live_text 切片增量
+                streamAcc += String(ev.text || "");
+                if (streamAcc.length > 16000) streamAcc = streamAcc.slice(-16000);
+                flushStream(false);
+              } else if (ev.type === "replace_text") {
+                streamAcc = String(ev.text || "");
+                flushStream(true);
+              } else if (ev.type === "done") {
+                finish(ev);
+              } else if (ev.type === "error") {
+                finish({ ok: false, error: ev.message || ev.detail, reply: ev.message || ev.detail });
+              }
+            }
             function pump() {
               return reader.read().then(function (res) {
                 if (res.done) {
-                  finish();
+                  if (!finished) {
+                    fetch(engineBase() + "/api/code-dev/jobs/" + encodeURIComponent(jid))
+                      .then(function (r2) {
+                        return r2.json();
+                      })
+                      .then(function (jd) {
+                        var job = (jd && jd.job) || jd || {};
+                        var st = job.status || "";
+                        if (job.live_text) {
+                          streamAcc = String(job.live_text);
+                          flushStream(true);
+                        }
+                        finish({
+                          ok: st === "succeeded" || st === "done" || !!(jd && jd.ok && st !== "failed"),
+                          reply: (jd && jd.reply) || "",
+                          job: job,
+                          synced_files: job.synced_files || [],
+                          deferred_files: job.deferred_files || [],
+                          error: job.error || "",
+                        });
+                      })
+                      .catch(function () {
+                        finish({ ok: false, error: "流式结束但未收到完成事件" });
+                      });
+                  }
                   return;
                 }
                 pending += decoder.decode(res.value, { stream: true });
-                var parts = pending.split("\n\n");
-                pending = parts.pop() || "";
-                parts.forEach(function (block) {
-                  var lines = block.split("\n");
-                  for (var i = 0; i < lines.length; i++) {
-                    var line = lines[i];
-                    if (line.indexOf("data:") !== 0) continue;
+                var chunks = pending.split("\n\n");
+                pending = chunks.pop() || "";
+                chunks.forEach(function (blk) {
+                  blk.split("\n").forEach(function (line) {
+                    if (line.indexOf("data:") !== 0) return;
                     var raw = line.slice(5).trim();
-                    if (!raw) continue;
-                    var ev;
-                    try { ev = JSON.parse(raw); } catch (e) { continue; }
-                    onEvent(ev);
-                  }
+                    if (!raw) return;
+                    try {
+                      onEvent(JSON.parse(raw));
+                    } catch (e1) {}
+                  });
                 });
                 return pump();
               });
             }
-            var finished = false;
-            function onEvent(ev) {
-              if (!ev || !ev.type) return;
-              if (ev.type === "status") {
-                bubble.status.style.display = "";
-                bubble.status.textContent = ev.detail || "处理中…";
-              } else if (ev.type === "thinking") {
-                // 正文开始后不再改写思考区，避免双通道切换导致「一会思考一会正文」
-                if (bubble.replyStarted) return;
-                bubble.status.style.display = "none";
-                bubble.thinkingText = eventText(ev, bubble.thinkingText);
-                if (bubble.thinkingText) {
-                  bubble.thinkWrap.style.display = "";
-                  bubble.thinkWrap.open = true;
-                  if (bubble.thinkSum) bubble.thinkSum.textContent = "思考中…";
-                  bubble.thinkBody.innerHTML = md(bubble.thinkingText);
-                }
-                msgs.scrollTop = msgs.scrollHeight;
-              } else if (ev.type === "reply") {
-                bubble.status.style.display = "none";
-                // 正式回复开始：折叠思考，用户可再点开
-                if (!bubble.replyStarted) {
-                  bubble.replyStarted = true;
-                  if (bubble.thinkingText) {
-                    bubble.thinkWrap.style.display = "";
-                    bubble.thinkWrap.open = false;
-                    if (bubble.thinkSum) bubble.thinkSum.textContent = "已完成思考（点击展开）";
-                  }
-                }
-                bubble.replyText = eventText(ev, bubble.replyText);
-                bubble.reply.innerHTML = md(bubble.replyText);
-                msgs.scrollTop = msgs.scrollHeight;
-              } else if (ev.type === "error") {
-                bubble.status.style.display = "none";
-                bubble.reply.innerHTML = md("出错了：" + (ev.detail || "未知错误"));
-                finished = true;
-              } else if (ev.type === "done") {
-                finished = true;
-                bubble.status.style.display = "none";
-                // done 以服务端拆好的全文为准，避免流式中间态残留标记
-                if (ev.reply != null) bubble.replyText = stripMarks(ev.reply || "");
-                else bubble.replyText = stripMarks(bubble.replyText);
-                bubble.reply.innerHTML = md(bubble.replyText);
-                if (ev.thinking != null) bubble.thinkingText = stripMarks(ev.thinking || "");
-                else bubble.thinkingText = stripMarks(bubble.thinkingText);
-                if (bubble.thinkingText) {
-                  bubble.thinkWrap.style.display = "";
-                  bubble.thinkWrap.open = false;
-                  if (bubble.thinkSum) bubble.thinkSum.textContent = "已完成思考（点击展开）";
-                  bubble.thinkBody.innerHTML = md(bubble.thinkingText);
-                } else {
-                  bubble.thinkWrap.style.display = "none";
-                }
-                if (ev.chart) {
-                  var img = document.createElement("img");
-                  img.src = ev.chart;
-                  img.alt = "图表";
-                  bubble.el.insertBefore(img, bubble.meta);
-                }
-                if (ev.table && ev.table.length) {
-                  var tbl = document.createElement("table");
-                  tbl.innerHTML = "<tr><th>项目</th><th>数值</th></tr>" +
-                    ev.table.map(function (row) {
-                      return "<tr><td>" + esc(row.label) + "</td><td>" + esc(row.value) + "</td></tr>";
-                    }).join("");
-                  bubble.el.insertBefore(tbl, bubble.meta);
-                }
-                var meta = formatChatMeta(ev);
-                bubble.meta.style.display = "";
-                bubble.meta.textContent = meta;
-                if (ev.code_dev_ui) {
-                  mountCodeDevUi(bubble.el, ev.code_dev_ui, bubble.meta, hitlHooks());
-                } else {
-                  var fbUi = parseCodeDevUiFromText(bubble.replyText, "");
-                  if (fbUi) {
-                    mountCodeDevUi(bubble.el, fbUi, bubble.meta, hitlHooks());
-                  }
-                }
-                if (ev.code_review_ui) {
-                  mountCodeReviewUi(bubble.el, ev.code_review_ui, bubble.meta, hitlHooks());
-                }
-                if (ev.code_commit_ui) {
-                  mountCodeCommitUi(bubble.el, ev.code_commit_ui, bubble.meta, hitlHooks());
-                }
-                if (ev.code_deploy_ui) {
-                  mountCodeDeployUi(bubble.el, ev.code_deploy_ui, bubble.meta);
-                }
-                if (ev.code_dev_brief && cur) {
-                  cur.codeDevBrief = ev.code_dev_brief;
-                }
-                if (cur) {
-                  cur.msgs.push({
-                    role: "assistant",
-                    text: bubble.replyText,
-                    thinking: bubble.thinkingText || null,
-                    chart: ev.chart || null,
-                    table: ev.table || null,
-                    meta: meta,
-                    code_dev_ui: ev.code_dev_ui || null,
-                    code_review_ui: ev.code_review_ui || null,
-                    code_commit_ui: ev.code_commit_ui || null,
-                    code_deploy_ui: ev.code_deploy_ui || null,
-                  });
-                  save();
-                }
-              }
-            }
-            function finish() {
-              if (!finished && !bubble.replyText) {
-                bubble.status.style.display = "none";
-                bubble.reply.textContent = "（流式结束，未收到完整回复）";
-              }
-              sendBtn.disabled = false;
-              input.focus();
-            }
-            return pump().catch(function (e) {
-              bubble.status.style.display = "none";
-              bubble.reply.textContent = "流式读取失败：" + e.message;
-              sendBtn.disabled = false;
-            });
+            return pump();
           })
           .catch(function (e) {
-            bubble.status.style.display = "none";
-            bubble.reply.textContent =
-              "引擎未连接（" + engineBase() + "）：" + e.message +
-              "\n请确认引擎已启动：scripts/engine.sh zr-workbuddy ensure";
-            sendBtn.disabled = false;
-            input.focus();
+            finished = true;
+            clearInterval(tickTimer);
+            setPhase("done");
+            setBusy(false);
+            setSteps(cdSealSteps(stepState, true));
+            setErr("订阅进度失败：" + (e && e.message ? e.message : e));
           });
       }
 
-      var chips = document.getElementById("dshMesChips");
-      SUGGESTIONS.forEach(function (s) {
-        var b = document.createElement("button");
-        b.textContent = s;
-        b.onclick = function () { send(s); };
-        chips.appendChild(b);
-      });
-      sendBtn.onclick = function () { send(); };
-      input.addEventListener("keydown", function (e) { if (e.key === "Enter") send(); });
-
-      if (!restoreLastConv()) {
-        renderMsg("assistant",
-          "你好！我是 ZR-WorkBuddy。\n" +
-          "• 查数出图：例如 **今天正在生产的工单有多少个**\n" +
-          "• PCB 工艺：例如 **飞针和 AOI 怎么分工**（会展示思考过程，并流式输出）",
-          null, null, null, false);
+      function confirmStart() {
+        var ws = String(workspace || "").trim();
+        var req = String(requirement || "").trim();
+        var pui = proposeUi || {};
+        var val = pui.validation || {};
+        if (!ws) {
+          setErr("请填写或浏览选择本机工程目录");
+          return;
+        }
+        if (!req) {
+          setErr("请填写需求摘要");
+          return;
+        }
+        if (val.errors && val.errors.length) {
+          setErr(val.errors.join("；"));
+          return;
+        }
+        if (val.warnings && val.warnings.length && !ackWarn) {
+          setErr("请先勾选确认：摘要与原始诉求一致");
+          return;
+        }
+        setBusy(true);
+        setErr("");
+        issueHitl("code-dev.confirm", { workspace: ws })
+          .then(function (nonce) {
+            return fetch(engineBase() + "/api/code-dev/confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                workspace: ws,
+                requirement: req,
+                code_dev_brief:
+                  brief ||
+                  pui.brief || {
+                    original_goal: goal || req,
+                    workspace: ws,
+                    selections: [],
+                    notes: [],
+                    option_rounds: 0,
+                  },
+                write_scope:
+                  pui.write_scope && pui.write_scope.length ? pui.write_scope : undefined,
+                source_gate_job_id: pui.source_gate_job_id || undefined,
+                nonce: nonce,
+              }),
+            });
+          })
+          .then(function (r) {
+            return r.json().then(function (d) {
+              return { status: r.status, d: d };
+            });
+          })
+          .then(function (pack) {
+            var d = pack.d || {};
+            if (!d.ok) {
+              setBusy(false);
+              setErr(d.detail || d.reply || "启动失败");
+              if (d.validation) {
+                setProposeUi(
+                  Object.assign({}, pui, {
+                    validation: d.validation,
+                    requirement: req,
+                    workspace: ws,
+                  }),
+                );
+              }
+              return;
+            }
+            var jid = String(d.job_id || "");
+            setJobId(jid);
+            setPhase("running");
+            setLog((d.reply || "已启动") + "\n");
+            setResult("");
+            if (jid) watchJob(jid);
+            else {
+              setPhase("done");
+              setBusy(false);
+              setResult(d.reply || "已启动（无 job_id）");
+            }
+          })
+          .catch(function (e) {
+            setBusy(false);
+            setErr("请求失败：" + (e && e.message ? e.message : e));
+          });
       }
 
-      discoverEngine(function () {
-        fetch(STATUS_URL()).then(function (r) { return r.json(); }).then(function (s) {
-          document.getElementById("dshMesDot").className = "dot " + (s.ok ? "ok" : "");
-        }).catch(function () {});
+      if (phase === "running" || phase === "done") {
+        return h(
+          "div",
+          { className: "wb-cr" },
+          head(phase === "running" ? "Cursor 写码中…" : "完成"),
+          h(
+            "div",
+            { className: "wb-cr-body" },
+            h(
+              "p",
+              { className: "wb-cr-sum" },
+              "工程：" + workspace + (jobId ? " · " + jobId : ""),
+            ),
+            phase === "running"
+              ? h(
+                  "p",
+                  { className: "wb-cd-alive" },
+                  h("span", { className: "wb-cd-pulse", style: { marginRight: 8 } }),
+                  aliveHint || "进行中…",
+                )
+              : h("p", { className: "wb-cd-alive" }, aliveHint || "已结束"),
+            h(CdPlanView, {
+              steps: steps,
+              duration: cdFormatDuration(elapsed),
+              summary: cdPlanSummary(steps),
+            }),
+            streamText
+              ? h(
+                  "div",
+                  null,
+                  h("div", { className: "wb-cr-label" }, "改码过程输出"),
+                  h("pre", { className: "wb-cd-stream" }, streamText),
+                )
+              : phase === "running"
+                ? h(
+                    "p",
+                    { className: "wb-cr-dsh" },
+                    "等待 Cursor 流式输出…（沙箱准备阶段可能暂无正文，计时仍会更新）",
+                  )
+                : null,
+            log
+              ? h(
+                  "details",
+                  { open: phase === "running" && !streamText, style: { marginTop: 8 } },
+                  h("summary", { className: "wb-cr-label", style: { cursor: "pointer" } }, "步骤日志"),
+                  h("pre", { className: "wb-cr-progress", style: { margin: 0 } }, log),
+                )
+              : null,
+            result ? h("p", { className: "wb-cr-sum", style: { marginTop: 8 } }, result) : null,
+            synced && synced.length
+              ? h(
+                  "div",
+                  null,
+                  h("div", { className: "wb-cr-label" }, "已同步到工程"),
+                  h(
+                    "div",
+                    { className: "wb-cr-files" },
+                    synced.slice(0, 40).map(function (f, i) {
+                      return h("div", { key: i, className: "wb-cr-file" }, h("span", null, String(f)));
+                    }),
+                  ),
+                )
+              : null,
+            deferred && deferred.length
+              ? h(
+                  "div",
+                  { className: "wb-cr-warn", style: { marginTop: 8 } },
+                  "未同步 " +
+                    deferred.length +
+                    " 个文件（路由/菜单/API 若在此列，刷新会看不到新界面）：\n" +
+                    deferred.slice(0, 12).join("\n"),
+                )
+              : null,
+            err ? h("p", { className: "wb-cr-err" }, err) : null,
+          ),
+        );
+      }
+
+      if (phase === "options" && optionsUi) {
+        var opts = optionsUi.options || {};
+        var groups = Array.isArray(opts.groups) ? opts.groups : [];
+        var og = optionsUi.original_goal || (optionsUi.brief && optionsUi.brief.original_goal) || goal;
+        return h(
+          "div",
+          { className: "wb-cr" },
+          head("需求选项 · 勾选后继续（不会立刻写码）"),
+          h(
+            "div",
+            { className: "wb-cr-body" },
+            h("p", { className: "wb-cr-sum" }, opts.title || "请确认以下关键项"),
+            opts.summary ? h("p", { className: "wb-cr-dsh" }, opts.summary) : null,
+            og ? h("p", { className: "wb-cr-dsh" }, "原始诉求：", h("code", null, og)) : null,
+            groups.map(function (g) {
+              return h(
+                "div",
+                { key: g.id, style: { marginBottom: 10 } },
+                h(
+                  "div",
+                  { className: "wb-cr-label" },
+                  (g.label || g.id) +
+                    (g.required === false ? "" : " · 必选") +
+                    (g.multi ? " · 可多选" : " · 单选"),
+                ),
+                h(
+                  "div",
+                  { className: "wb-cr-chips" },
+                  (g.options || []).map(function (o) {
+                    var on = (selectedOpts[g.id] || []).indexOf(o.id) >= 0;
+                    return h(
+                      "button",
+                      {
+                        key: o.id,
+                        type: "button",
+                        className: "wb-cr-chip" + (on ? " on" : ""),
+                        style: on
+                          ? { borderColor: "#0ea5e9", color: "#0369a1", background: "#e0f2fe" }
+                          : undefined,
+                        onClick: function () {
+                          setSelectedOpts(function (prev) {
+                            var next = Object.assign({}, prev);
+                            var cur = (next[g.id] || []).slice();
+                            if (g.multi) {
+                              var ix = cur.indexOf(o.id);
+                              if (ix >= 0) cur.splice(ix, 1);
+                              else cur.push(o.id);
+                            } else {
+                              cur = [o.id];
+                            }
+                            next[g.id] = cur;
+                            return next;
+                          });
+                        },
+                      },
+                      o.label || o.id,
+                    );
+                  }),
+                ),
+              );
+            }),
+            h(
+              "label",
+              { className: "wb-cr-label" },
+              opts.notes_required ? "备注（必填）" : "备注（可选）",
+            ),
+            h("textarea", {
+              className: "wb-cr-input",
+              style: { width: "100%", minHeight: 72, boxSizing: "border-box", marginBottom: 8 },
+              value: notes,
+              placeholder: opts.notes_placeholder || "补充约束、验收点…",
+              onChange: function (e) {
+                setNotes(e.target.value);
+              },
+            }),
+            err ? h("p", { className: "wb-cr-err" }, err) : null,
+            h(
+              "div",
+              { className: "wb-cr-actions" },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  disabled: busy,
+                  onClick: function () {
+                    setPhase("form");
+                    setErr("");
+                  },
+                },
+                "返回改诉求",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn primary",
+                  disabled: busy,
+                  onClick: submitOptions,
+                },
+                busy ? "梳理中…" : "确认选项",
+              ),
+            ),
+          ),
+        );
+      }
+
+      if (phase === "propose") {
+        var pui = proposeUi || {};
+        var val = pui.validation || {};
+        var mod = (pui.target_hints && pui.target_hints.module) || "";
+        var paths = (pui.target_hints && pui.target_hints.expected_paths) || [];
+        var og2 = pui.original_goal || (pui.brief && pui.brief.original_goal) || goal;
+        var hasErr = !!(val.errors && val.errors.length);
+        var hasWarn = !!(val.warnings && val.warnings.length) && !hasErr;
+        return h(
+          "div",
+          { className: "wb-cr" },
+          head("写码确认 · 核对后再开工"),
+          h(
+            "div",
+            { className: "wb-cr-body" },
+            h("p", { className: "wb-cr-sum" }, "请确认原始诉求、目标模块与需求摘要；确认后才会启动 Cursor。"),
+            og2 ? h("p", { className: "wb-cr-dsh" }, "原始诉求：", h("code", null, og2)) : null,
+            mod ? h("p", { className: "wb-cr-dsh" }, "目标模块：", h("code", null, mod)) : null,
+            paths.length
+              ? h(
+                  "p",
+                  { className: "wb-cr-dsh" },
+                  "预期改动：",
+                  paths.slice(0, 6).join(" · "),
+                )
+              : null,
+            hasErr
+              ? h("div", { className: "wb-cr-err" }, val.errors.join("\n"))
+              : null,
+            hasWarn
+              ? h("div", { className: "wb-cr-warn" }, val.warnings.join("\n"))
+              : null,
+            h(WorkspaceMismatchHint, {
+              dshCwd: dshCwd,
+              workspace: workspace,
+              home: props.home,
+              onUseDsh: function () {
+                setWorkspace(dshCwd);
+              },
+            }),
+            h("label", { className: "wb-cr-label" }, "本机工程目录"),
+            h(
+              "div",
+              { className: "wb-cr-row" },
+              h("input", {
+                className: "wb-cr-input",
+                value: workspace,
+                onChange: function (e) {
+                  setWorkspace(e.target.value);
+                },
+              }),
+              h(
+                "button",
+                { type: "button", className: "wb-cr-btn", disabled: busy, onClick: browse },
+                "浏览…",
+              ),
+            ),
+            h("label", { className: "wb-cr-label" }, "需求摘要（可编辑，须含原始业务名称）"),
+            h("textarea", {
+              className: "wb-cr-input",
+              style: {
+                width: "100%",
+                minHeight: 120,
+                boxSizing: "border-box",
+                fontFamily: "inherit",
+                marginBottom: 8,
+              },
+              value: requirement,
+              onChange: function (e) {
+                setRequirement(e.target.value);
+              },
+            }),
+            hasWarn
+              ? h(
+                  "label",
+                  { className: "wb-set-check" },
+                  h("input", {
+                    type: "checkbox",
+                    checked: ackWarn,
+                    onChange: function (e) {
+                      setAckWarn(e.target.checked);
+                    },
+                  }),
+                  h("span", null, "我已核对原始诉求与目标模块，确认摘要不偏离业务目标"),
+                )
+              : null,
+            err ? h("p", { className: "wb-cr-err" }, err) : null,
+            h(
+              "div",
+              { className: "wb-cr-actions" },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn",
+                  disabled: busy,
+                  onClick: function () {
+                    setPhase("form");
+                    setErr("");
+                  },
+                },
+                "返回改诉求",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-cr-btn primary",
+                  disabled: busy || hasErr,
+                  onClick: confirmStart,
+                },
+                busy ? "启动中…" : "确认并用 Cursor 写入本机",
+              ),
+            ),
+          ),
+        );
+      }
+
+      // form：只收集目录 + 原始诉求，再进入讨论（禁止直接 confirm）
+      return h(
+        "div",
+        { className: "wb-cr" },
+        head("选择目录 · 填写诉求 · 先梳理需求"),
+        h(
+          "div",
+          { className: "wb-cr-body" },
+          h(
+            "p",
+            { className: "wb-cr-sum" },
+            "与原先 WorkBuddy 一致：先选项/确认卡梳理需求，确认后才会启动 Cursor；不会自动 commit。",
+          ),
+          h(WorkspaceMismatchHint, {
+            dshCwd: dshCwd,
+            workspace: workspace,
+            home: props.home,
+            onUseDsh: function () {
+              setWorkspace(dshCwd);
+            },
+          }),
+          h("label", { className: "wb-cr-label" }, "本机工程目录"),
+          h(
+            "div",
+            { className: "wb-cr-row" },
+            h("input", {
+              className: "wb-cr-input",
+              value: workspace,
+              placeholder: "/Users/你/项目",
+              onChange: function (e) {
+                setWorkspace(e.target.value);
+              },
+            }),
+            h(
+              "button",
+              { type: "button", className: "wb-cr-btn", disabled: busy, onClick: browse },
+              busy ? "选择中…" : "浏览…",
+            ),
+          ),
+          suggestions.length
+            ? h(
+                "div",
+                { className: "wb-cr-chips" },
+                suggestions.map(function (s, i) {
+                  var p = typeof s === "string" ? s : (s && s.path) || "";
+                  var lab = typeof s === "object" && s.label ? s.label + " · " : "";
+                  if (!p) return null;
+                  return h(
+                    "button",
+                    {
+                      key: i + p,
+                      type: "button",
+                      className: "wb-cr-chip",
+                      title: p,
+                      onClick: function () {
+                        setWorkspace(p);
+                      },
+                    },
+                    lab + p,
+                  );
+                }),
+              )
+            : null,
+          h("label", { className: "wb-cr-label" }, "原始写码诉求（一句话也行，下一步会帮你补全）"),
+          h("textarea", {
+            className: "wb-cr-input",
+            style: {
+              width: "100%",
+              minHeight: 96,
+              boxSizing: "border-box",
+              fontFamily: "inherit",
+              marginBottom: 10,
+            },
+            value: requirement,
+            placeholder: "例如：MES系统仓库管理菜单新增物料出库界面",
+            onChange: function (e) {
+              setRequirement(e.target.value);
+              setGoal(e.target.value);
+            },
+          }),
+          err ? h("p", { className: "wb-cr-err" }, err) : null,
+          h(
+            "div",
+            { className: "wb-cr-actions" },
+            h(
+              "button",
+              {
+                type: "button",
+                className: "wb-cr-btn primary",
+                disabled: busy,
+                onClick: function () {
+                  setGoal(requirement);
+                  runDiscuss();
+                },
+              },
+              busy ? "梳理中…" : "下一步：梳理需求",
+            ),
+          ),
+        ),
+      );
+    }
+
+    /** 一体部署确认卡：单卡一步确认（精简 meta，避免工具卡丢 units） */
+    function CodeDeployConfirmCard(props) {
+      ensureCss();
+      var block = props.block;
+      var wb = useMemo(function () {
+        return readMeta(block);
+      }, [block]);
+      var ui = (wb && wb.ui) || {};
+      var kind = String(ui.kind || (wb && String(wb.t || "").replace(/^cdp-/, "")) || "confirm");
+
+      var _busy = useState(false);
+      var busy = _busy[0];
+      var setBusy = _busy[1];
+      var _err = useState("");
+      var err = _err[0];
+      var setErr = _err[1];
+      var _done = useState(kind === "success");
+      var done = _done[0];
+      var setDone = _done[1];
+      var _success = useState(kind === "success" ? ui : null);
+      var success = _success[0];
+      var setSuccess = _success[1];
+
+      function resolveIds(src) {
+        var u = src || {};
+        if (Array.isArray(u.unit_ids) && u.unit_ids.length) {
+          return u.unit_ids.map(String).filter(Boolean);
+        }
+        var exec = u.execution || {};
+        if (Array.isArray(exec.unit_ids) && exec.unit_ids.length) {
+          return exec.unit_ids.map(String).filter(Boolean);
+        }
+        var list =
+          u.mode === "full" || u.force_full
+            ? u.units_full || u.units || []
+            : u.units_incremental || u.units || [];
+        return (list || [])
+          .map(function (x) {
+            return typeof x === "string" ? x : (x && x.id) || "";
+          })
+          .filter(Boolean);
+      }
+
+      var forceFull = !!(ui.force_full || ui.locked_mode === "full");
+      var mode = forceFull ? "full" : ui.mode === "full" ? "full" : "incremental";
+      var ids = resolveIds(ui);
+      var unitCount = Number(ui.unit_count) || ids.length;
+      var entry = ui.entry_url || ui.access_url || ui.health_url || "";
+      var canGo = ui.can_deploy !== false && !!ui.job_id && (ids.length > 0 || unitCount > 0);
+
+      // 准备失败时不要画空确认卡（——:— / 0 单元）
+      if (kind === "confirm" && !ui.job_id) {
+        return h(
+          "div",
+          { className: "wb-cr" },
+          h("div", { className: "wb-cr-head" }, h("span", { className: "wb-cr-badge" }, "部署未就绪")),
+          h(
+            "div",
+            { className: "wb-cr-body" },
+            h("p", { className: "wb-cr-err" }, "请再说一次「部署上线」（勿选 production）"),
+          ),
+        );
+      }
+
+      function doReject() {
+        if (!ui.job_id) {
+          setDone(true);
+          setSuccess({ cancelled: true });
+          return;
+        }
+        setBusy(true);
+        setErr("");
+        issueHitl("code-deploy.confirm", { job_id: ui.job_id })
+          .then(function (nonce) {
+            return fetch(engineBase() + "/api/code-deploy/confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ job_id: ui.job_id, decision: "reject", nonce: nonce }),
+            }).then(function (r) {
+              return r.json();
+            });
+          })
+          .then(function () {
+            setDone(true);
+            setSuccess({ cancelled: true });
+            setBusy(false);
+          })
+          .catch(function (e) {
+            setErr((e && e.message) || "取消失败");
+            setBusy(false);
+          });
+      }
+
+      function doApprove() {
+        var sendIds = ids.length ? ids : resolveIds(ui);
+        if (!ui.job_id || (!sendIds.length && !unitCount)) {
+          setErr("没有可同步的单元");
+          return;
+        }
+        if (!canGo && !sendIds.length) {
+          setErr("当前不可部署，请检查配置");
+          return;
+        }
+        setBusy(true);
+        setErr("");
+        issueHitl("code-deploy.confirm", { job_id: ui.job_id })
+          .then(function (nonce) {
+            return fetch(engineBase() + "/api/code-deploy/confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                job_id: ui.job_id,
+                decision: "approve",
+                mode: mode,
+                unit_ids: sendIds,
+                nonce: nonce,
+              }),
+            }).then(function (r) {
+              return r.json();
+            });
+          })
+          .then(function (d) {
+            if (!d || !d.ok) {
+              setErr((d && (d.detail || d.reply)) || "部署失败");
+              setBusy(false);
+              return;
+            }
+            var succ = d.deploy_success || d.code_deploy_ui || {};
+            setSuccess({
+              title: succ.title || (mode === "full" ? "全量部署完成" : "增量部署完成"),
+              entry_url: succ.entry_url || succ.access_url || succ.health_url || entry,
+              remote: succ.remote || "",
+              env: succ.env || ui.env || "",
+              units: succ.units || ids,
+              actions: succ.actions || [],
+            });
+            setDone(true);
+            setBusy(false);
+          })
+          .catch(function (e) {
+            setErr((e && e.message) || "部署请求失败");
+            setBusy(false);
+          });
+      }
+
+      if (done && success) {
+        if (success.cancelled) {
+          return h(
+            "div",
+            { className: "wb-cr" },
+            h("div", { className: "wb-cr-head" }, h("span", { className: "wb-cr-badge" }, "已取消")),
+            h("div", { className: "wb-cr-body" }, h("p", { className: "wb-cr-sum" }, "未执行同步")),
+          );
+        }
+        return h(
+          "div",
+          { className: "wb-cr" },
+          h("div", { className: "wb-cr-head" }, h("span", { className: "wb-cr-badge" }, "部署完成")),
+          h(
+            "div",
+            { className: "wb-cr-body" },
+            h("p", { className: "wb-cr-sum" }, success.title || "部署完成"),
+            success.remote ? h("p", { className: "wb-cr-sum" }, success.remote) : null,
+            success.entry_url
+              ? h(
+                  "p",
+                  { className: "wb-cr-sum" },
+                  h(
+                    "a",
+                    { href: success.entry_url, target: "_blank", rel: "noopener noreferrer" },
+                    success.entry_url,
+                  ),
+                )
+              : null,
+          ),
+        );
+      }
+
+      var title = forceFull || mode === "full" ? "确认全量部署" : "确认增量部署";
+      var remote =
+        (ui.ssh_host || "—") + ":" + (ui.ssh_app_path || "—");
+      var unitRows = Array.isArray(ui.units) && ui.units.length
+        ? ui.units
+        : ids.map(function (id) {
+            return { id: id, label: id, kind: "" };
+          });
+      var gitLine = "";
+      if (ui.head_sha_short || ui.head_ref) {
+        gitLine =
+          (ui.head_ref || "HEAD") +
+          (ui.head_sha_short ? " @" + ui.head_sha_short : "");
+        if (ui.base_ref && ui.base_ref !== "(none)") {
+          gitLine = String(ui.base_ref).slice(0, 10) + " → " + gitLine;
+        }
+      }
+
+      function kv(label, node) {
+        if (!node) return null;
+        return [h("dt", null, label), h("dd", null, node)];
+      }
+
+      return h(
+        "div",
+        { className: "wb-cr" },
+        h(
+          "div",
+          { className: "wb-cr-head" },
+          h("span", { className: "wb-cr-badge" }, title),
+          h("span", { className: "wb-cr-hint" }, "点确认后才会同步 · 不动 8092"),
+        ),
+        h(
+          "div",
+          { className: "wb-cr-body" },
+          h(
+            "dl",
+            { className: "wb-cr-kv" },
+            kv("环境", ui.env || "staging"),
+            kv("远端", remote),
+            entry
+              ? kv(
+                  "入口",
+                  h(
+                    "a",
+                    { href: entry, target: "_blank", rel: "noopener noreferrer" },
+                    entry,
+                  ),
+                )
+              : null,
+            ui.workspace ? kv("本机仓", ui.workspace) : null,
+            gitLine ? kv("版本", gitLine) : null,
+            kv(
+              "范围",
+              (unitCount || ids.length) +
+                " 个单元 · " +
+                (forceFull ? "全量锁定" : mode === "full" ? "全量" : "增量"),
+            ),
+          ),
+          unitRows.length
+            ? h(
+                "div",
+                { className: "wb-cr-units" },
+                unitRows.map(function (u) {
+                  var id = typeof u === "string" ? u : u.id;
+                  var label = typeof u === "string" ? u : u.label || u.id;
+                  var kind = typeof u === "string" ? "" : u.kind || "";
+                  return h(
+                    "span",
+                    { key: id, className: "wb-cr-unit", title: id },
+                    kind ? h("span", { className: "k" }, kind) : null,
+                    label,
+                  );
+                }),
+              )
+            : null,
+          ui.reason || ui.note
+            ? h(
+                "p",
+                { className: "wb-cr-note" },
+                ui.reason || ui.note,
+              )
+            : null,
+          err ? h("p", { className: "wb-cr-err" }, err) : null,
+          h(
+            "div",
+            { className: "wb-cr-actions" },
+            h(
+              "button",
+              { type: "button", className: "wb-cr-btn", disabled: busy, onClick: doReject },
+              "取消",
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "wb-cr-btn primary",
+                disabled: busy || !canGo,
+                onClick: doApprove,
+              },
+              busy ? "部署中…" : "确认部署",
+            ),
+          ),
+        ),
+      );
+    }
+
+    function field(label, props, full) {
+      return h(
+        "div",
+        { className: "wb-set-field" + (full ? " full" : "") },
+        h("label", null, label),
+        h("input", props),
+      );
+    }
+
+    function emptyDraft() {
+      return {
+        mes: {
+          base_url: "",
+          auth_type: "password",
+          username: "",
+          password: "",
+          token: "",
+          enterprise_code: "",
+          extra_headers: "{}",
+          verify_ssl: true,
+          timeout: 30,
+        },
+        deepseek: {
+          provider: "deepseek",
+          api_key: "",
+          base_url: "https://api.deepseek.com",
+          model: "deepseek-chat",
+        },
+        code_dev: {
+          enabled: false,
+          cursor_api_key: "",
+          model: "composer-2.5",
+          max_concurrent: 1,
+          cursor_timeout_sec: 2700,
+          default_workspace: "",
+        },
+        code_review: {
+          enabled: false,
+          max_files: 40,
+          max_file_bytes: 120000,
+          max_total_bytes: 800000,
+          default_workspace: "",
+        },
+        code_commit: {
+          enabled: true,
+          default_workspace: "",
+          work_branch: "",
+          remote_name: "origin",
+          default_push: true,
+          use_skill_review: true,
+          allow_blocked: false,
+          max_files: 80,
+        },
+        code_deploy: {
+          enabled: false,
+          provider: "local_ssh",
+          unified_product: true,
+          default_workspace: "",
+          default_ref: "HEAD",
+          default_env: "staging",
+          env_whitelist: ["staging"],
+          allow_production: false,
+          ssh_host: "",
+          ssh_user: "",
+          ssh_port: 22,
+          ssh_key_path: "",
+          ssh_app_path: "",
+          entry_url: "",
+          health_url: "",
+          health_timeout_sec: 8,
+        },
+      };
+    }
+
+    function patchDraft(setDraft, path, value) {
+      setDraft(function (prev) {
+        var next = Object.assign({}, prev);
+        var cur = next;
+        for (var i = 0; i < path.length - 1; i++) {
+          var k = path[i];
+          cur[k] = Object.assign({}, cur[k] || {});
+          cur = cur[k];
+        }
+        cur[path[path.length - 1]] = value;
+        return next;
       });
     }
 
-    function apply() {
-      if (typeof document === "undefined") return;
-      try {
-        buildPanel();
-        console.log("[dsh-mes-bridge] 聊天面板已挂载");
-      } catch (err) {
-        console.error("[dsh-mes-bridge] 面板挂载失败:", err);
+    function WorkBuddySettingsSection() {
+      ensureCss();
+      var draftState = useState(emptyDraft);
+      var draft = draftState[0];
+      var setDraft = draftState[1];
+      var busyState = useState(false);
+      var busy = busyState[0];
+      var setBusy = busyState[1];
+      var msgState = useState("");
+      var msg = msgState[0];
+      var setMsg = msgState[1];
+      var msgOkState = useState(false);
+      var msgOk = msgOkState[0];
+      var setMsgOk = msgOkState[1];
+      var engHostState = useState(engineHost());
+      var engHost = engHostState[0];
+      var setEngHost = engHostState[1];
+      var engPortState = useState(enginePort());
+      var engPort = engPortState[0];
+      var setEngPort = engPortState[1];
+      var testState = useState({});
+      var tests = testState[0];
+      var setTests = testState[1];
+
+      function applyEngineEndpoint() {
+        try {
+          localStorage.setItem("dsh-mes-engine-host", String(engHost || "127.0.0.1").trim());
+          localStorage.setItem("dsh-mes-engine-port", String(engPort || "8000").trim());
+        } catch (e) {}
       }
+
+      function loadConfig() {
+        setBusy(true);
+        setMsg("加载中…");
+        setMsgOk(false);
+        applyEngineEndpoint();
+        fetch(engineBase() + "/api/config")
+          .then(function (r) {
+            return r.json().then(function (d) {
+              return { ok: r.ok, d: d };
+            });
+          })
+          .then(function (x) {
+            if (!x.ok || !x.d || !x.d.ok || !x.d.config) {
+              throw new Error((x.d && (x.d.detail || x.d.message)) || "引擎未响应");
+            }
+            var c = x.d.config;
+            var base = emptyDraft();
+            setDraft({
+              mes: Object.assign({}, base.mes, c.mes || {}),
+              deepseek: Object.assign({}, base.deepseek, c.deepseek || {}),
+              code_dev: Object.assign({}, base.code_dev, c.code_dev || {}),
+              code_review: Object.assign({}, base.code_review, c.code_review || {}),
+              code_commit: Object.assign({}, base.code_commit, c.code_commit || {}),
+              code_deploy: Object.assign({}, base.code_deploy, c.code_deploy || {}),
+            });
+            setMsg("已从引擎加载");
+            setMsgOk(true);
+          })
+          .catch(function (e) {
+            setMsg("加载失败：" + (e && e.message ? e.message : String(e)) + "（请先 scripts/engine.sh zr-workbuddy ensure）");
+            setMsgOk(false);
+          })
+          .finally(function () {
+            setBusy(false);
+          });
+      }
+
+      useEffect(function () {
+        loadConfig();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, []);
+
+      function saveConfig() {
+        setBusy(true);
+        setMsg("保存中…");
+        setMsgOk(false);
+        applyEngineEndpoint();
+        var payload = {
+          mes: Object.assign({}, draft.mes, {
+            timeout: Math.max(5, Number(draft.mes.timeout) || 30),
+          }),
+          deepseek: Object.assign({}, draft.deepseek),
+          code_dev: Object.assign({}, draft.code_dev, {
+            model: (draft.code_dev.model || "").trim() || "composer-2.5",
+            max_concurrent: Math.max(1, Number(draft.code_dev.max_concurrent) || 1),
+            cursor_timeout_sec: Math.max(60, Number(draft.code_dev.cursor_timeout_sec) || 2700),
+            default_workspace: (draft.code_dev.default_workspace || "").trim(),
+          }),
+          code_review: Object.assign({}, draft.code_review, {
+            max_files: Math.max(1, Number(draft.code_review.max_files) || 40),
+            max_file_bytes: Math.max(1024, Number(draft.code_review.max_file_bytes) || 120000),
+            max_total_bytes: Math.max(4096, Number(draft.code_review.max_total_bytes) || 800000),
+            default_workspace: (draft.code_review.default_workspace || "").trim(),
+          }),
+          code_commit: Object.assign({}, draft.code_commit, {
+            default_workspace: (draft.code_commit.default_workspace || "").trim(),
+            work_branch: (draft.code_commit.work_branch || "").trim(),
+            remote_name: (draft.code_commit.remote_name || "").trim() || "origin",
+            max_files: Math.max(1, Number(draft.code_commit.max_files) || 80),
+            use_skill_review: draft.code_commit.use_skill_review !== false,
+            allow_blocked: !!draft.code_commit.allow_blocked,
+          }),
+          code_deploy: Object.assign({}, draft.code_deploy, {
+            provider: "local_ssh",
+            unified_product: draft.code_deploy.unified_product !== false,
+            default_workspace: (draft.code_deploy.default_workspace || "").trim(),
+            default_ref: (draft.code_deploy.default_ref || "").trim() || "HEAD",
+            default_env: "staging",
+            env_whitelist: ["staging"],
+            allow_production: false,
+            ssh_host: (draft.code_deploy.ssh_host || "").trim(),
+            ssh_user: (draft.code_deploy.ssh_user || "").trim(),
+            ssh_port: Math.max(1, Number(draft.code_deploy.ssh_port) || 22),
+            ssh_key_path: (draft.code_deploy.ssh_key_path || "").trim(),
+            ssh_app_path: (draft.code_deploy.ssh_app_path || "").trim(),
+            entry_url: (draft.code_deploy.entry_url || draft.code_deploy.health_url || "").trim(),
+            health_url: (draft.code_deploy.entry_url || draft.code_deploy.health_url || "").trim(),
+            health_timeout_sec: 8,
+          }),
+        };
+        fetch(engineBase() + "/api/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ config: payload }),
+        })
+          .then(function (r) {
+            return r.json().then(function (d) {
+              return { ok: r.ok, d: d };
+            });
+          })
+          .then(function (x) {
+            if (!x.ok || !x.d || !x.d.ok) {
+              throw new Error((x.d && (x.d.detail || x.d.message)) || "保存失败");
+            }
+            var c = x.d.config || {};
+            var base = emptyDraft();
+            setDraft({
+              mes: Object.assign({}, base.mes, c.mes || {}),
+              deepseek: Object.assign({}, base.deepseek, c.deepseek || {}),
+              code_dev: Object.assign({}, base.code_dev, c.code_dev || {}),
+              code_review: Object.assign({}, base.code_review, c.code_review || {}),
+              code_commit: Object.assign({}, base.code_commit, c.code_commit || {}),
+              code_deploy: Object.assign({}, base.code_deploy, c.code_deploy || {}),
+            });
+            setMsg("已保存到引擎 config.yaml");
+            setMsgOk(true);
+          })
+          .catch(function (e) {
+            setMsg("保存失败：" + (e && e.message ? e.message : String(e)));
+            setMsgOk(false);
+          })
+          .finally(function () {
+            setBusy(false);
+          });
+      }
+
+      function runTest(key, path, body) {
+        applyEngineEndpoint();
+        setTests(function (prev) {
+          var n = Object.assign({}, prev);
+          n[key] = "测试中…";
+          return n;
+        });
+        var opts = body
+          ? {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            }
+          : undefined;
+        fetch(engineBase() + path, opts)
+          .then(function (r) {
+            return r.json().then(function (d) {
+              return { ok: r.ok, d: d };
+            });
+          })
+          .then(function (x) {
+            var d = x.d || {};
+            var text =
+              d.detail ||
+              d.message ||
+              d.summary ||
+              (d.ok === false ? "未就绪" : d.ok ? "OK" : JSON.stringify(d).slice(0, 240));
+            setTests(function (prev) {
+              var n = Object.assign({}, prev);
+              n[key] = (x.ok && d.ok !== false ? "✅ " : "❌ ") + text;
+              return n;
+            });
+          })
+          .catch(function (e) {
+            setTests(function (prev) {
+              var n = Object.assign({}, prev);
+              n[key] = "❌ " + (e && e.message ? e.message : String(e));
+              return n;
+            });
+          });
+      }
+
+      var mes = draft.mes;
+      var llm = draft.deepseek;
+      var cd = draft.code_dev;
+      var cr = draft.code_review;
+      var cc = draft.code_commit;
+      var cdp = draft.code_deploy;
+
+      return h(
+        "div",
+        { className: "wb-set" },
+        h(
+          "p",
+          { className: "wb-set-lead" },
+          "与宿主「设置」同级的 WorkBuddy 配置中心。保存写入引擎 config.yaml；不必再打开 :8000。",
+        ),
+        h(
+          "div",
+          { className: "wb-set-eng" },
+          h("label", null, "引擎 host"),
+          h("input", {
+            value: engHost,
+            onChange: function (e) {
+              setEngHost(e.target.value);
+            },
+          }),
+          h("label", null, "port"),
+          h("input", {
+            value: engPort,
+            onChange: function (e) {
+              setEngPort(e.target.value);
+            },
+          }),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "wb-set-btn",
+              disabled: busy,
+              onClick: function () {
+                applyEngineEndpoint();
+                loadConfig();
+              },
+            },
+            "连接并加载",
+          ),
+        ),
+        h(
+          "div",
+          { className: "wb-set-card" },
+          h("h3", null, "1 · MES 连接"),
+          h(
+            "div",
+            { className: "body" },
+            h("div", { className: "wb-set-grid" },
+              field(
+                "Base URL",
+                {
+                  value: mes.base_url || "",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["mes", "base_url"], e.target.value);
+                  },
+                },
+                true,
+              ),
+              h(
+                "div",
+                { className: "wb-set-field full" },
+                h("label", null, "认证方式"),
+                h(
+                  "div",
+                  { className: "wb-set-radios" },
+                  ["password", "token", "apikey", "none"].map(function (v) {
+                    return h(
+                      "label",
+                      { key: v },
+                      h("input", {
+                        type: "radio",
+                        name: "wb-mes-auth",
+                        checked: (mes.auth_type || "password") === v,
+                        onChange: function () {
+                          patchDraft(setDraft, ["mes", "auth_type"], v);
+                        },
+                      }),
+                      " ",
+                      v,
+                    );
+                  }),
+                ),
+              ),
+              field("账号", {
+                value: mes.username || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["mes", "username"], e.target.value);
+                },
+              }),
+              field("密码（脱敏回显）", {
+                type: "password",
+                autoComplete: "new-password",
+                value: mes.password || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["mes", "password"], e.target.value);
+                },
+              }),
+              field(
+                "企业编码",
+                {
+                  value: mes.enterprise_code || "",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["mes", "enterprise_code"], e.target.value);
+                  },
+                },
+                true,
+              ),
+              field(
+                "Token / API Key",
+                {
+                  type: "password",
+                  autoComplete: "new-password",
+                  value: mes.token || "",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["mes", "token"], e.target.value);
+                  },
+                },
+                true,
+              ),
+              field(
+                "附加请求头 JSON",
+                {
+                  value: mes.extra_headers || "{}",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["mes", "extra_headers"], e.target.value);
+                  },
+                },
+                true,
+              ),
+              field("超时（秒）", {
+                type: "number",
+                min: 5,
+                max: 120,
+                value: mes.timeout != null ? mes.timeout : 30,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["mes", "timeout"], e.target.value);
+                },
+              }),
+              h(
+                "div",
+                { className: "wb-set-check" },
+                h("input", {
+                  type: "checkbox",
+                  checked: mes.verify_ssl !== false,
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["mes", "verify_ssl"], e.target.checked);
+                  },
+                }),
+                h("span", null, "校验 HTTPS 证书"),
+              ),
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "wb-set-btn",
+                disabled: busy,
+                onClick: function () {
+                  runTest("mes", "/api/config/test/mes", { config: { mes: draft.mes } });
+                },
+              },
+              "测试 MES",
+            ),
+            tests.mes ? h("div", { className: "wb-set-test" }, tests.mes) : null,
+          ),
+        ),
+        h(
+          "div",
+          { className: "wb-set-card" },
+          h("h3", null, "2 · LLM 意图引擎"),
+          h(
+            "div",
+            { className: "body" },
+            h("p", { className: "wb-set-hint" }, "审码依赖此处 LLM；DeepSeek / Ollama / 关闭任选。"),
+            h(
+              "div",
+              { className: "wb-set-radios" },
+              [
+                ["deepseek", "DeepSeek API"],
+                ["ollama", "Ollama 本地"],
+                ["none", "不使用 LLM"],
+              ].map(function (pair) {
+                return h(
+                  "label",
+                  { key: pair[0] },
+                  h("input", {
+                    type: "radio",
+                    name: "wb-llm",
+                    checked: (llm.provider || "deepseek") === pair[0],
+                    onChange: function () {
+                      patchDraft(setDraft, ["deepseek", "provider"], pair[0]);
+                    },
+                  }),
+                  " ",
+                  pair[1],
+                );
+              }),
+            ),
+            h(
+              "div",
+              { className: "wb-set-grid" },
+              field(
+                "API Key（脱敏回显）",
+                {
+                  type: "password",
+                  autoComplete: "new-password",
+                  value: llm.api_key || "",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["deepseek", "api_key"], e.target.value);
+                  },
+                },
+                true,
+              ),
+              field("Base URL", {
+                value: llm.base_url || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["deepseek", "base_url"], e.target.value);
+                },
+              }),
+              field("模型", {
+                value: llm.model || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["deepseek", "model"], e.target.value);
+                },
+              }),
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "wb-set-btn",
+                disabled: busy,
+                onClick: function () {
+                  runTest("llm", "/api/config/test/deepseek", {
+                    config: { deepseek: draft.deepseek },
+                  });
+                },
+              },
+              "测试 LLM",
+            ),
+            tests.llm ? h("div", { className: "wb-set-test" }, tests.llm) : null,
+          ),
+        ),
+        h(
+          "div",
+          { className: "wb-set-card" },
+          h("h3", null, "3 · 写码车道"),
+          h(
+            "div",
+            { className: "body" },
+            h(
+              "div",
+              { className: "wb-set-check" },
+              h("input", {
+                type: "checkbox",
+                checked: !!cd.enabled,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_dev", "enabled"], e.target.checked);
+                },
+              }),
+              h("span", null, "开启本机写码（code_dev.enabled）"),
+            ),
+            h(
+              "div",
+              { className: "wb-set-grid" },
+              field(
+                "Cursor API Key",
+                {
+                  type: "password",
+                  autoComplete: "new-password",
+                  value: cd.cursor_api_key || "",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["code_dev", "cursor_api_key"], e.target.value);
+                  },
+                },
+                true,
+              ),
+              field("本机模型", {
+                value: cd.model || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_dev", "model"], e.target.value);
+                },
+              }),
+              field("最大并发", {
+                type: "number",
+                min: 1,
+                max: 4,
+                value: cd.max_concurrent != null ? cd.max_concurrent : 1,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_dev", "max_concurrent"], e.target.value);
+                },
+              }),
+              field("超时（秒）", {
+                type: "number",
+                min: 60,
+                max: 7200,
+                value: cd.cursor_timeout_sec != null ? cd.cursor_timeout_sec : 2700,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_dev", "cursor_timeout_sec"], e.target.value);
+                },
+              }),
+              field(
+                "常用工程路径（备忘）",
+                {
+                  value: cd.default_workspace || "",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["code_dev", "default_workspace"], e.target.value);
+                  },
+                },
+                true,
+              ),
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "wb-set-btn",
+                disabled: busy,
+                onClick: function () {
+                  runTest("cd", "/api/status");
+                },
+              },
+              "探测引擎状态",
+            ),
+            tests.cd ? h("div", { className: "wb-set-test" }, tests.cd) : null,
+          ),
+        ),
+        h(
+          "div",
+          { className: "wb-set-card" },
+          h("h3", null, "4 · 审码车道"),
+          h(
+            "div",
+            { className: "body" },
+            h(
+              "div",
+              { className: "wb-set-check" },
+              h("input", {
+                type: "checkbox",
+                checked: !!cr.enabled,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_review", "enabled"], e.target.checked);
+                },
+              }),
+              h("span", null, "开启本机审码（code_review.enabled）"),
+            ),
+            h(
+              "div",
+              { className: "wb-set-grid" },
+              field("单次最多文件", {
+                type: "number",
+                min: 1,
+                max: 200,
+                value: cr.max_files != null ? cr.max_files : 40,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_review", "max_files"], e.target.value);
+                },
+              }),
+              field("单文件最大字节", {
+                type: "number",
+                value: cr.max_file_bytes != null ? cr.max_file_bytes : 120000,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_review", "max_file_bytes"], e.target.value);
+                },
+              }),
+              field("总读取上限", {
+                type: "number",
+                value: cr.max_total_bytes != null ? cr.max_total_bytes : 800000,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_review", "max_total_bytes"], e.target.value);
+                },
+              }),
+              field(
+                "常用工程路径",
+                {
+                  value: cr.default_workspace || "",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["code_review", "default_workspace"], e.target.value);
+                  },
+                },
+                true,
+              ),
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "wb-set-btn",
+                disabled: busy,
+                onClick: function () {
+                  runTest("cr", "/api/code-review/status");
+                },
+              },
+              "测试审码就绪",
+            ),
+            tests.cr ? h("div", { className: "wb-set-test" }, tests.cr) : null,
+          ),
+        ),
+        h(
+          "div",
+          { className: "wb-set-card" },
+          h("h3", null, "5 · 提交车道"),
+          h(
+            "div",
+            { className: "body" },
+            h(
+              "div",
+              { className: "wb-set-check" },
+              h("input", {
+                type: "checkbox",
+                checked: !!cc.enabled,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_commit", "enabled"], e.target.checked);
+                },
+              }),
+              h("span", null, "开启人触发提交（code_commit.enabled）"),
+            ),
+            h(
+              "div",
+              { className: "wb-set-grid" },
+              field(
+                "常用工程路径",
+                {
+                  value: cc.default_workspace || "",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["code_commit", "default_workspace"], e.target.value);
+                  },
+                },
+                true,
+              ),
+              field("工作分支（空=当前；勿填 main/master）", {
+                value: cc.work_branch || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_commit", "work_branch"], e.target.value);
+                },
+              }),
+              field("远程名", {
+                value: cc.remote_name || "origin",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_commit", "remote_name"], e.target.value);
+                },
+              }),
+              h(
+                "div",
+                { className: "wb-set-check full" },
+                h("input", {
+                  type: "checkbox",
+                  checked: cc.default_push !== false,
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["code_commit", "default_push"], e.target.checked);
+                  },
+                }),
+                h("span", null, "确认卡默认勾选推送远程"),
+              ),
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "wb-set-btn",
+                disabled: busy,
+                onClick: function () {
+                  runTest("cc", "/api/code-commit/status");
+                },
+              },
+              "测试提交就绪",
+            ),
+            tests.cc ? h("div", { className: "wb-set-test" }, tests.cc) : null,
+          ),
+        ),
+        h(
+          "div",
+          { className: "wb-set-card" },
+          h("h3", null, "6 · 自动化部署"),
+          h(
+            "div",
+            { className: "body" },
+            h(
+              "p",
+              { className: "wb-set-hint" },
+              "一体部署、一个入口：确认一次 → 同步改动并拉起引擎+聊天壳。须保持功能插件 code-deploy 开启。",
+            ),
+            h(
+              "div",
+              { className: "wb-set-check" },
+              h("input", {
+                type: "checkbox",
+                checked: !!cdp.enabled,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_deploy", "enabled"], e.target.checked);
+                },
+              }),
+              h("span", null, "开启自动化部署"),
+            ),
+            h(
+              "div",
+              { className: "wb-set-check" },
+              h("input", {
+                type: "checkbox",
+                checked: cdp.unified_product !== false,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_deploy", "unified_product"], e.target.checked);
+                },
+              }),
+              h("span", null, "一体部署（推荐）"),
+            ),
+            h(
+              "div",
+              { className: "wb-set-grid" },
+              field("默认分支 / tag", {
+                value: cdp.default_ref || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_deploy", "default_ref"], e.target.value);
+                },
+              }),
+              field(
+                "浏览器一体入口",
+                {
+                  value: cdp.entry_url || cdp.health_url || "",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["code_deploy", "entry_url"], e.target.value);
+                    patchDraft(setDraft, ["code_deploy", "health_url"], e.target.value);
+                  },
+                },
+                true,
+              ),
+              field(
+                "本地项目路径",
+                {
+                  value: cdp.default_workspace || "",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["code_deploy", "default_workspace"], e.target.value);
+                  },
+                },
+                true,
+              ),
+              field("SSH 主机", {
+                value: cdp.ssh_host || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_deploy", "ssh_host"], e.target.value);
+                },
+              }),
+              field("SSH 用户", {
+                value: cdp.ssh_user || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_deploy", "ssh_user"], e.target.value);
+                },
+              }),
+              field(
+                "私钥路径",
+                {
+                  value: cdp.ssh_key_path || "",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["code_deploy", "ssh_key_path"], e.target.value);
+                  },
+                },
+                true,
+              ),
+              field(
+                "远端目录",
+                {
+                  value: cdp.ssh_app_path || "",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["code_deploy", "ssh_app_path"], e.target.value);
+                  },
+                },
+                true,
+              ),
+              field("SSH 端口", {
+                value: cdp.ssh_port != null ? cdp.ssh_port : 22,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_deploy", "ssh_port"], e.target.value);
+                },
+              }),
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "wb-set-btn",
+                disabled: busy,
+                onClick: function () {
+                  runTest("cdp", "/api/code-deploy/status");
+                },
+              },
+              "测试部署就绪",
+            ),
+            tests.cdp ? h("div", { className: "wb-set-test" }, tests.cdp) : null,
+          ),
+        ),
+        h(
+          "div",
+          { className: "wb-set-bar" },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "wb-set-btn primary",
+              disabled: busy,
+              onClick: saveConfig,
+            },
+            busy ? "处理中…" : "保存全部配置",
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "wb-set-btn",
+              disabled: busy,
+              onClick: loadConfig,
+            },
+            "重新加载",
+          ),
+          msg
+            ? h("span", { className: "wb-set-msg" + (msgOk ? " ok" : " err") }, msg)
+            : null,
+        ),
+      );
     }
 
-    var inject = [];
-    module.exports = { inject: inject, apply: apply };
+    function apply(ctx) {
+      discoverEngine();
+      if (!ctx || !ctx.slots || typeof ctx.slots.inject !== "function") {
+        console.error("[dsh-mes-bridge] 无 slots 服务：无法注册 WorkBuddy 客户端能力");
+        return;
+      }
+      ctx.slots.inject("settings.section", function () {
+        return ctx.slots.register(
+          {
+            name: "settings.section",
+            id: "workbuddy",
+            order: 5,
+            label: "WorkBuddy",
+          },
+          WorkBuddySettingsSection,
+        );
+      });
+      ctx.slots.inject("tool.call.toolview", function () {
+        return ctx.slots.register(
+          { name: "tool.call.toolview", key: "mes_code_review_begin" },
+          CodeReviewBeginCard,
+        );
+      });
+      ctx.slots.inject("tool.call.toolview", function () {
+        return ctx.slots.register(
+          { name: "tool.call.toolview", key: "mes_code_commit_begin" },
+          CodeCommitBeginCard,
+        );
+      });
+      ctx.slots.inject("tool.call.toolview", function () {
+        return ctx.slots.register(
+          { name: "tool.call.toolview", key: "mes_code_dev_begin" },
+          CodeDevBeginCard,
+        );
+      });
+      ctx.slots.inject("tool.call.toolview", function () {
+        return ctx.slots.register(
+          { name: "tool.call.toolview", key: "mes_code_deploy_begin" },
+          CodeDeployConfirmCard,
+        );
+      });
+      ctx.slots.inject("tool.call.toolview", function () {
+        return ctx.slots.register(
+          { name: "tool.call.toolview", key: "mes_code_deploy_prepare" },
+          CodeDeployConfirmCard,
+        );
+      });
+      ctx.slots.inject("tool.call.toolview", function () {
+        return ctx.slots.register(
+          { name: "tool.call.toolview", key: "mes_code_deploy_confirm" },
+          CodeDeployConfirmCard,
+        );
+      });
+      console.log(
+        "[dsh-mes-bridge] settings.section=WorkBuddy + toolview review/commit/code_dev/deploy",
+      );
+    }
+
+    module.exports = { inject: ["slots"], apply: apply };
     return module.exports;
   },
 });

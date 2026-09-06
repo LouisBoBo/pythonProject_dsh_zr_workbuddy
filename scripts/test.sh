@@ -8,6 +8,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$(resolve_app_name "${1:-zr-workbuddy}")"
 ENG="$ROOT/apps/$APP/engine"
 export MPLBACKEND="${MPLBACKEND:-Agg}"
+# 规避部分 macOS + NumPy/Accelerate 在 import 期 polyfit 触发 SIGFPE
+export VECLIB_MAXIMUM_THREADS="${VECLIB_MAXIMUM_THREADS:-1}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
 
 echo "== secrets check =="
 "$ROOT/scripts/check-secrets.sh"

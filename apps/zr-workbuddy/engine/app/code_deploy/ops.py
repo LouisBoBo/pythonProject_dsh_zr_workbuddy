@@ -27,27 +27,31 @@ def default_data_dir() -> Path:
 
 
 def _enrich_unit_for_ui(u: dict[str, Any], cfg: Any) -> dict[str, Any]:
-    """按真实配置改写 action_hint（三大目标：业务成败看引擎，宿主可选）。"""
+    """按真实配置改写 action_hint（一体部署：同步后收尾拉起引擎+聊天壳）。"""
     row = dict(u)
     uid = str(row.get("id") or "")
     action = str(row.get("action") or "")
+    restart_bridge = bool(getattr(cfg, "auto_restart_bridge", False))
     if uid == "bridge" or action in {"sync_bridge", "sync_bridge_reinstall"}:
-        if getattr(cfg, "auto_restart_bridge", False):
+        if restart_bridge:
             row["action"] = "sync_bridge_reinstall"
             row["action_hint"] = (
-                "同步 bridge 后重装并重启远端宿主（已开 auto_restart_bridge；非员工网页成败条件）"
+                "同步 bridge；收尾会重装并确保远端聊天壳在跑（auto_restart_bridge）"
             )
             row["risk"] = "high"
         else:
             row["action"] = "sync_bridge"
             row["action_hint"] = (
-                "仅同步 bridge 文件（默认）；业务验收看引擎网页。"
-                "确需宿主收尾时设 auto_restart_bridge=true"
+                "仅同步 bridge 文件；未开 auto_restart_bridge 时不重启聊天壳"
             )
             row["risk"] = "medium"
     elif uid == "engine" or action == "sync_engine_restart":
         if getattr(cfg, "auto_restart_engine", True):
-            row["action_hint"] = "同步引擎代码后重启本应用引擎（不影响其它服务）"
+            row["action_hint"] = (
+                "同步引擎后重启；一体部署还会确保聊天壳入口可用"
+                if bool(getattr(cfg, "unified_product", True))
+                else "同步引擎代码后重启本应用引擎（不影响其它服务）"
+            )
         else:
             row["action_hint"] = "同步引擎文件；按配置跳过远端引擎重启"
     return row
@@ -129,12 +133,29 @@ def prepare(
                 "can_deploy": False,
             }
 
-    target_env = (env or cfg.default_env or "staging").strip().lower()
+    # 「上线/生产」口语默认落到白名单默认环境，避免 Agent 传 production 失败后再调一次 → 两张卡
+    raw_env = (env or cfg.default_env or "staging").strip().lower()
+    _env_alias = {
+        "prod": "production",
+        "生产": "production",
+        "上线": "staging",
+        "预发": "staging",
+        "preview": "staging",
+        "stage": "staging",
+    }
+    target_env = _env_alias.get(raw_env, raw_env)
+    if target_env not in cfg.env_whitelist:
+        if target_env in {"production", "prod", "生产"} and not getattr(
+            cfg, "allow_production", False
+        ):
+            target_env = (cfg.default_env or "staging").strip().lower()
+        elif target_env not in cfg.env_whitelist:
+            target_env = (cfg.default_env or cfg.env_whitelist[0] or "staging").strip().lower()
     if target_env not in cfg.env_whitelist:
         return {
             "ok": False,
-            "detail": f"环境「{target_env}」不在白名单 {cfg.env_whitelist}",
-            "reply": f"环境「{target_env}」不允许部署",
+            "detail": f"环境「{raw_env}」不在白名单 {cfg.env_whitelist}",
+            "reply": f"环境「{raw_env}」不允许部署",
             "can_deploy": False,
         }
 
@@ -302,7 +323,9 @@ def prepare(
         "skipped_paths": mapped.get("skipped_paths") or [],
         "ssh_host": cfg.ssh_host,
         "ssh_app_path": cfg.ssh_app_path,
-        "health_url": (cfg.health_url or "").strip(),
+        "health_url": cfg.resolve_entry_url() if hasattr(cfg, "resolve_entry_url") else (cfg.health_url or "").strip(),
+        "entry_url": cfg.resolve_entry_url() if hasattr(cfg, "resolve_entry_url") else (cfg.health_url or "").strip(),
+        "unified_product": bool(getattr(cfg, "unified_product", True)),
         "provider": cfg.provider,
         "can_deploy": can_deploy,
         "gate_detail": avail.get("detail") or "",
@@ -310,37 +333,12 @@ def prepare(
     }
     save_job(default_data_dir(), job)
 
-    reason_txt = "；".join(decision.reasons[:3]) if decision.reasons else ""
-    if deploy_mode == "full":
-        if decision.force_full:
-            reply = (
-                f"策略判定 **全量部署**（已锁定，不可改增量）→ **{target_env}**"
-                f"（`{cfg.ssh_host}`），**{len(units_full)}** 个单元。"
-            )
-        else:
-            reply = (
-                f"将执行 **全量部署** → **{target_env}**（`{cfg.ssh_host}`），"
-                f"**{len(units_full)}** 个单元。"
-            )
-        if reason_txt:
-            reply += f"\n原因：{reason_txt}"
-        reply += "\n人只须确认触发；未确认不会 rsync。"
-    elif not units_incremental:
-        reply = (
-            f"相对上次部署无业务单元变更（`{job['base_ref']}` → `{job['head_ref']}`）。"
-            "确认将不执行同步；若远端异常可升级为全量。"
-        )
-    else:
-        labels = "、".join(u["id"] for u in units_incremental)
-        reply = (
-            f"策略判定 **增量部署** → **{target_env}**：自动全选 **{labels}**。"
-            + (f"\n原因：{reason_txt}" if reason_txt else "")
-            + "\n人只须确认触发；未确认不会 rsync。需要时可将本任务升级为全量。"
-        )
-    if decision.warnings:
-        reply += "\n注意：" + "；".join(decision.warnings[:2])
+    # 短回复：长文案会在聊天里再叠一层「框」，详情只放确认卡
+    n_units = len(execution.get("unit_ids") or [])
+    mode_label = "全量" if deploy_mode == "full" else "增量"
+    reply = f"请点上方确认卡（{mode_label} · {target_env} · {n_units} 个单元）。"
     if not avail.get("ok"):
-        reply += f"\n\nSSH 尚未就绪——{avail.get('detail')}"
+        reply = f"SSH 未就绪：{avail.get('detail') or '请检查配置'}"
 
     return {
         "ok": True,
@@ -418,18 +416,49 @@ def _build_confirm_ui(job: dict[str, Any]) -> dict[str, Any]:
         "warnings": warnings,
         "ssh_host": job.get("ssh_host") or "",
         "ssh_app_path": job.get("ssh_app_path") or "",
-        "health_url": job.get("health_url") or "",
-        "access_url": job.get("health_url") or "",
+        "health_url": job.get("entry_url") or job.get("health_url") or "",
+        "entry_url": job.get("entry_url") or job.get("health_url") or "",
+        "access_url": job.get("entry_url") or job.get("health_url") or "",
+        "unified_product": bool(job.get("unified_product", True)),
         "can_deploy": bool(job.get("can_deploy")),
         "hint": (
-            "已判定全量：确认后同步全部单元，不可改增量"
-            if force_full
-            else "已判定增量：确认后只同步命中单元；需要时可升级为全量"
+            "点确认后才会同步"
+            if bool(job.get("unified_product", True))
+            else (
+                "已判定全量：确认后同步全部单元，不可改增量"
+                if force_full
+                else "已判定增量：确认后只同步命中单元；需要时可升级为全量"
+            )
         ),
-        "summary": f"{badge} · {job.get('env')}",
+        "summary": (
+            f"全量 · {job.get('env')} · {len(units)} 个单元"
+            if mode == "full"
+            else f"增量 · {job.get('env')} · {len(units)} 个单元"
+        ),
         "desc": (
-            "二元策略：触发全量条件则全量锁定；否则增量。"
-            "对比上次成功部署 SHA → HEAD（含未提交，已部署同内容脏文件会忽略）。"
+            f"{job.get('ssh_host') or ''} → {job.get('ssh_app_path') or ''}；"
+            f"入口 {job.get('entry_url') or job.get('health_url') or '未配置'}"
+        ),
+        "unit_ids": list(execution.get("unit_ids") or [])
+        or [u.get("id") for u in units if isinstance(u, dict) and u.get("id")],
+        "unit_count": len(execution.get("unit_ids") or units or []),
+        # 卡面用的精简单元（id + 中文标签），避免塞进整份 units_full
+        "unit_labels": [
+            {
+                "id": str(u.get("id") or ""),
+                "label": str(u.get("label") or u.get("id") or ""),
+                "kind": str(u.get("kind") or ""),
+            }
+            for u in (units or [])
+            if isinstance(u, dict) and u.get("id")
+        ][:24],
+        "reason": "；".join(
+            str(x).strip() for x in (reasons[:2] if isinstance(reasons, list) else []) if str(x).strip()
+        )[:220],
+        "note": (
+            "首次/远端空目录或基线不可用 → 全量锁定"
+            if force_full
+            else ("相对上次部署只同步变更单元" if mode == "incremental" else "全量同步目录全部单元")
         ),
     }
 
@@ -599,37 +628,53 @@ def confirm(
             logs=logs[-80:],
         )
         unit_ids = [u.id for u in selected]
-        access = (cfg.health_url or "").strip() or str(job.get("health_url") or "").strip()
+        access = ""
+        if hasattr(cfg, "resolve_entry_url"):
+            access = cfg.resolve_entry_url()
+        access = access or str(job.get("entry_url") or job.get("health_url") or "").strip()
         remote = f"{cfg.ssh_host}:{cfg.ssh_app_path}"
         engine_port = result.get("remote_engine_port")
         health = result.get("health") or {}
         actions: list[str] = []
         if result.get("engine_restart"):
             actions.append("已重启引擎" + (f"（:{engine_port}）" if engine_port else ""))
+        elif result.get("engine_ensure"):
+            actions.append("已确保引擎在跑" + (f"（:{engine_port}）" if engine_port else ""))
         if result.get("bridge_restart"):
-            actions.append("已重装 bridge 并后台重启远端宿主")
-        bridge_skip_warn = ""
+            actions.append("已重装 bridge 并后台重启远端聊天壳")
+        elif result.get("host_up"):
+            actions.append("远端聊天壳已在跑 / 已拉起")
+        host_skip_warn = ""
         for urec in result.get("results") or []:
-            if isinstance(urec, dict) and urec.get("id") == "_bridge_restart":
-                bridge_skip_warn = str(urec.get("warning") or "").strip()
-                break
-        if not result.get("bridge_restart") and "bridge" in unit_ids:
-            if bridge_skip_warn:
-                actions.append("bridge 文件已同步，远端无宿主 profile 已跳过重启")
-            elif not getattr(cfg, "auto_restart_bridge", False):
-                actions.append("bridge 仅同步（默认，不重启远端宿主）")
+            if isinstance(urec, dict) and urec.get("id") in {"_bridge_restart", "_host_web"}:
+                host_skip_warn = str(urec.get("warning") or "").strip()
+                if host_skip_warn:
+                    break
+        if host_skip_warn:
+            actions.append("聊天壳：远端无宿主 profile，已跳过启动")
+        elif not result.get("host_up") and not result.get("bridge_restart"):
+            if "bridge" in unit_ids and not getattr(cfg, "auto_restart_bridge", False) and not getattr(
+                cfg, "unified_product", True
+            ):
+                actions.append("bridge 仅同步（未开一体/宿主收尾）")
         if not actions:
             actions.append("仅同步文件")
-        # 业务成功看引擎；bridge/宿主为可选收尾
-        if result.get("bridge_restart"):
-            reply_extra = "\n- bridge：远端宿主已后台重启（可选收尾已执行）"
-        elif bridge_skip_warn:
-            reply_extra = f"\n- bridge：{bridge_skip_warn}"
+        # 一体成功叙事：入口 + 引擎/壳收尾
+        reply_extra = ""
+        if getattr(cfg, "unified_product", True):
+            if result.get("host_up") or result.get("bridge_restart"):
+                reply_extra = "\n- 聊天壳：已确保远端可用（与本机入口一致）"
+            elif host_skip_warn:
+                reply_extra = f"\n- 聊天壳：{host_skip_warn}"
+            else:
+                reply_extra = "\n- 聊天壳：未检测到远端 profile（文件已同步）"
+        elif result.get("bridge_restart"):
+            reply_extra = "\n- bridge：远端聊天壳已后台重启"
+        elif host_skip_warn:
+            reply_extra = f"\n- bridge：{host_skip_warn}"
         elif "bridge" in unit_ids and not getattr(cfg, "auto_restart_bridge", False):
-            reply_extra = "\n- bridge：仅同步文件（默认；业务以引擎网页为准）"
-        else:
-            reply_extra = ""
-        title = f"{mode_label}部署完成"
+            reply_extra = "\n- bridge：仅同步文件"
+        title = f"{mode_label}部署完成" + ("（一体）" if getattr(cfg, "unified_product", True) else "")
         receipt_path = str(result.get("remote_receipt_path") or "").strip()
         synced_rels = []
         for u in selected:
@@ -645,14 +690,81 @@ def confirm(
         head_sha = sha or str(job.get("head_sha") or "").strip()
         unit_short = "、".join(unit_ids[:4]) + ("…" if len(unit_ids) > 4 else "")
         health_ok = isinstance(health, dict) and bool(health.get("ok"))
-        health_bit = "探活通过" if health_ok else (
-            "探活未通过" if isinstance(health, dict) and health.get("ok") is False else "探活未配置"
+        health_bit = "入口探活通过" if health_ok else (
+            "入口探活未通过" if isinstance(health, dict) and health.get("ok") is False else "入口未配置"
         )
+        if access and not health_ok:
+            title = f"{mode_label}已同步，但入口不可达"
+            actions = list(actions) + [
+                f"公网入口探活失败：{access}（引擎多在 127.0.0.1:{engine_port or '?'}，"
+                "须 nginx 反代到该回环口；entry_url 端口勿与 remote_engine_port 相同）"
+            ]
+            reply = (
+                f"**{title}** · `{unit_short or '—'}`\n"
+                f"- 环境：`{job.get('env') or cfg.default_env}` · {health_bit}\n"
+                f"- 远端：`{remote}`"
+                + (f"\n- 浏览器入口：{access}" if access else "")
+                + (f"\n- 引擎回环：`127.0.0.1:{engine_port}`" if engine_port else "")
+                + f"{reply_extra}\n"
+                f"- 处理：在服务器为入口端口配 nginx → `127.0.0.1:{engine_port or '引擎口'}`，"
+                "勿改 8092；参考 `scripts/deploy/nginx-8093-to-engine.example.conf`"
+            )
+            success = {
+                "title": title,
+                "mode": deploy_mode,
+                "mode_label": mode_label,
+                "job_id": job_id,
+                "env": job.get("env") or cfg.default_env,
+                "ssh_host": cfg.ssh_host,
+                "ssh_app_path": cfg.ssh_app_path,
+                "remote": remote,
+                "access_url": access,
+                "entry_url": access,
+                "health_url": access,
+                "unified_product": bool(getattr(cfg, "unified_product", True)),
+                "units": unit_ids,
+                "synced_rels": synced_rels,
+                "engine_restart": bool(result.get("engine_restart")),
+                "engine_ensure": bool(result.get("engine_ensure")),
+                "bridge_restart": bool(result.get("bridge_restart")),
+                "host_up": bool(result.get("host_up")),
+                "remote_engine_port": engine_port,
+                "remote_host_port": result.get("remote_host_port"),
+                "head_sha": head_sha,
+                "actions": actions,
+                "health": health if isinstance(health, dict) else None,
+                "remote_receipt_path": receipt_path,
+                "remote_receipt_ok": bool(result.get("remote_receipt_ok")),
+                "entry_unreachable": True,
+            }
+            return {
+                "ok": False,
+                "job_id": job_id,
+                "status": "done_entry_unreachable",
+                "mode": deploy_mode,
+                "deploy_result": result,
+                "deploy_success": success,
+                "code_deploy_ui": {
+                    "kind": "success",
+                    **success,
+                },
+                "units": unit_ids,
+                "access_url": access,
+                "health_url": access,
+                "ssh_host": cfg.ssh_host,
+                "ssh_app_path": cfg.ssh_app_path,
+                "env": success["env"],
+                "head_sha": head_sha,
+                "reply": reply,
+                "detail": reply,
+                "logs": logs[-40:],
+            }
         reply = (
             f"**{title}** · `{unit_short or '—'}`\n"
             f"- 环境：`{job.get('env') or cfg.default_env}` · {health_bit}\n"
             f"- 远端：`{remote}`"
-            f"{reply_extra}"
+            + (f"\n- 浏览器入口：{access}" if access else "")
+            + f"{reply_extra}"
         )
         success = {
             "title": title,
@@ -664,12 +776,17 @@ def confirm(
             "ssh_app_path": cfg.ssh_app_path,
             "remote": remote,
             "access_url": access,
+            "entry_url": access,
             "health_url": access,
+            "unified_product": bool(getattr(cfg, "unified_product", True)),
             "units": unit_ids,
             "synced_rels": synced_rels,
             "engine_restart": bool(result.get("engine_restart")),
+            "engine_ensure": bool(result.get("engine_ensure")),
             "bridge_restart": bool(result.get("bridge_restart")),
+            "host_up": bool(result.get("host_up")),
             "remote_engine_port": engine_port,
+            "remote_host_port": result.get("remote_host_port"),
             "head_sha": head_sha,
             "actions": actions,
             "health": health if isinstance(health, dict) else None,

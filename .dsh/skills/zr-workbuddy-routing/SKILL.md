@@ -17,7 +17,7 @@ description: >-
 | --- | --- | --- |
 | 查产量、良率、OEE、工单、缺陷等 **MES 数据** | `mes_ask` | mes-ask |
 | PCB 工序、叠层阻抗、DFM、AOI/飞针、IPC、缺陷排障 | `mes_pcb` | mes-pcb |
-| 在本机工程 **写代码 / 改页面 / 加功能 / 做报表页** | `mes_code_dev_*`（见 zr-workbuddy-code-dev） | code-dev |
+| 在本机工程 **写代码 / 改页面 / 改菜单 / 加功能 / 做报表页** | **立刻** `mes_code_dev_begin`（禁止 Bash 扫仓） | code-dev |
 | **本机目录审码**（直读源码，非 Git） | `mes_code_review_*`（见 zr-workbuddy-code-review） | code-review |
 | **提交 / git commit / 推送本批代码** | 对话确认卡优先；工具 `mes_code_commit_*` | code-commit |
 | 测 MES/LLM 连接、看引擎状态 | `mes_config` / `mes_status` | mes-config |
@@ -27,8 +27,10 @@ description: >-
 1. **PCB 工艺 ≠ MES 查数**  
    问「PCB 有哪些工序」「Class 2 孔铜」→ `mes_pcb`，不是 `mes_ask`。
 
-2. **做页面/改代码 ≠ 查数**  
-   「员工工时报表页面」「加一个列表 CRUD」→ 写码流程（`code-dev`），不是 `mes_ask`。
+2. **做页面/改代码/改菜单 ≠ 查数，也 ≠ 宿主自己改仓**  
+   「员工工时报表页面」「加一个列表 CRUD」「物料出库要写在仓库管理菜单」  
+   → **只调** `mes_code_dev_begin`，出主聊天写码工具卡。  
+   **禁止** Bash / Grep / Read 扫用户工程、禁止宿主 Agent 直接改文件。
 
 3. **写码不会自动 commit**  
    本机写码只同步改动到 workspace；提交走 `code-commit`：**选目录 → 门禁 → 人确认** 后才 git。  
@@ -59,13 +61,10 @@ description: >-
 
 ### code-dev（`mes_code_dev_*`）
 
-- 总流程：**zr-workbuddy-code-dev**
-- 需求/UI 子 Skill（写码链路）：  
-  `zr-workbuddy-requirements` →（可选）`zr-workbuddy-repo-bootstrap` →  
-  （UI 时）`zr-workbuddy-ui-product-design` / `zr-workbuddy-ui-craft` →  
-  确认后 `zr-workbuddy-coding-impl`
-- 工具：`mes_code_dev_status`、`mes_code_dev_check`、`mes_code_dev_start`、
-  `mes_code_dev_job`、`mes_code_dev_cancel`。
+- **主入口：`mes_code_dev_begin`**（改代码/改页面/改菜单第一下就调；见 **zr-workbuddy-code-dev**）
+- 工具卡内：选目录 → discuss 选项/确认 → Cursor Local；**不要**用 Bash 摸底代替 begin
+- 排障才用：`mes_code_dev_status`、`check`；确认后偶发代调：`start`（须 confirmed）
+- 进度：`mes_code_dev_job` / `cancel`
 - 写码车道须在引擎配置中心开启（`code_dev.enabled`）。
 
 ### code-review（`mes_code_review_*`）

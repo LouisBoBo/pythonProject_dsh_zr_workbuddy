@@ -184,6 +184,12 @@ def _job_summary(job: dict[str, Any]) -> str:
             lines.append(f"…共 {len(synced)} 个")
     if deferred:
         lines.append(f"范围外未同步 {len(deferred)} 个")
+        lines.append(
+            "⚠️ 未同步文件可能导致页面报错（如 Vite Failed to resolve import）。未同步："
+            + "、".join(str(x) for x in deferred[:8])
+            + ("…" if len(deferred) > 8 else "")
+            + "。请缩小需求或重新写码并确认同步完成。"
+        )
     # 终态附助手说明（Cursor 改码小结）
     if st in {"succeeded", "failed", "cancelled"}:
         for m in reversed(job.get("messages") or []):

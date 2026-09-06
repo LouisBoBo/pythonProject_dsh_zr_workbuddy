@@ -92,10 +92,10 @@ def build_pick_ui(*, workspace: str = "") -> dict[str, Any]:
         "branch_hint": br.get("branch_hint") or "",
         "default_push": cfg.default_push,
         "suggestions": _suggestions(cfg.default_workspace or ""),
-        "hint": "选择目录 · 开始门禁审核",
+        "hint": "选择目录 · 下一步勾选文件",
         "summary": "请确认要提交的本机 Git 工程",
         "desc": (
-            "先对本批变更做门禁审核（仅阻断 P0/P1）；通过后需再点确认才会 commit/push。"
+            "先选目录并勾选待提交文件，再跑门禁（仅阻断 P0/P1）；通过后需再确认才会 commit/push。"
             "提交分支优先用仓库当前分支，其次用配置中心工作分支；都没有时请手动填写。"
             "模型不会执行 git。"
         ),

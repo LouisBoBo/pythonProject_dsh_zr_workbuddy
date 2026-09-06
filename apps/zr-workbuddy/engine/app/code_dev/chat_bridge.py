@@ -21,6 +21,56 @@ from .intent import extract_workspace_path
 from .ops import FEATURE_ID, start as code_dev_start
 
 
+def _suggestions(cfg_default: str) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add(path: str, label: str) -> None:
+        p = (path or "").strip()
+        if not p or p in seen:
+            return
+        seen.add(p)
+        out.append({"path": p, "label": label})
+
+    add(cfg_default, "写码常用")
+    try:
+        from ..code_commit.ops import default_data_dir
+        from ..code_commit.store import latest_done_workspace
+
+        add(latest_done_workspace(default_data_dir()) or "", "上次提交")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from ..code_review.config import get_config as get_code_review_config
+
+        add(get_code_review_config().default_workspace, "审码常用")
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def build_pick_ui(*, workspace: str = "", requirement: str = "") -> dict[str, Any]:
+    """主聊天 toolview / 面板：选目录 + 填需求（确认后才 confirm_and_start）。"""
+    cfg = get_config()
+    ws = (workspace or "").strip() or (cfg.default_workspace or "").strip()
+    req = (requirement or "").strip()
+    return {
+        "kind": "pick",
+        "status": "pending",
+        "workspace": ws,
+        "requirement": req,
+        "original_goal": req,
+        "suggestions": _suggestions(cfg.default_workspace or ""),
+        "hint": "选择目录 · 填写需求 · 确认后开工",
+        "summary": "请确认本机工程与写码需求",
+        "desc": (
+            "在主聊天工具卡中选择工程目录并填写需求摘要；点确认后才会启动 Cursor Local。"
+            "改码在沙箱中进行，同步回本机后**不会**自动 git commit。"
+        ),
+        "default_workspace": cfg.default_workspace or "",
+    }
+
+
 def _base(**extra: Any) -> dict[str, Any]:
     out = {
         "ok": True,

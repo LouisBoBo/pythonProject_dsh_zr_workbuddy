@@ -1,0 +1,18 @@
+{
+  "name": "@deepseek-ai/dsh-background",
+  "description": "Set a custom background (image or gradient) for the DeepSeek Harness interface.",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["lib"],
+  "dsh": {
+    "client": { "platform": "web" }
+  },
+  "license": "MIT"
+}

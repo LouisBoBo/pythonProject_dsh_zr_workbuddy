@@ -15,6 +15,24 @@ import * as runtime from "@dsh-external/mes-runtime";
 export const name = "dsh-mes-bridge";
 export const inject = ["tools"];
 
+const WORKBUDDY_CODE_DEV_PROMPT = [
+  "## ZR-WorkBuddy 写码路由（强制）",
+  "当用户要改代码、改页面、改菜单、挪菜单、加功能、做报表页、Cursor 写码时：",
+  "1. **本轮第一个工具调用必须是 `mes_code_dev_begin`，且 message=用户原话（原样，禁止留空）**。",
+  "2. **禁止**用 Bash / Grep / Glob / Read / Write / StrReplace 去扫或改用户工程来「完成写码」。",
+  "3. **禁止**先长思考、先查 Vite/日志/HMR；改菜单类诉求同样走 begin → 主聊天工具卡。",
+  "4. 工具卡内完成：选目录 → 梳理需求 → 确认后才由 Cursor Local 改盘；未确认禁止 `mes_code_dev_start`。",
+  "5. 写码不会自动 git commit；提交用 `mes_code_commit_begin`。",
+  "示例：「MES系统仓库管理菜单新增物料出库记录」→ 立刻 `mes_code_dev_begin`，message 填该句原文。",
+  "",
+  "## ZR-WorkBuddy 一体部署路由（强制）",
+  "当用户要部署到预发/上线、自动化部署、发布到服务器时：",
+  "1. **本轮只调用一次 `mes_code_deploy_begin`**，参数全部留空即可（默认 staging）。",
+  "2. **禁止**传 env=production/prod；**禁止**再调 prepare/confirm；**禁止**失败后换参数重试出第二张卡。",
+  "3. **禁止**自己 SSH/rsync；出卡后只说一句「请点确认部署」，不要复述原因/单元列表。",
+  "示例：「部署上线」→ 立刻 `mes_code_deploy_begin()`。",
+].join("\n");
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** plugins/mes-bridge/lib → apps/zr-workbuddy */
 const APP_ROOT = path.join(__dirname, "..", "..", "..");
@@ -78,6 +96,23 @@ export function apply(ctx) {
   };
   ctx.provide("mesEngine", mesEngine);
 
+  // 写入系统提示：不依赖工作区是否加载 .dsh/skills（用户工程目录常无本仓 Skill）
+  try {
+    const sp = ctx.get && ctx.get("systemPrompt");
+    if (sp && typeof sp.section === "function") {
+      sp.section({
+        name: "workbuddy:code-dev-route",
+        order: 35,
+        text: WORKBUDDY_CODE_DEV_PROMPT,
+      });
+      console.log("[mes-bridge] 已注册 systemPrompt：workbuddy:code-dev-route");
+    } else {
+      console.warn("[mes-bridge] 无 systemPrompt 服务：写码路由硬约束未注入");
+    }
+  } catch (e) {
+    console.warn("[mes-bridge] systemPrompt 注入失败", e);
+  }
+
   runtime
     .ensureEngineHttp()
     .then((ok) => {
@@ -129,7 +164,18 @@ export function apply(ctx) {
       // ?t= 强制新加载；旧 ESM 模块对象可能仍留在内存（可接受的小泄漏）
       const url = pathToFileURL(file).href + "?t=" + Date.now();
       const mod = await import(url);
-      const fiberLike = ctx.plugin(mod);
+      // 必须收成普通对象再交给 Cordis：部分运行时对 Module Namespace 的
+      // `typeof apply === "function"` 检测会失败（报 received object）。
+      const plugin = {
+        name: mod.name,
+        inject: mod.inject,
+        apply: mod.apply,
+      };
+      if (mod.Config) plugin.Config = mod.Config;
+      if (typeof plugin.apply !== "function") {
+        throw new Error('feature 未导出 apply 函数（收到 ' + typeof plugin.apply + '）');
+      }
+      const fiberLike = ctx.plugin(plugin);
       const fiber = typeof fiberLike?.then === "function" ? await fiberLike : fiberLike;
       if (!fiber || typeof fiber.dispose !== "function") {
         const msg = "未返回可 dispose 的 fiber";

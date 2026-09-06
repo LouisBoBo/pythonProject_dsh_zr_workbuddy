@@ -17,7 +17,11 @@ from .intent import (
     is_code_commit_question,
     is_fix_from_gate_question,
 )
-from .chat_bridge import handle_chat_code_commit, handle_chat_fix_from_gate
+from .chat_bridge import (
+    build_pick_ui,
+    handle_chat_code_commit,
+    handle_chat_fix_from_gate,
+)
 
 __all__ = [
     "FEATURE_ID",
@@ -31,6 +35,7 @@ __all__ = [
     "get_job",
     "latest_blocked",
     "prepare_fix_from_gate",
+    "build_pick_ui",
     "is_code_commit_question",
     "is_fix_from_gate_question",
     "handle_chat_code_commit",

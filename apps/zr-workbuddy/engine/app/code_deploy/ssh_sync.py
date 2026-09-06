@@ -201,9 +201,14 @@ def deploy_units_ssh(
         }
     results.append({"id": "_remote_runtime", "ok": True, "logs": prep.get("logs") or []})
 
+    unified = bool(getattr(cfg, "unified_product", True))
+    engine_restarted = False
+    engine_ensured = False
+
+    # 引擎收尾：有 engine 单元则 restart；一体部署时无变更也 ensure 保活
     if need_engine and getattr(cfg, "auto_restart_engine", True):
         remote = f"cd {shlex.quote(app)} && scripts/engine.sh zr-workbuddy restart"
-        _log(f"远端重启本应用引擎（端口 {prep.get('port')}，不影响其它服务）…")
+        _log(f"远端重启本应用引擎（端口 {prep.get('port')}）…")
         c3, o3, e3 = _run(ssh + [f"bash -lc {shlex.quote(remote)}"], timeout=240)
         if c3 != 0:
             return {
@@ -212,85 +217,69 @@ def deploy_units_ssh(
                 "results": results,
                 "engine_restart": False,
             }
+        engine_restarted = True
         results.append({"id": "_engine_restart", "ok": True, "logs": ["engine restart ok"]})
     elif need_engine:
         _log("已同步引擎文件；按配置跳过远端引擎重启（auto_restart_engine=false）")
         results.append({"id": "_engine_restart", "ok": True, "logs": ["skipped by config"]})
+    elif unified and getattr(cfg, "auto_restart_engine", True):
+        remote = f"cd {shlex.quote(app)} && scripts/engine.sh zr-workbuddy ensure"
+        _log(f"一体部署：确保远端引擎在跑（端口 {prep.get('port')}）…")
+        c3, o3, e3 = _run(ssh + [f"bash -lc {shlex.quote(remote)}"], timeout=240)
+        if c3 != 0:
+            return {
+                "ok": False,
+                "error": f"引擎 ensure 失败：{(e3 or o3)[:400]}",
+                "results": results,
+                "engine_restart": False,
+            }
+        engine_ensured = True
+        results.append({"id": "_engine_ensure", "ok": True, "logs": ["engine ensure ok"]})
 
+    # 聊天壳收尾：一体部署每次确保；或 bridge 单元且 auto_restart_bridge
+    want_host = unified or (
+        need_bridge and getattr(cfg, "auto_restart_bridge", False)
+    )
+    force_host_restart = bool(
+        need_bridge and getattr(cfg, "auto_restart_bridge", False)
+    )
     bridge_restarted = False
-    if need_bridge and getattr(cfg, "auto_restart_bridge", False):
-        # 二次保险：远端没有完整 DSH profile 时不 install（避免半残 .dsh）
-        # 文件已 rsync：降级为「跳过重启」成功，不把整次部署打成失败
-        prof_check = (
-            "test -f \"$HOME/.dsh/profiles/web/package.json\" "
-            "&& echo dsh_ok || echo dsh_missing"
+    host_up = False
+    if want_host:
+        host_res = _ensure_remote_host_web(
+            ssh,
+            app,
+            cfg,
+            force_restart=force_host_restart,
+            also_reinstall_bridge=bool(need_bridge and getattr(cfg, "auto_restart_bridge", False)),
+            log=_log,
         )
-        _c_p, o_p, _e_p = _run(ssh + [prof_check], timeout=30)
-        if "dsh_ok" not in (o_p or ""):
-            warn = (
-                "远端无 ~/.dsh/profiles/web/package.json，已跳过 bridge 重装/重启；"
-                "文件已同步。业务验收以引擎网页为准；确需宿主时请先装 profile。"
-            )
-            _log(warn)
-            results.append(
-                {
-                    "id": "_bridge_restart",
-                    "ok": True,
-                    "logs": ["skipped: no remote DSH profile", warn],
-                    "warning": warn,
-                }
-            )
-        else:
-            # 先 install（不 --restart），再后台 restart-dsh：避免 SSH 被前台 exec dsh 挂死
-            remote_install = (
-                f"cd {shlex.quote(app)} && "
-                "scripts/plugin.sh --app zr-workbuddy install bridge"
-            )
-            _log("远端重装 bridge …")
-            c4, o4, e4 = _run(ssh + [f"bash -lc {shlex.quote(remote_install)}"], timeout=300)
-            if c4 != 0:
-                return {
-                    "ok": False,
-                    "error": f"bridge 重装失败：{(e4 or o4)[:300]}",
-                    "results": results,
-                    "bridge_restart": False,
-                }
-            remote_restart = (
-                f"cd {shlex.quote(app)} && "
-                "nohup scripts/restart-dsh.sh "
-                ">/tmp/zr-workbuddy-dsh-restart.log 2>&1 & "
-                "echo dsh_restart_started"
-            )
-            _log("远端后台重启宿主（可选收尾）…")
-            c5, o5, e5 = _run(ssh + [f"bash -lc {shlex.quote(remote_restart)}"], timeout=60)
-            if c5 != 0 or "dsh_restart_started" not in (o5 or ""):
-                return {
-                    "ok": False,
-                    "error": (
-                        "bridge 已安装，但启动远端宿主重启失败："
-                        f"{(e5 or o5)[:300]}；可 SSH 查看 /tmp/zr-workbuddy-dsh-restart.log"
-                    ),
-                    "results": results,
-                    "bridge_restart": False,
-                }
-            bridge_restarted = True
-            results.append(
-                {
-                    "id": "_bridge_restart",
-                    "ok": True,
-                    "logs": ["bridge install ok", "host restart started (background)"],
-                }
-            )
+        results.append(host_res)
+        if not host_res.get("ok") and host_res.get("hard_fail"):
+            return {
+                "ok": False,
+                "error": host_res.get("error") or "远端聊天壳收尾失败",
+                "results": results,
+                "bridge_restart": False,
+                "host_up": False,
+            }
+        bridge_restarted = bool(host_res.get("bridge_restart"))
+        host_up = bool(host_res.get("host_up"))
+        if host_res.get("warning"):
+            _log(str(host_res.get("warning")))
     elif need_bridge:
-        _log(
-            "已同步 bridge 文件；按配置跳过远端宿主重启（auto_restart_bridge=false）"
-        )
+        _log("已同步 bridge 文件；按配置跳过远端宿主重启（auto_restart_bridge=false）")
         results.append({"id": "_bridge_restart", "ok": True, "logs": ["skipped by config"]})
 
+    entry = ""
+    if hasattr(cfg, "resolve_entry_url"):
+        entry = cfg.resolve_entry_url()
+    else:
+        entry = (getattr(cfg, "entry_url", None) or cfg.health_url or "").strip()
     health: dict[str, Any] | None = None
-    if (cfg.health_url or "").strip():
-        health = probe_health(cfg.health_url, timeout=cfg.health_timeout_sec)
-        _log(f"探活 {cfg.health_url} → {health}")
+    if entry:
+        health = probe_health(entry, timeout=cfg.health_timeout_sec)
+        _log(f"入口探活 {entry} → {health}")
 
     receipt = _write_remote_deploy_receipt(
         ssh,
@@ -299,7 +288,7 @@ def deploy_units_ssh(
         results=results,
         cfg=cfg,
         meta=meta or {},
-        engine_restart=bool(need_engine and getattr(cfg, "auto_restart_engine", True)),
+        engine_restart=engine_restarted or engine_ensured,
         bridge_restart=bridge_restarted,
         remote_engine_port=prep.get("port"),
         health=health if isinstance(health, dict) else None,
@@ -321,13 +310,126 @@ def deploy_units_ssh(
         "ok": True,
         "error": "",
         "results": results,
-        "engine_restart": bool(need_engine and getattr(cfg, "auto_restart_engine", True)),
+        "engine_restart": engine_restarted,
+        "engine_ensure": engine_ensured,
         "bridge_restart": bridge_restarted,
+        "host_up": host_up,
+        "unified_product": unified,
         "health": health,
+        "entry_url": entry,
         "units": [u.id for u in units],
         "remote_engine_port": prep.get("port"),
+        "remote_host_port": int(getattr(cfg, "remote_host_port", 3080) or 3080),
         "remote_receipt_path": receipt.get("path") or "",
         "remote_receipt_ok": bool(receipt.get("ok")),
+    }
+
+
+def _ensure_remote_host_web(
+    ssh: list[str],
+    app: str,
+    cfg: CodeDeployConfig,
+    *,
+    force_restart: bool = False,
+    also_reinstall_bridge: bool = False,
+    log: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """一体收尾：确保远端聊天壳（dsh web）在跑；无 profile 时软跳过。"""
+
+    def _log(msg: str) -> None:
+        if log:
+            log(msg)
+
+    host_port = int(getattr(cfg, "remote_host_port", 3080) or 3080)
+    logs: list[str] = []
+    # 二次保险：远端没有完整 DSH profile 时不 install（避免半残 .dsh）
+    prof_check = (
+        "test -f \"$HOME/.dsh/profiles/web/package.json\" "
+        "&& echo dsh_ok || echo dsh_missing"
+    )
+    _c_p, o_p, _e_p = _run(ssh + [prof_check], timeout=30)
+    if "dsh_ok" not in (o_p or ""):
+        warn = (
+            "远端无 ~/.dsh/profiles/web/package.json，已跳过聊天壳启动；"
+            "业务文件已同步。请在服务器安装 dsh 并用 scripts/host.sh wire 接线后再部署。"
+        )
+        _log(warn)
+        return {
+            "id": "_host_web",
+            "ok": True,
+            "hard_fail": False,
+            "host_up": False,
+            "bridge_restart": False,
+            "logs": ["skipped: no remote DSH profile", warn],
+            "warning": warn,
+        }
+
+    if also_reinstall_bridge:
+        remote_install = (
+            f"cd {shlex.quote(app)} && "
+            "scripts/plugin.sh --app zr-workbuddy install bridge"
+        )
+        _log("远端重装 bridge …")
+        c4, o4, e4 = _run(ssh + [f"bash -lc {shlex.quote(remote_install)}"], timeout=300)
+        if c4 != 0:
+            return {
+                "id": "_host_web",
+                "ok": False,
+                "hard_fail": True,
+                "host_up": False,
+                "bridge_restart": False,
+                "error": f"bridge 重装失败：{(e4 or o4)[:300]}",
+                "logs": logs,
+            }
+        logs.append("bridge install ok")
+
+    listen_check = (
+        f"pid=$(lsof -tiTCP:{host_port} -sTCP:LISTEN 2>/dev/null | head -1); "
+        f"if [ -n \"$pid\" ]; then echo up:$pid; else echo down; fi"
+    )
+    _c_l, o_l, _e_l = _run(ssh + [listen_check], timeout=30)
+    token = (o_l or "").strip().splitlines()[-1] if (o_l or "").strip() else ""
+    already_up = token.startswith("up:")
+    if already_up and not force_restart:
+        _log(f"远端聊天壳已在监听 :{host_port}，跳过重启")
+        return {
+            "id": "_host_web",
+            "ok": True,
+            "hard_fail": False,
+            "host_up": True,
+            "bridge_restart": False,
+            "logs": logs + [f"already listening :{host_port}"],
+        }
+
+    remote_restart = (
+        f"cd {shlex.quote(app)} && "
+        f"DSH_WEB_PORT={host_port} nohup scripts/restart-dsh.sh "
+        ">/tmp/zr-workbuddy-dsh-restart.log 2>&1 & "
+        "echo dsh_restart_started"
+    )
+    _log(f"远端后台启动/重启聊天壳（:{host_port}）…")
+    c5, o5, e5 = _run(ssh + [f"bash -lc {shlex.quote(remote_restart)}"], timeout=60)
+    if c5 != 0 or "dsh_restart_started" not in (o5 or ""):
+        return {
+            "id": "_host_web",
+            "ok": False,
+            "hard_fail": True,
+            "host_up": False,
+            "bridge_restart": False,
+            "error": (
+                "启动远端聊天壳失败："
+                f"{(e5 or o5)[:300]}；可 SSH 查看 /tmp/zr-workbuddy-dsh-restart.log"
+            ),
+            "logs": logs,
+        }
+    logs.append("host restart started (background)")
+    return {
+        "id": "_host_web",
+        "ok": True,
+        "hard_fail": False,
+        "host_up": True,
+        "bridge_restart": bool(also_reinstall_bridge or force_restart),
+        "logs": logs,
     }
 
 
@@ -391,7 +493,17 @@ def _write_remote_deploy_receipt(
         "engine_restart": engine_restart,
         "bridge_restart": bridge_restart,
         "remote_engine_port": remote_engine_port,
-        "health_url": (cfg.health_url or "").strip(),
+        "unified_product": bool(getattr(cfg, "unified_product", True)),
+        "entry_url": (
+            cfg.resolve_entry_url()
+            if hasattr(cfg, "resolve_entry_url")
+            else (cfg.health_url or "").strip()
+        ),
+        "health_url": (
+            cfg.resolve_entry_url()
+            if hasattr(cfg, "resolve_entry_url")
+            else (cfg.health_url or "").strip()
+        ),
         "health": health,
         "rsync_results": [
             {"id": r.get("id"), "ok": r.get("ok"), "logs": (r.get("logs") or [])[:8]}
@@ -461,15 +573,16 @@ def _write_remote_deploy_receipt(
 def _resolve_remote_port(cfg: CodeDeployConfig) -> int:
     """远端引擎监听端口：只认 remote_engine_port，绝不从 health_url 偷端口。
 
-    health_url 常为公网 nginx（如 :8092），与引擎回环 :8091 不是同一端口；
-    若用 health_url 覆盖，会误判「nginx 占用引擎端口」并拒绝部署。
+    health_url / entry_url 常为公网 nginx（如 :8093），与引擎回环不是同一端口；
+    若用 URL 覆盖，会误判「nginx 占用引擎端口」并拒绝部署。
     """
-    port = int(getattr(cfg, "remote_engine_port", None) or 8091)
-    # 保留口 / 公网反代口：禁止当作引擎监听
-    if port in {80, 443, 22, 3306, 8000, 8009, 8092, 888, 8888}:
-        return 8091
+    default = 8095
+    port = int(getattr(cfg, "remote_engine_port", None) or default)
+    # 保留口 / 公网反代口 / 旧项目引擎口：禁止当作本应用引擎监听
+    if port in {80, 443, 22, 3306, 8000, 8009, 8091, 8092, 8093, 888, 8888}:
+        return default
     if port < 1 or port > 65535:
-        return 8091
+        return default
     return port
 
 

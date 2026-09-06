@@ -11,6 +11,8 @@
 import random
 from datetime import date, timedelta
 
+from . import blas_env  # noqa: F401 — 须在 pandas/numpy 之前
+
 import pandas as pd
 
 LINES = ["L1", "L2", "L3"]

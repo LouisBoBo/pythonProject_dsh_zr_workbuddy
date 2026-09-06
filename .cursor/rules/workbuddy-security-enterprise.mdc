@@ -1,0 +1,38 @@
+---
+description: WorkBuddy 企业级安全底线——HITL 硬门禁、回环、路径与密钥（写码/审码/提交/部署时强制）
+alwaysApply: true
+---
+
+# WorkBuddy 企业级安全底线
+
+完整方案与验收清单：`docs/企业级安全加固方案.md`。  
+**不推翻**铁律（见 `workbuddy-ops-standard.mdc`）：加固只加控制面，不另造第二个 bridge、不自造公网鉴权协议替代回环约定。
+
+## 写/改代码时必须遵守
+
+1. **人确认必须引擎可验证**  
+   - 写码 / 提交 / 部署的开工接口须校验 **UI 签发 nonce**（或等价票据），禁止只信 Agent 参数 `confirmed=true`。  
+   - 新车道若会改盘 / 推远端 / 调付费 API：默认 HITL；禁止「聊天一句直接开工」。
+
+2. **引擎只绑回环**  
+   - `runtime.yaml` host ∈ `{127.0.0.1, localhost, ::1}`。  
+   - **禁止**为「方便」改成 `0.0.0.0` 且不配企业接入层。  
+   - 变异接口（config PUT、confirm、deploy）须有 Origin/Referer 或同源策略加固（见方案 P0）。
+
+3. **审码 / 读盘路径门禁**  
+   - 禁止 Agent 裸传任意绝对路径直接开跑为主路径。  
+   - 须经选目录卡签发 `path_ticket`，或限制在允许根目录白名单内。
+
+4. **密钥与日志**  
+   - 密钥只进 `engine/config/config.yaml`（gitignore）。  
+   - Job SSE / 进度文案禁止回显 API Key、Token、私钥内容；敏感路径脱敏。
+
+5. **同步与沙箱**  
+   - 保持路径穿越防护（`resolve` + 前缀校验）；禁止为「全量同步」关掉逃逸检查。  
+   - `write_scope` 为空时的整仓同步须有显式人确认或企业配置开关。
+
+## 禁止借口
+
+- ❌「本机信任所以不用 nonce」——企业级默认要硬门禁；本机信任只解释威胁模型，不替代控制。  
+- ❌「另起一套引擎 HTTP token 头」——与 AGENTS 约定冲突；若要企业 SSO，单独立项，勿偷偷焊进业务 feature。  
+- ❌「为加固把业务焊进 host 内核」——违规铁律 5。

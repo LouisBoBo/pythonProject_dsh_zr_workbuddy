@@ -95,6 +95,8 @@ class CodeReviewConfig:
     max_file_bytes: int = 120_000
     max_total_bytes: int = 800_000
     default_workspace: str = ""
+    # 企业默认 false：禁止 Agent/CLI 裸绝对路径开跑，须 path_ticket
+    allow_agent_absolute_path: bool = False
 
 
 def get_config() -> CodeReviewConfig:
@@ -105,6 +107,7 @@ def get_config() -> CodeReviewConfig:
         max_file_bytes=max(1024, min(int(raw.get("max_file_bytes") or 120_000), 500_000)),
         max_total_bytes=max(4096, min(int(raw.get("max_total_bytes") or 800_000), 2_000_000)),
         default_workspace=str(raw.get("default_workspace") or "").strip(),
+        allow_agent_absolute_path=bool(raw.get("allow_agent_absolute_path")),
     )
 
 

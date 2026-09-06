@@ -45,3 +45,21 @@ apps/*/plugins/*/node_modules/
 **/engine/data/code_deploy/jobs.lock
 **/engine/data/feature_quarantine/
 **/engine/data/feature_install_tmp/
+
+# 宿主 host/（DeepSeek Harness Studio 源码树）：依赖与构建产物不进 git
+host/node_modules/
+host/**/node_modules/
+host/.dsh-build/
+host/.pnpm-store/
+host/.cache/
+host/coverage/
+host/apps/web/dist/
+host/apps/desktop/dist/
+host/apps/desktop/runtime-host/
+host/.artifacts/
+host/tmp/
+host/**/.DS_Store
+
+# 仓库根临时日志（host.sh start-web 等）
+/tmp/
+/lefthook.yml

@@ -34,7 +34,7 @@ def _base(**extra: Any) -> dict[str, Any]:
 
 
 def _suggestions(cfg_default: str) -> list[dict[str, str]]:
-    """常用路径建议（配置中心默认 + 写码车道默认）。"""
+    """常用路径建议（审码默认 + 写码默认 + 最近提交仓库）。"""
     out: list[dict[str, str]] = []
     seen: set[str] = set()
 
@@ -50,6 +50,13 @@ def _suggestions(cfg_default: str) -> list[dict[str, str]]:
         from ..code_dev.config import get_config as get_code_dev_config
 
         add(get_code_dev_config().default_workspace, "写码常用")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from ..code_commit.ops import default_data_dir
+        from ..code_commit.store import latest_done_workspace
+
+        add(latest_done_workspace(default_data_dir()) or "", "上次提交")
     except Exception:  # noqa: BLE001
         pass
     return out
@@ -70,9 +77,9 @@ def build_pick_ui(
         "scope": (scope or "").strip(),
         "focus": (focus or "").strip(),
         "suggestions": _suggestions(cfg.default_workspace or ""),
-        "hint": "选择目录 · 确认后开始",
+        "hint": "选择目录 · 下一步勾选文件",
         "summary": "请确认要审核的本机工程",
-        "desc": "直读本机磁盘源码（不走 Git / VS Code Bridge），确认后开始审查。",
+        "desc": "先选目录，再勾选要审的文件（也可默认抽样）。",
     }
 
 
@@ -116,8 +123,8 @@ async def handle_chat_code_review(text: str) -> dict[str, Any]:
     return _base(
         thinking="已识别审码意图，请在确认卡中选择本机工程目录后再开始。",
         reply=(
-            "已识别为**本机代码审查**（直读磁盘源码，不走 Git / VS Code）。\n\n"
-            "请在下方确认卡中选择**目标目录**，可选填范围与审查重点，再点「开始审核」。"
+            "已识别为**本机代码审查**（直读磁盘源码）。\n\n"
+            "请在下方确认卡中：① 浏览/填写**目录** → ② 点「下一步：选文件」勾选 → ③ 开始审核。"
         ),
         note="等待确认目录",
         intent={"type": "code_review", "metric": "pick", "dim": None, "chart": None},

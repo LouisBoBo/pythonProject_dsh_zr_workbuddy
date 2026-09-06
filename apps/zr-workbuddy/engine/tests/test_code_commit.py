@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,16 @@ from unittest import mock
 _ENG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ENG not in sys.path:
     sys.path.insert(0, _ENG)
+
+
+def _git_init(root: Path, branch: str) -> None:
+    """初始化测试用裸仓库（不依赖系统 template 内容）。"""
+    subprocess.run(
+        ["git", "init", "-b", branch],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
 
 
 class CodeCommitTests(unittest.TestCase):
@@ -94,9 +105,7 @@ class CodeCommitTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            import subprocess
-
-            subprocess.run(["git", "init", "-b", "feature/demo"], cwd=root, check=True, capture_output=True)
+            _git_init(root, "feature/demo")
             subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=root, check=True, capture_output=True)
             subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True, capture_output=True)
             (root / "a.txt").write_text("1\n", encoding="utf-8")
@@ -111,9 +120,7 @@ class CodeCommitTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            import subprocess
-
-            subprocess.run(["git", "init", "-b", "feature/demo"], cwd=root, check=True, capture_output=True)
+            _git_init(root, "feature/demo")
             subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=root, check=True, capture_output=True)
             subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True, capture_output=True)
             (root / "a.txt").write_text("1\n", encoding="utf-8")
@@ -188,14 +195,7 @@ class CodeCommitTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            import subprocess
-
-            subprocess.run(
-                ["git", "init", "-b", "feature/docs"],
-                cwd=root,
-                check=True,
-                capture_output=True,
-            )
+            _git_init(root, "feature/docs")
             subprocess.run(
                 ["git", "config", "user.email", "t@t.com"],
                 cwd=root,

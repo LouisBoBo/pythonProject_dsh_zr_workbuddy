@@ -28,14 +28,19 @@ class CodeDeployConfig:
     ssh_port: int = 22
     ssh_key_path: str = ""
     ssh_app_path: str = ""  # 远端仓库根（与本仓布局一致）
+    # 浏览器一体入口（nginx→聊天壳）；与 health_url 同义，优先 entry_url
+    entry_url: str = ""
     health_url: str = ""
     health_timeout_sec: int = 8
-    # 远端引擎端口：必须避开服务器已有服务（如本机 8000 常被其它项目占用）
-    remote_engine_port: int = 8091
+    # 远端引擎回环口：须避开旧项目占用（8091/8092）；公网入口另走 nginx，勿与本字段同端口
+    remote_engine_port: int = 8095
+    # 远端聊天壳端口（与本机 dsh web 默认一致）
+    remote_host_port: int = 3080
+    # 一体部署：一次确认 → 同步单元 → 收尾拉起引擎+聊天壳 → 入口探活
+    unified_product: bool = True
     auto_restart_engine: bool = True
-    # 含 bridge 单元时：默认只同步文件（三大目标：业务验收看引擎网页）
-    # 确需远端宿主收尾时：config.yaml 显式 auto_restart_bridge: true
-    auto_restart_bridge: bool = False
+    # 与 get_config 一致：一体默认 true；非一体默认 false（可显式覆盖）
+    auto_restart_bridge: bool = True
     rsync_excludes: list[str] = field(
         default_factory=lambda: [
             "__pycache__",
@@ -54,8 +59,14 @@ class CodeDeployConfig:
             "engine/data",
             "local_dev",
             "sandboxes",
+            "node_modules",
+            "host/node_modules",
         ]
     )
+
+    def resolve_entry_url(self) -> str:
+        """浏览器一体入口：entry_url 优先，否则 health_url。"""
+        return (self.entry_url or self.health_url or "").strip()
 
 
 def get_config() -> CodeDeployConfig:
@@ -74,6 +85,14 @@ def get_config() -> CodeDeployConfig:
         if not whitelist:
             whitelist = ["staging"]
     excludes = raw.get("rsync_excludes")
+    unified = bool(raw.get("unified_product", True))
+    # 一体部署默认拉起聊天壳；显式写 false 才关闭
+    if "auto_restart_bridge" in raw:
+        restart_bridge = bool(raw.get("auto_restart_bridge"))
+    else:
+        restart_bridge = True if unified else False
+    entry = str(raw.get("entry_url") or "").strip()
+    health = str(raw.get("health_url") or "").strip()
     cfg = CodeDeployConfig(
         enabled=enabled,
         provider=str(raw.get("provider") or "local_ssh").strip() or "local_ssh",
@@ -87,11 +106,14 @@ def get_config() -> CodeDeployConfig:
         ssh_port=max(1, min(int(raw.get("ssh_port") or 22), 65535)),
         ssh_key_path=str(raw.get("ssh_key_path") or "").strip(),
         ssh_app_path=str(raw.get("ssh_app_path") or "").strip(),
-        health_url=str(raw.get("health_url") or "").strip(),
+        entry_url=entry,
+        health_url=health or entry,
         health_timeout_sec=max(2, min(int(raw.get("health_timeout_sec") or 8), 60)),
-        remote_engine_port=max(1, min(int(raw.get("remote_engine_port") or 8091), 65535)),
+        remote_engine_port=max(1, min(int(raw.get("remote_engine_port") or 8095), 65535)),
+        remote_host_port=max(1, min(int(raw.get("remote_host_port") or 3080), 65535)),
+        unified_product=unified,
         auto_restart_engine=bool(raw.get("auto_restart_engine", True)),
-        auto_restart_bridge=bool(raw.get("auto_restart_bridge", False)),
+        auto_restart_bridge=restart_bridge,
     )
     if isinstance(excludes, list) and excludes:
         cfg.rsync_excludes = [str(x).strip() for x in excludes if str(x).strip()]
@@ -137,8 +159,14 @@ def availability() -> dict[str, Any]:
     return {
         "ok": True,
         "enabled": True,
-        "detail": "部署车道就绪（按插件/单元增量 → 人确认 → SSH/rsync）",
+        "detail": (
+            "部署车道就绪（一体部署：改哪发哪 → 人确认 → 拉起引擎+聊天壳 → 浏览器单入口）"
+            if cfg.unified_product
+            else "部署车道就绪（按插件/单元增量 → 人确认 → SSH/rsync）"
+        ),
         "provider": cfg.provider,
+        "unified_product": cfg.unified_product,
+        "entry_url": cfg.resolve_entry_url(),
         "env_whitelist": list(cfg.env_whitelist),
         "default_env": cfg.default_env,
         "ssh_host": cfg.ssh_host,

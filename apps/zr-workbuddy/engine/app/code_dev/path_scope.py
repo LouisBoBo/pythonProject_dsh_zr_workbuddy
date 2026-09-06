@@ -73,27 +73,187 @@ def path_in_scope(rel: str, scope: list[str] | None) -> bool:
     return False
 
 
+def is_ui_shell_wiring(rel: str) -> bool:
+    """菜单/路由/API/schema 等接线文件：不同步则「写完了但刷新看不到」。"""
+    rel_n = normalize_rel(rel)
+    if not rel_n:
+        return False
+    if rel_n.startswith("frontend/src/router/"):
+        return True
+    if rel_n.startswith("frontend/src/layouts/"):
+        return True
+    if rel_n.startswith("frontend/src/api/"):
+        return True
+    if rel_n.startswith("backend/app/routers/"):
+        return True
+    name = rel_n.rsplit("/", 1)[-1]
+    if rel_n.startswith("backend/app/") and (
+        name.startswith("schemas")
+        or name.endswith("_store.py")
+        or "schema" in name
+        or name.endswith("_store.js")
+    ):
+        return True
+    return False
+
+
+def is_ui_page_asset(rel: str) -> bool:
+    """页面/组件资产：路由已引用时若不同步会直接 Vite 报错。"""
+    rel_n = normalize_rel(rel)
+    if not rel_n:
+        return False
+    return rel_n.startswith(
+        (
+            "frontend/src/views/",
+            "frontend/src/components/",
+            "frontend/src/pages/",
+            "frontend/src/stores/",
+            "frontend/src/store/",
+        )
+    )
+
+
+def is_backend_feature_asset(rel: str) -> bool:
+    """与菜单页配套的后端文件（store/schema/router）。"""
+    rel_n = normalize_rel(rel)
+    if not rel_n or not rel_n.startswith("backend/app/"):
+        return False
+    if rel_n.startswith("backend/app/routers/"):
+        return True
+    name = rel_n.rsplit("/", 1)[-1]
+    return (
+        name.endswith("_store.py")
+        or name.startswith("schemas")
+        or "schema" in name
+        or "/models/" in ("/" + rel_n + "/")
+    )
+
+
+def _extract_local_import_rels(source_rel: str, text: str) -> list[str]:
+    """从 JS/TS/Vue/Python 源码里抽出相对本文件的本地 import 目标（归一成仓库相对路径）。"""
+    import re
+
+    src = normalize_rel(source_rel)
+    if not src or not text:
+        return []
+    parent = "/".join(src.split("/")[:-1])
+    found: list[str] = []
+    # JS/TS/Vue: from '...'; import '...'; require('...')
+    for m in re.finditer(
+        r"""(?:from|import|require\()\s*['"](\.\.?/[^'"]+)['"]""",
+        text,
+    ):
+        raw = m.group(1).replace("\\", "/")
+        # resolve relative to parent
+        base_parts = parent.split("/") if parent else []
+        for part in raw.split("/"):
+            if part == "." or part == "":
+                continue
+            if part == "..":
+                if base_parts:
+                    base_parts.pop()
+                continue
+            base_parts.append(part)
+        cand = "/".join(base_parts)
+        # drop query/hash; try with common extensions if bare
+        cand = cand.split("?", 1)[0].split("#", 1)[0]
+        found.append(cand)
+        if not cand.rsplit("/", 1)[-1].count("."):
+            for ext in (".vue", ".js", ".ts", ".tsx", ".jsx"):
+                found.append(cand + ext)
+            found.append(cand + "/index.js")
+            found.append(cand + "/index.ts")
+            found.append(cand + "/index.vue")
+    # Python: from .x import / from ..pkg import — skip complex; routers already covered
+    return [normalize_rel(x) for x in found if normalize_rel(x)]
+
+
+def promote_shell_companions(
+    inside: list[str],
+    outside: list[str],
+    *,
+    changed_all: list[str] | None = None,
+    sandbox_root: Path | None = None,
+) -> tuple[list[str], list[str]]:
+    """路由/布局已进同步集时，强制带上同批变更的页面与后端配套，并按 import 闭包再扩一轮。
+
+    典型故障：write_scope 误判为 production/，warehouse 视图进 deferred，
+    但 router 已同步 → Vite Failed to resolve import。
+    """
+    in_set = [normalize_rel(r) for r in inside if normalize_rel(r)]
+    out_set = [normalize_rel(r) for r in outside if normalize_rel(r)]
+    all_changed = {
+        normalize_rel(r)
+        for r in (changed_all or (in_set + out_set))
+        if normalize_rel(r)
+    }
+
+    shell_touched = any(is_ui_shell_wiring(r) for r in all_changed) or any(
+        is_ui_shell_wiring(r) for r in in_set
+    )
+    if shell_touched:
+        keep_out: list[str] = []
+        for rel in out_set:
+            if is_ui_page_asset(rel) or is_backend_feature_asset(rel) or is_ui_shell_wiring(rel):
+                if rel not in in_set:
+                    in_set.append(rel)
+            else:
+                keep_out.append(rel)
+        out_set = keep_out
+
+    # import 闭包：已同步文件若引用同批 deferred 文件，一并提升
+    if sandbox_root is not None and out_set:
+        out_lookup = set(out_set)
+        promoted: set[str] = set()
+        for rel in list(in_set):
+            path = sandbox_root / rel
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for dep in _extract_local_import_rels(rel, text):
+                if dep in out_lookup:
+                    promoted.add(dep)
+        if promoted:
+            out_set = [r for r in out_set if r not in promoted]
+            for r in sorted(promoted):
+                if r not in in_set:
+                    in_set.append(r)
+
+    return in_set, out_set
+
+
 def partition_by_scope(
     changed_rels: list[str],
     scope: list[str] | None,
+    *,
+    sandbox_root: Path | None = None,
 ) -> tuple[list[str], list[str]]:
-    """返回 (in_scope, out_of_scope)。"""
+    """返回 (in_scope, out_of_scope)。
+
+    即使 write_scope 较窄，UI 接线文件（路由/布局/api/schema）仍算 in_scope；
+    若本批改动触及接线文件，同批 views/components 与后端配套一并强制同步。
+    """
     scope_n = normalize_write_scope(scope)
+    cleaned = [normalize_rel(r) for r in changed_rels]
+    cleaned = [r for r in cleaned if r]
     if not scope_n:
-        cleaned = [normalize_rel(r) for r in changed_rels]
-        cleaned = [r for r in cleaned if r]
         return cleaned, []
     inside: list[str] = []
     outside: list[str] = []
-    for rel in changed_rels:
-        rel_n = normalize_rel(rel)
-        if not rel_n:
-            continue
-        if path_in_scope(rel_n, scope_n):
+    for rel_n in cleaned:
+        if path_in_scope(rel_n, scope_n) or is_ui_shell_wiring(rel_n):
             inside.append(rel_n)
         else:
             outside.append(rel_n)
-    return inside, outside
+    return promote_shell_companions(
+        inside,
+        outside,
+        changed_all=cleaned,
+        sandbox_root=sandbox_root,
+    )
 
 
 def list_workspace_entries(

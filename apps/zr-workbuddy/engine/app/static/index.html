@@ -421,14 +421,14 @@
         <div class="col">
 
           <div class="welcome" id="welcome">
-            <div class="w-logo">📊</div>
+            <div class="w-logo">🧰</div>
             <h1>ZR-WorkBuddy</h1>
-            <p>DSH 工作助手：可连生产系统查数出图；未配置时使用演示数据 · 支持 OEE / 良率 / 产量 / 缺陷等</p>
+            <p>工作助手：写码、审码、提交、一体部署；在对话里说需求，确认后再改盘 / 同步服务器</p>
             <div class="w-cards">
-              <div class="w-card" onclick="send('最近7天各产线OEE对比')"><div class="q">📈 最近7天各产线OEE对比</div><div class="d">设备综合效率对比</div></div>
-              <div class="w-card" onclick="send('本周产量趋势')"><div class="q">📉 本周产量趋势</div><div class="d">生产走势与波动</div></div>
-              <div class="w-card" onclick="send('良率最低的产品TOP5')"><div class="q">🏆 良率最低的产品TOP5</div><div class="d">质量排名</div></div>
-              <div class="w-card" onclick="send('缺陷类型占比')"><div class="q">🥧 缺陷类型占比</div><div class="d">质量分布</div></div>
+              <div class="w-card" onclick="send('帮我改一下这个项目的页面')"><div class="q">写码改功能</div><div class="d">选目录 → 确认 → Cursor 改盘</div></div>
+              <div class="w-card" onclick="send('审核这段代码')"><div class="q">审码看风险</div><div class="d">路径确认后出审查卡</div></div>
+              <div class="w-card" onclick="send('提交代码')"><div class="q">提交到 Git</div><div class="d">选分支与说明后确认提交</div></div>
+              <div class="w-card" onclick="send('部署上线')"><div class="q">部署到预发</div><div class="d">确认卡 → 增量/全量同步</div></div>
             </div>
           </div>
 
@@ -444,7 +444,7 @@
               <svg viewBox="0 0 24 24" fill="none"><path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
           </div>
-          <div class="input-hint">ZR-WorkBuddy · 回复由内置规则引擎生成，可在配置中心绑定 DeepSeek 升级</div>
+          <div class="input-hint">ZR-WorkBuddy · 写码 / 审码 / 提交 / 部署；查数类能力可在功能插件中按需开启</div>
         </div>
       </div>
     </div>
@@ -702,19 +702,23 @@
             <h2><span class="step">8</span> 自动化部署</h2>
             <div class="body">
               <div class="hint" style="margin-bottom:10px;">
-                境外 Git 无法走 Actions 时用<strong>本机 SSH</strong>：按插件增量 rsync 到预发。对话「部署到预发」→ 勾选插件 → 人确认。
-                <b>模型不会执行 SSH</b>；须保持功能插件 <b>code-deploy</b> 开启。
+                <strong>一体部署、一个入口</strong>：对话「部署到预发」→ 确认一次 → 同步改动单元并拉起远端引擎+聊天壳；浏览器效果与本机一致。
+                <b>模型不会执行 SSH</b>；须保持功能插件 <b>code-deploy</b> 开启。Nginx 示例见 <code>scripts/deploy/nginx-one-entry.example.conf</code>。
               </div>
               <div class="check-row">
                 <input type="checkbox" id="code_deploy_enabled">
                 <label for="code_deploy_enabled">开启自动化部署</label>
+              </div>
+              <div class="check-row" style="margin-top:8px;">
+                <input type="checkbox" id="code_deploy_unified_product" checked>
+                <label for="code_deploy_unified_product">一体部署（同步后确保引擎+聊天壳，推荐）</label>
               </div>
               <div style="margin-top:12px;">
                 <label>部署执行方式</label>
                 <div class="radio-row" style="margin-top:6px;">
                   <label><input type="radio" name="code_deploy_provider" value="local_ssh" checked> 本机 SSH</label>
                 </div>
-                <p class="hint" style="margin-top:6px;">本机按插件打包后 SSH/rsync 到预发（适合境外 Git / CI 连不上国内机）。</p>
+                <p class="hint" style="margin-top:6px;">本机 SSH/rsync 到预发（改哪发哪；运维仍是一次部署）。</p>
               </div>
               <div class="grid" style="margin-top:12px;">
                 <div>
@@ -722,8 +726,8 @@
                   <input type="text" id="code_deploy_default_ref" placeholder="示例：hebo 或 staging" autocomplete="off">
                 </div>
                 <div class="full">
-                  <label>部署后访问地址（探活）</label>
-                  <input type="text" id="code_deploy_health_url" placeholder="例如 http://主机:端口/" autocomplete="off">
+                  <label>浏览器一体入口（探活）</label>
+                  <input type="text" id="code_deploy_health_url" placeholder="例如 http://主机/ 或 http://主机:3080/" autocomplete="off">
                 </div>
               </div>
               <h3 style="margin:16px 0 8px;font-size:14px;">本机 SSH</h3>
@@ -734,7 +738,7 @@
                 </div>
                 <div>
                   <label>主机</label>
-                  <input type="text" id="code_deploy_ssh_host" placeholder="例如 175.178.238.31" autocomplete="off">
+                  <input type="text" id="code_deploy_ssh_host" placeholder="例如 203.0.113.10" autocomplete="off">
                 </div>
                 <div>
                   <label>用户</label>
@@ -1119,10 +1123,10 @@ async function loadStatus() {
     else engine = "意图：规则引擎（未开 LLM）";
     $("topEngine").textContent = engine;
     const dataTxt = s.mes && s.mes.configured
-      ? "数据：MES 实时（" + s.mes.base_url + "）"
-      : "数据：演示（" + s.demo.orders + " 工单 · " + s.demo.range + "）";
+      ? "数据：MES（" + s.mes.base_url + "）"
+      : "车道：写码 / 审码 / 提交 / 部署";
     $("sideStatus").innerHTML =
-      dataTxt + "<br>引擎：" + engine + (s.network ? "" : " · 无外网");
+      dataTxt + "<br>" + engine + (s.network ? "" : " · 无外网");
   } catch (e) {
     $("topEngine").textContent = "服务未连接";
     $("sideStatus").textContent = "无法连接服务";
@@ -1132,6 +1136,21 @@ async function loadStatus() {
 /* ================= 聊天 ================= */
 function esc(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+async function issueHitl(action, bind) {
+  const r = await fetch("/api/hitl/issue", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-WorkBuddy-Hitl": "ui",
+    },
+    body: JSON.stringify(Object.assign({ action: action }, bind || {})),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d || !d.ok || !d.nonce) {
+    throw new Error((d && (d.detail || d.reply)) || "HITL 签发失败 HTTP " + r.status);
+  }
+  return d.nonce;
 }
 function md(s) {
   let t = esc(s);
@@ -1661,10 +1680,11 @@ function renderCdDeployConfirm(card, ui) {
     );
     card.querySelector(".cd-cancel").onclick = async function () {
       try {
+        var nonce = await issueHitl("code-deploy.confirm", { job_id: ui.job_id });
         await fetch("/api/code-deploy/confirm", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ job_id: ui.job_id, decision: "reject" }),
+          body: JSON.stringify({ job_id: ui.job_id, decision: "reject", nonce: nonce }),
         });
       } catch (_) {}
       card.className = "cd-card cdp-card done";
@@ -1688,6 +1708,7 @@ function renderCdDeployConfirm(card, ui) {
       goBtn.textContent = "部署中…";
       errEl.style.display = "none";
       try {
+        var nonce = await issueHitl("code-deploy.confirm", { job_id: ui.job_id });
         var r = await fetch("/api/code-deploy/confirm", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1696,6 +1717,7 @@ function renderCdDeployConfirm(card, ui) {
             decision: "approve",
             mode: sendMode,
             unit_ids: ids,
+            nonce: nonce,
           }),
         });
         var d = await r.json();
@@ -1958,9 +1980,11 @@ function renderCcPick(card, ui) {
       '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">提交代码</span></div>' +
       '<p class="cd-summary">已取消，未开始门禁</p></div>';
   };
+  // 目录已预填时主动识别当前分支（与 bridge 提交卡一致）
+  if ((wsEl.value || "").trim()) refreshBranch();
   card.querySelector(".cd-go").onclick = async () => {
     const workspace = (wsEl.value || "").trim();
-    const work_branch = (brEl.value || "").trim();
+    let work_branch = (brEl.value || "").trim();
     if (!workspace) {
       errEl.style.display = "";
       errEl.textContent = "请填写或浏览选择本机 Git 工程目录";
@@ -1968,8 +1992,29 @@ function renderCcPick(card, ui) {
     }
     if (!work_branch) {
       errEl.style.display = "";
-      errEl.textContent = "请填写要提交的分支（当前分支与配置中心均不可用时须手填）";
-      return;
+      errEl.textContent = "正在识别分支…";
+      try {
+        const cr = await fetch("/api/code-commit/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspace }),
+        });
+        const cd = await cr.json();
+        if (cd && cd.ok && (cd.work_branch || "").trim()) {
+          brEl.value = cd.work_branch;
+          hintEl.textContent = cd.branch_hint || "";
+          work_branch = String(cd.work_branch).trim();
+          errEl.style.display = "none";
+        } else {
+          errEl.textContent =
+            (cd && (cd.branch_hint || cd.detail || cd.reply)) ||
+            "请填写要提交的分支（当前分支与配置中心均不可用时须手填）";
+          return;
+        }
+      } catch (e) {
+        errEl.textContent = "分支识别失败，请手动填写";
+        return;
+      }
     }
     const goBtn = card.querySelector(".cd-go");
     goBtn.disabled = true;
@@ -2429,10 +2474,11 @@ function renderCcConfirm(card, ui) {
   syncGoLabel();
   card.querySelector(".cd-cancel").onclick = async () => {
     try {
+      const nonce = await issueHitl("code-commit.confirm", { job_id: ui.job_id });
       await fetch("/api/code-commit/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_id: ui.job_id, decision: "reject" }),
+        body: JSON.stringify({ job_id: ui.job_id, decision: "reject", nonce }),
       });
     } catch (_) {}
     card.classList.add("done");
@@ -2452,10 +2498,11 @@ function renderCcConfirm(card, ui) {
     goBtn.textContent = "提交中…";
     errEl.style.display = "none";
     try {
+      const nonce = await issueHitl("code-commit.confirm", { job_id: ui.job_id });
       const r = await fetch("/api/code-commit/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_id: ui.job_id, message, push, decision: "approve" }),
+        body: JSON.stringify({ job_id: ui.job_id, message, push, decision: "approve", nonce }),
       });
       const d = await r.json();
       const host = card.closest(".msg-assistant") || card.parentElement;
@@ -2523,11 +2570,11 @@ function renderCrPick(card, ui) {
   const suggestions = Array.isArray(ui.suggestions) ? ui.suggestions : [];
   let html =
     '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">代码审核</span><span class="cd-hint">' +
-    esc(ui.hint || "选择目录 · 确认后开始") +
+    esc(ui.hint || "选择目录 · 下一步勾选文件") +
     '</span></div><p class="cd-summary">' +
     esc(ui.summary || "请确认要审核的本机工程") +
     '</p><p class="cd-desc">' +
-    esc(ui.desc || "直读本机磁盘源码（不走 Git / VS Code Bridge），确认后开始审查。") +
+    esc(ui.desc || "先选目录，再勾选要审的文件（也可默认抽样）。") +
     "</p></div>";
   html +=
     '<label class="cd-field"><span class="cd-label">本机工程目录</span><div class="cd-path-row">' +
@@ -2552,7 +2599,7 @@ function renderCrPick(card, ui) {
   html +=
     '<p class="cd-error" style="display:none"></p><div class="cd-actions">' +
     '<button type="button" class="cd-btn cd-cancel">取消</button>' +
-    '<button type="button" class="cd-btn confirm cd-go">开始审核</button></div>';
+    '<button type="button" class="cd-btn confirm cd-go">下一步：选文件</button></div>';
   card.innerHTML = html;
   const errEl = card.querySelector(".cd-error");
   const wsEl = card.querySelector(".cd-ws");
@@ -2609,22 +2656,151 @@ function renderCrPick(card, ui) {
       errEl.textContent = "请填写或浏览选择本机工程目录";
       return;
     }
-    const name = local_path.split(/[/\\]/).filter(Boolean).pop() || local_path;
-    // 立刻切到进度态（禁止停在「审核中…」空等）
+    goBtn.disabled = true;
+    goBtn.textContent = "列出文件…";
+    errEl.style.display = "";
+    errEl.textContent = "正在列出可审文件，请勾选后开始…";
+    try {
+      const r = await fetch("/api/code-review/list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ local_path, scope: scope || "" }),
+      });
+      const d = await r.json();
+      if (!d || !d.ok) {
+        errEl.style.display = "";
+        errEl.textContent = (d && (d.detail || d.reply)) || "列文件失败";
+        goBtn.disabled = false;
+        goBtn.textContent = "下一步：选文件";
+        return;
+      }
+      renderCrFilePick(card, {
+        local_path: d.local_path || local_path,
+        scope,
+        focus,
+        files: d.files || [],
+        sample_selected: d.sample_selected || [],
+        count: d.count || 0,
+        path_ticket: d.path_ticket || "",
+      });
+    } catch (e) {
+      errEl.style.display = "";
+      errEl.textContent = "列文件失败：" + e.message;
+      goBtn.disabled = false;
+      goBtn.textContent = "下一步：选文件";
+    }
+  };
+}
+function renderCrFilePick(card, info) {
+  const local_path = info.local_path || "";
+  const scope = info.scope || "";
+  const focus = info.focus || "";
+  const path_ticket = info.path_ticket || "";
+  const files = Array.isArray(info.files) ? info.files : [];
+  const sample = Array.isArray(info.sample_selected) ? info.sample_selected : [];
+  const sampleSet = {};
+  sample.forEach((p) => {
+    const rel = typeof p === "string" ? p : (p && p.path) || "";
+    if (rel) sampleSet[rel] = true;
+  });
+  const paths = [];
+  const seen = {};
+  sample.forEach((p) => {
+    const rel = typeof p === "string" ? p : (p && p.path) || "";
+    if (!rel || seen[rel]) return;
+    seen[rel] = true;
+    paths.push(rel);
+  });
+  files.forEach((f) => {
+    const rel = typeof f === "string" ? f : (f && f.path) || "";
+    if (!rel || seen[rel]) return;
+    seen[rel] = true;
+    paths.push(rel);
+  });
+  const maxShow = 80;
+  const shown = paths.slice(0, maxShow);
+  let html =
+    '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">代码审核</span><span class="cd-hint">选择文件</span></div>' +
+    '<p class="cd-summary">目录已确认，请勾选要审的文件</p>' +
+    '<p class="cd-desc"><code>' + esc(local_path) + "</code>" +
+    (scope ? " · scope <code>" + esc(scope) + "</code>" : "") +
+    " · 共 " + (info.count || paths.length) + " 个可审，展示 " + shown.length +
+    (paths.length > maxShow ? "（已截断）" : "") +
+    "</p></div>";
+  html +=
+    '<div style="padding:0 12px 8px;display:flex;gap:8px;flex-wrap:wrap">' +
+    '<button type="button" class="cd-btn cd-all-sample">勾选默认抽样</button>' +
+    '<button type="button" class="cd-btn cd-all-shown">全选当前列表</button>' +
+    '<button type="button" class="cd-btn cd-clear">清空勾选</button></div>';
+  html +=
+    '<div class="cd-file-list" style="max-height:240px;overflow:auto;margin:0 12px 8px;padding:8px;border:1px solid #e5e7eb;border-radius:10px;font-size:12px">';
+  if (!shown.length) {
+    html += '<p class="cd-desc">没有可审文件。可改 scope 后返回重试，或直接用默认抽样开审。</p>';
+  } else {
+    shown.forEach((rel) => {
+      const checked = sampleSet[rel] ? " checked" : "";
+      html +=
+        '<label style="display:flex;gap:8px;align-items:flex-start;margin:4px 0;cursor:pointer">' +
+        '<input type="checkbox" class="cd-file-cb" data-path="' + esc(rel) + '"' + checked + ">" +
+        '<span style="word-break:break-all;font-family:ui-monospace,Menlo,monospace">' +
+        esc(rel) +
+        "</span></label>";
+    });
+  }
+  html += "</div>";
+  html +=
+    '<p class="cd-error" style="display:none"></p><div class="cd-actions">' +
+    '<button type="button" class="cd-btn cd-back">返回改目录</button>' +
+    '<button type="button" class="cd-btn confirm cd-run">开始审核所选</button>' +
+    '<button type="button" class="cd-btn confirm cd-run-sample">不选文件·默认抽样</button></div>';
+  card.innerHTML = html;
+  const errEl = card.querySelector(".cd-error");
+  const selectedFiles = () =>
+    Array.from(card.querySelectorAll(".cd-file-cb:checked"))
+      .map((cb) => cb.getAttribute("data-path") || "")
+      .filter(Boolean);
+  card.querySelector(".cd-all-sample").onclick = () => {
+    card.querySelectorAll(".cd-file-cb").forEach((cb) => {
+      cb.checked = !!sampleSet[cb.getAttribute("data-path") || ""];
+    });
+  };
+  card.querySelector(".cd-all-shown").onclick = () => {
+    card.querySelectorAll(".cd-file-cb").forEach((cb) => { cb.checked = true; });
+  };
+  card.querySelector(".cd-clear").onclick = () => {
+    card.querySelectorAll(".cd-file-cb").forEach((cb) => { cb.checked = false; });
+  };
+  card.querySelector(".cd-back").onclick = () => {
+    renderCrPick(card, {
+      workspace: local_path,
+      scope,
+      focus,
+      suggestions: [],
+      hint: "选择目录 · 下一步勾选文件",
+      summary: "请确认要审核的本机工程",
+      desc: "选目录后将列出文件供勾选。",
+    });
+  };
+  const kickOff = (fileList) => {
+    if (!path_ticket) {
+      errEl.style.display = "";
+      errEl.textContent = "缺少 path_ticket：请返回重新列出文件";
+      return;
+    }
     card.classList.add("done");
     card.innerHTML =
       '<div class="cd-head"><div class="cd-title-row"><span class="cd-badge">代码审核</span><span class="cd-hint">进行中</span></div>' +
-      '<p class="cd-summary">已确认本机工程，正在审核</p></div>' +
+      '<p class="cd-summary">已确认目录与文件，正在审核</p></div>' +
       '<div class="cd-chosen">' +
-      '<div class="cd-chosen-row"><span class="cd-k">来源</span><span class="cd-v">本机目录直读</span></div>' +
-      '<div class="cd-chosen-row"><span class="cd-k">项目</span><span class="cd-v">' + esc(name) + "</span></div>" +
-      '<div class="cd-chosen-row"><span class="cd-k">路径</span><span class="cd-v">' + esc(local_path) + "</span></div></div>" +
+      '<div class="cd-chosen-row"><span class="cd-k">路径</span><span class="cd-v">' + esc(local_path) + "</span></div>" +
+      '<div class="cd-chosen-row"><span class="cd-k">文件</span><span class="cd-v">' +
+      (fileList && fileList.length ? fileList.length + " 个（指定）" : "默认抽样") +
+      "</span></div></div>" +
       '<div class="cd-plan-host" style="padding:0 12px 8px"></div>' +
       '<div class="cd-done-banner" style="display:none;margin:0 12px 10px"></div>';
     const host = card.closest(".msg-assistant") || card.parentElement;
     if (host) {
       const replyEl = host.querySelector(".reply");
-      // 进度卡在上、报告正文在下（像普通对话流式）
       if (replyEl && replyEl.nextElementSibling === card) host.insertBefore(card, replyEl);
       if (replyEl) replyEl.innerHTML = md("正在审核本机工程 `" + local_path + "` …");
       const metaEl = host.querySelector(".msg-meta");
@@ -2636,8 +2812,18 @@ function renderCrPick(card, ui) {
       metaEl: host && host.querySelector(".msg-meta"),
       replyEl: host && host.querySelector(".reply"),
       mountInPlace: true,
-    });
+    }, fileList, path_ticket);
   };
+  card.querySelector(".cd-run").onclick = () => {
+    const sel = selectedFiles();
+    if (!sel.length) {
+      errEl.style.display = "";
+      errEl.textContent = "请至少勾选一个文件，或点「不选文件·默认抽样」";
+      return;
+    }
+    kickOff(sel);
+  };
+  card.querySelector(".cd-run-sample").onclick = () => kickOff(null);
 }
 const CR_PIPELINE = [
   { id: "validate", title: "校验工程路径" },
@@ -2665,8 +2851,10 @@ function applyCrStep(steps, event) {
   }
   return list;
 }
-function startCodeReviewWatch(local_path, scope, focus, hosts) {
+function startCodeReviewWatch(local_path, scope, focus, hosts, files, path_ticket) {
   hosts = hosts || {};
+  const fileList = Array.isArray(files) && files.length ? files : null;
+  const ticket = String(path_ticket || "").trim();
   let wrap = null;
   let planHost = hosts.planHost;
   let bannerEl = hosts.bannerEl;
@@ -2779,7 +2967,13 @@ function startCodeReviewWatch(local_path, scope, focus, hosts) {
       const r = await fetch("/api/code-review/run/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({ local_path, scope: scope || "", focus: focus || "" }),
+        body: JSON.stringify({
+          local_path,
+          scope: scope || "",
+          focus: focus || "",
+          files: fileList,
+          path_ticket: ticket,
+        }),
       });
       if (!r.ok) {
         let detail = "HTTP " + r.status;
@@ -2963,6 +3157,7 @@ function renderCdPropose(card, ui) {
     goBtn.textContent = "启动中…";
     errEl.style.display = "none";
     try {
+      const nonce = await issueHitl("code-dev.confirm", { workspace });
       const r = await fetch("/api/code-dev/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2972,6 +3167,7 @@ function renderCdPropose(card, ui) {
           code_dev_brief: getCodeDevBrief() || ui.brief || null,
           write_scope: (ui.write_scope && ui.write_scope.length) ? ui.write_scope : undefined,
           source_gate_job_id: ui.source_gate_job_id || undefined,
+          nonce,
         }),
       });
       const d = await r.json();
@@ -3359,8 +3555,10 @@ function fillForm(c) {
   $("code_commit_default_push").checked = cc.default_push !== false;
   const cdp = c.code_deploy || {};
   $("code_deploy_enabled").checked = !!cdp.enabled;
+  const uni = $("code_deploy_unified_product");
+  if (uni) uni.checked = cdp.unified_product !== false;
   $("code_deploy_default_ref").value = cdp.default_ref || "";
-  $("code_deploy_health_url").value = cdp.health_url || "";
+  $("code_deploy_health_url").value = cdp.entry_url || cdp.health_url || "";
   $("code_deploy_default_workspace").value = cdp.default_workspace || "";
   $("code_deploy_ssh_host").value = cdp.ssh_host || "";
   $("code_deploy_ssh_user").value = cdp.ssh_user || "";
@@ -3443,6 +3641,9 @@ function collect() {
     code_deploy: {
       enabled: $("code_deploy_enabled").checked,
       provider: "local_ssh",
+      unified_product: ($("code_deploy_unified_product")
+        ? $("code_deploy_unified_product").checked
+        : true),
       default_workspace: $("code_deploy_default_workspace").value.trim(),
       default_ref: ($("code_deploy_default_ref").value.trim() || "HEAD"),
       default_env: "staging",
@@ -3453,6 +3654,7 @@ function collect() {
       ssh_port: Math.max(1, Number($("code_deploy_ssh_port").value) || 22),
       ssh_key_path: $("code_deploy_ssh_key_path").value.trim(),
       ssh_app_path: $("code_deploy_ssh_app_path").value.trim(),
+      entry_url: $("code_deploy_health_url").value.trim(),
       health_url: $("code_deploy_health_url").value.trim(),
       health_timeout_sec: 8,
     },

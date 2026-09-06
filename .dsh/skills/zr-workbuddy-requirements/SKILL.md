@@ -57,7 +57,8 @@ description: >-
        ↓
 用户点确认 / 明确口头同意
        ↓
-才进入 zr-workbuddy-code-dev（mes_code_dev_start）
+才进入 **mes_code_dev_begin**（主聊天工具卡）；禁止宿主 Bash 扫仓代写。
+确认后才 `mes_code_dev_start`（须 confirmed=true）。
 ```
 
 ## 选项卡应覆盖的维度（参考）

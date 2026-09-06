@@ -300,6 +300,7 @@ class CodeReviewTests(unittest.TestCase):
         self.assertIn("确认卡", out.get("reply") or "")
 
     def test_run_review_async_mock_llm(self):
+        """ops 走 iter_llm_review（非 run_llm_review）；须 mock 异步生成器，禁止打真网。"""
         from app.code_review.config import CodeReviewConfig
         from app.code_review import ops
 
@@ -310,8 +311,10 @@ class CodeReviewTests(unittest.TestCase):
             (root / "main.py").write_text("def f():\n  return 1\n", encoding="utf-8")
             cfg = CodeReviewConfig(enabled=True, max_files=5)
 
-            async def fake_llm(**kwargs):
-                return {
+            async def fake_iter(**kwargs):
+                yield {"type": "status", "detail": "mock"}
+                yield {
+                    "type": "done",
                     "ok": True,
                     "reply": "ok",
                     "summary": "无问题",
@@ -329,11 +332,12 @@ class CodeReviewTests(unittest.TestCase):
 
             with mock.patch.object(ops, "get_config", return_value=cfg):
                 with mock.patch.object(ops, "availability", return_value={"ok": True}):
-                    with mock.patch("app.code_review.review.run_llm_review", side_effect=fake_llm):
+                    with mock.patch.object(ops, "iter_llm_review", side_effect=fake_iter):
                         out = asyncio.run(
                             ops.run_review_async(local_path=str(root), persist=False)
                         )
             self.assertTrue(out.get("ok"), out)
+            self.assertEqual(out.get("summary"), "无问题")
         finally:
             for p in root.iterdir():
                 if p.is_file():

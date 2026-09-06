@@ -9,7 +9,7 @@ from .ops import (
     status,
 )
 from .intent import is_code_review_question
-from .chat_bridge import handle_chat_code_review
+from .chat_bridge import build_pick_ui, handle_chat_code_review
 
 __all__ = [
     "FEATURE_ID",
@@ -18,6 +18,7 @@ __all__ = [
     "list_files",
     "run_review",
     "get_report",
+    "build_pick_ui",
     "is_code_review_question",
     "handle_chat_code_review",
 ]

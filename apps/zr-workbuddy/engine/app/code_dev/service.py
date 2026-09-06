@@ -138,8 +138,13 @@ def run_job(
             )
 
         scope = job.get("write_scope") or []
-        inside, outside = partition_by_scope(changed, scope)
+        inside, outside = partition_by_scope(
+            changed,
+            scope,
+            sandbox_root=sandbox_path,
+        )
         # P0：范围外文件不同步（记入 deferred），不进入 awaiting_scope（无 SPA 卡）
+        # 若触及路由/布局，同批 views 已由 partition 强制提升，避免 Vite 缺文件
         synced: list[str] = []
         if inside:
             step(f"同步 {len(inside)} 个文件到目标目录…", sid="sync")

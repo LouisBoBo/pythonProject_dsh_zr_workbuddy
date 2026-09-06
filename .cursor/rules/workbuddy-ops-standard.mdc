@@ -1,37 +1,47 @@
 ---
-description: WorkBuddy 运行约定——保留 DSH 架构、日常不跑宿主、验收看引擎
+description: WorkBuddy 五条铁律——DSH 架构、验收看引擎、features/宿主分轨（alwaysApply）
 alwaysApply: true
 ---
 
-# WorkBuddy 运行与验收标准
+# WorkBuddy 五条铁律（不可推翻）
 
-与用户协作、排障、写文档、做部署时**一律按本标准**（细则见 `AGENTS.md` §0、`docs/三大核心目标落地方案.md`）。
+权威细则：`AGENTS.md` §0、`docs/三大核心目标落地方案.md`、`host/WORKBUDDY.md`。  
+安全加固：`docs/企业级安全加固方案.md` + `.cursor/rules/workbuddy-security-enterprise.mdc`。
 
-## 四条铁律
+## 铁律
 
 1. **架构保留 DSH 写法**  
-   - 保留唯一 `plugins/mes-bridge` + `features/` 热插拔契约。  
-   - **禁止**删除 Bridge、禁止再增业务正式 Cordis 包、禁止把业务堆进 profile。
+   唯一 `plugins/mes-bridge` + `features/` 热插拔。  
+   **禁止**删 Bridge、再增业务正式 Cordis 包、把业务堆进 profile。
 
-2. **日常当作本机/服务器未装 DSH**  
-   - 不以打开 Harness/聊天窗口为步骤；不把「重启 DSH」当业务收尾。  
-   - `auto_restart_bridge` 默认 false；无远端 profile 时跳过宿主重启属正常，不得当部署失败。
+2. **业务收尾不绑宿主**  
+   不以打开 Harness/聊天为业务步骤；不以「重启 DSH」为业务收尾。  
+   `auto_restart_bridge`：非一体默认 false；一体（`unified_product=true`）默认 true（可显式 false）；无远端 profile 跳过宿主重启 ≠ 部署失败。
 
-3. **验收与发布只认引擎**  
-   - 成败看：引擎网页 / 探活 / `engine.sh … ensure|restart`。  
-   - 增量部署：改哪发哪；引擎单元收尾优先；bridge 同步≠业务成败条件。
+3. **业务验收与发布只认引擎**  
+   成败看：引擎网页 / 探活 / `engine.sh … ensure|restart`。  
+   增量：改哪发哪；bridge 文件同步 ≠ 业务成败。
 
-4. **第三方只进 `features/`**  
-   - 校验 → enable（`plugins.json` / 引擎功能插件页）→ 可按 `feature:<id>` 部署。  
-   - 安装与启停不依赖本机是否在跑 DSH。
+4. **WorkBuddy 业务第三方只进 `features/`**  
+   校验 → enable（`plugins.json` / 功能插件页）→ 可按 `feature:<id>` 部署。  
+   **禁止**任意生态 zip 硬塞进引擎功能页。
 
-## 禁止说成
+5. **生态 Cordis/Skill 走宿主**  
+   源码在 `host/`，与业务分轨。宿主跑起来后用插件中心/官方命令装。  
+   `scripts/host.sh` 仅状态提示；**禁止**擅自全量 `pnpm install`/启动宿主，除非用户明确要求。
 
-- ❌「必须重启 DSH 业务才生效」（日常业务路径）  
-- ❌「没装 DSH 就装不了第三方 / 不是 DSH 架构」  
-- ❌「删掉 Bridge 也一样」（会退出 DSH 宿主架构）
+## 分层（实施禁止推翻）
 
-## 可以这样说
+| 层 | 路径 | 禁令 |
+|---|---|---|
+| 唯一常驻包 | `plugins/mes-bridge` | 禁止第二个业务 bridge |
+| 业务能力 | `features/*` | 禁止 npm import；经 `mesEngine` |
+| 算数 | `engine/` | 密钥只在 `config.yaml`；只绑 `127.0.0.1` |
+| 宿主 | `host/` | 禁止焊业务进内核；禁止倒进根 `vendor/` |
 
-- ✅「架构在（Bridge+features），宿主可不上；验收看引擎」  
-- ✅「聊天里 Cordis 热挂工具」属 DSH 进程能力，非员工网页验收项
+## 禁止说成 / 可以说
+
+- ❌「必须重启 DSH 业务才生效」→ ✅ 日常改 feature 热插拔  
+- ❌「删掉 Bridge 也一样」→ ✅ 删 Bridge = 退出 DSH 架构  
+- ❌「引擎页能装任意上游包」→ ✅ 生态走宿主；features 要 manifest+index  
+- ✅「架构在 Bridge+features；验收看引擎；生态在 host 装」
