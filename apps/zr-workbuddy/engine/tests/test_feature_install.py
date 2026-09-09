@@ -16,7 +16,7 @@ from app import feature_install
 ROOT = Path(__file__).resolve().parents[3]  # repo root? engine/tests -> engine -> zr-workbuddy -> apps -> repo
 # tests at apps/zr-workbuddy/engine/tests → parents[0]=tests, [1]=engine, [2]=zr-workbuddy, [3]=apps, [4]=repo
 REPO = Path(__file__).resolve().parents[4]
-SAMPLE = REPO / "docs" / "examples" / "sample-third-party"
+SAMPLE = REPO / "docs" / "示例" / "sample-third-party"
 
 
 class FeatureInstallTests(unittest.TestCase):

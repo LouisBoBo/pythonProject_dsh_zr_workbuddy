@@ -10,7 +10,7 @@
 ## 安装
 
 ```bash
-scripts/plugin.sh --app zr-workbuddy install-feature docs/examples/sample-third-party
+scripts/plugin.sh --app zr-workbuddy install-feature docs/示例/sample-third-party
 ```
 
 或在引擎「功能插件」页上传本目录打成的 zip。

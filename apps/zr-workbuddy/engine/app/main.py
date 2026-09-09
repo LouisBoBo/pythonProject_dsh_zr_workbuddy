@@ -112,6 +112,14 @@ def _warn_non_loopback_bind():
             "引擎 host=%s 非本机回环：HTTP 接口无鉴权，切勿对公网暴露；请改回 runtime.yaml 的 127.0.0.1",
             host,
         )
+    try:
+        from .code_dev.service import default_data_dir, reconcile_stale_jobs
+
+        n = reconcile_stale_jobs(default_data_dir())
+        if n:
+            logging.getLogger("uvicorn.error").info("本机写码：已将 %d 个孤儿任务标为已取消", n)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("uvicorn.error").warning("本机写码孤儿任务 reconcile 失败：%s", exc)
 
 from .health import check_net  # noqa: E402
 
@@ -333,6 +341,45 @@ def api_code_dev_confirm(body: CodeDevConfirmBody):
 
 
 @app.get(
+    "/api/code-dev/jobs",
+    tags=["本机写码"],
+    summary="列出本机写码任务历史",
+    description="按更新时间倒序返回任务摘要（id、状态、诉求、时间），便于核对今日测试记录。",
+)
+def api_code_dev_jobs_list(
+    limit: int = Query(80, ge=1, le=200, description="最多返回条数"),
+):
+    from . import plugins_store
+    from .code_dev.ops import FEATURE_ID, list_recent_jobs
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机 Cursor 写码")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    return list_recent_jobs(limit=limit)
+
+
+@app.post(
+    "/api/code-dev/jobs/{job_id}/cancel",
+    tags=["本机写码"],
+    summary="取消本机写码任务",
+    description="将 queued/running 任务标为 cancelled；后台 Cursor 线程会在下一检查点退出。"
+    "引擎重启后遗留的 running 任务会在启动时自动 reconcile 为已取消。",
+)
+def api_code_dev_job_cancel(job_id: str):
+    from . import plugins_store
+    from .code_dev import cancel as code_dev_cancel
+    from .code_dev.ops import FEATURE_ID
+
+    blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机 Cursor 写码")
+    if blocked:
+        return JSONResponse(blocked, status_code=400)
+    out = code_dev_cancel(job_id)
+    if not out.get("ok"):
+        return JSONResponse(out, status_code=404)
+    return out
+
+
+@app.get(
     "/api/code-dev/jobs/{job_id}",
     tags=["本机写码"],
     summary="查询本机写码任务",
@@ -356,7 +403,7 @@ def api_code_dev_job(job_id: str):
     "/api/code-dev/jobs/{job_id}/stream",
     tags=["本机写码"],
     summary="订阅本机写码任务进度（SSE）",
-    description="推送 status / step / token / done / error；对齐 simplified local-dev job stream。"
+    description="推送 status / step / token / thinking（Cursor 思考过程，含工具调用）/ tool_call / done / error。"
     "已结束的任务会立刻推送终态 done。",
 )
 async def api_code_dev_job_stream(job_id: str):
@@ -377,11 +424,16 @@ async def api_code_dev_job_stream(job_id: str):
 
     async def event_gen():
         last_n = 0
-        last_text_len = 0
+        last_live = ""
+        last_think = ""
+        last_delivery = ""
+        last_think_ms = None
         last_progress = ""
         saw_terminal = False
+        skip_replay = {"token", "token_delivery", "replace_text", "replace_delivery", "thinking"}
+        interval = 0.04
         try:
-            for _ in range(3600):  # ~1h @1s
+            for _ in range(int(3600 / interval)):  # ~1h
                 out = code_dev_get_job(jid)
                 if not out.get("ok"):
                     yield f"data: {_json.dumps({'type': 'error', 'message': out.get('detail') or '找不到任务'}, ensure_ascii=False)}\n\n"
@@ -391,13 +443,41 @@ async def api_code_dev_job_stream(job_id: str):
                 events = job.get("events") or []
                 for ev in events[last_n:]:
                     if isinstance(ev, dict) and ev.get("type"):
+                        if str(ev.get("type") or "") in skip_replay:
+                            continue
                         yield f"data: {_json.dumps(ev, ensure_ascii=False)}\n\n"
                 last_n = len(events)
 
                 live = str(job.get("live_text") or "")
-                if len(live) > last_text_len:
-                    yield f"data: {_json.dumps({'type': 'token', 'text': live[last_text_len:]}, ensure_ascii=False)}\n\n"
-                    last_text_len = len(live)
+                if live != last_live:
+                    if live.startswith(last_live):
+                        delta = live[len(last_live) :]
+                        if delta:
+                            yield f"data: {_json.dumps({'type': 'token', 'text': delta}, ensure_ascii=False)}\n\n"
+                    else:
+                        yield f"data: {_json.dumps({'type': 'replace_text', 'text': live}, ensure_ascii=False)}\n\n"
+                    last_live = live
+
+                think = str(job.get("thinking_text") or "")
+                think_ms = job.get("thinking_duration_ms") if st in terminal else None
+                if think != last_think or think_ms != last_think_ms:
+                    if think or think_ms is not None:
+                        payload = {"type": "thinking", "text": think}
+                        if think_ms is not None:
+                            payload["thinking_duration_ms"] = think_ms
+                        yield f"data: {_json.dumps(payload, ensure_ascii=False)}\n\n"
+                    last_think = think
+                    last_think_ms = think_ms
+
+                delivery = str(job.get("delivery_text") or "")
+                if delivery != last_delivery:
+                    if last_delivery and delivery.startswith(last_delivery):
+                        delta = delivery[len(last_delivery) :]
+                        if delta:
+                            yield f"data: {_json.dumps({'type': 'token_delivery', 'text': delta}, ensure_ascii=False)}\n\n"
+                    else:
+                        yield f"data: {_json.dumps({'type': 'replace_delivery', 'text': delivery}, ensure_ascii=False)}\n\n"
+                    last_delivery = delivery
 
                 progress = str(job.get("progress") or "").strip()
                 if progress and progress != last_progress and last_n == len(events):
@@ -410,7 +490,7 @@ async def api_code_dev_job_stream(job_id: str):
                     yield f"data: {_json.dumps({'type': 'done', 'ok': st == 'succeeded', 'status': st, 'job_id': jid, 'job': job, 'reply': reply, 'synced_files': job.get('synced_files') or [], 'error': job.get('error')}, ensure_ascii=False)}\n\n"
                     saw_terminal = True
                     return
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(interval)
             if not saw_terminal:
                 yield f"data: {_json.dumps({'type': 'error', 'message': '订阅超时，请用 code-dev-job 查询'}, ensure_ascii=False)}\n\n"
         except Exception as e:
@@ -452,7 +532,8 @@ class PickFolderBody(BaseModel):
     tags=["本机工具"],
     summary="弹出本机选文件夹对话框",
     description="在运行引擎的本机弹出原生文件夹选择框（macOS/Windows/Linux）；"
-    "仅适用于浏览器与引擎同机。用于写码/审码确认卡「浏览…」。",
+    "仅适用于浏览器与引擎同机。一体桌面包优先走 Electron 选目录，不经过本接口。"
+    "用于写码/审码确认卡「浏览…」。",
 )
 def api_pick_folder(body: PickFolderBody = PickFolderBody()):
     from .folder_picker import pick_local_folder

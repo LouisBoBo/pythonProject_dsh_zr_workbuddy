@@ -16,9 +16,11 @@ export function apply(ctx) {
     eng.defineTool({
       name: "mes_pcb",
       description:
-        "【PCB 制造工艺专家，非 MES 查数】回答印制电路板相关的工艺、材料、检测、标准与缺陷问题。" +
+        "【PCB 制造工艺专家，非 MES 查数，也非 BOM 算术】回答印制电路板相关的工艺、材料、检测、标准与缺陷问题。" +
         "凡涉及：PCB 工序/流程、叠层、阻抗线宽、钻孔电镀、阻焊丝印、HASL/OSP/ENIG、DFM、" +
         "AOI/飞针/电测分工、IPC 术语、缺陷排障——必须优先调用本工具，不要改用 mes_ask 或泛化对话。" +
+        "【不要用本工具】统计用户粘贴的位号清单（如 R1,10）有几行/总数量——应改用 pcb_count_bom；" +
+        "解析 100x80mm 这类板尺寸字符串——应改用 pcb_parse_dimensions。" +
         "示例：「PCB 有哪些工序？」「飞针和 AOI 在短路检测上怎么分工？」「Class 2 和 3 孔铜差多少？」",
       parameters: {
         question: {

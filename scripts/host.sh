@@ -26,7 +26,7 @@ CMD="${1:-status}"
 shift || true
 
 if [ ! -d "$HOST" ] || [ ! -f "$HOST/package.json" ]; then
-  echo "未找到 host/ 工程，请先按 docs/宿主二次开发-同仓host与部署方案.md 导入源码。" >&2
+  echo "未找到 host/ 工程，请先按 docs/架构与选型/宿主二次开发-同仓host与部署方案.md 导入源码。" >&2
   exit 1
 fi
 
@@ -56,6 +56,17 @@ resolve_dsh_bin() {
     done
   fi
   printf '%s' "$dsh_bin"
+}
+
+# dsh 脚本为 #!/usr/bin/env node；须把同目录 node 置于 PATH 前，避免误用 /usr/local 的 Node 20
+prepend_dsh_node_path() {
+  local dsh_bin="$1"
+  local node_bin
+  [ -n "$dsh_bin" ] || return 0
+  node_bin="$(dirname "$dsh_bin")"
+  if [ -x "$node_bin/node" ]; then
+    export PATH="$node_bin${PATH:+:$PATH}"
+  fi
 }
 
 cmd_status() {
@@ -188,10 +199,15 @@ cmd_wire() {
     echo "执行: plugin.sh --app zr-workbuddy install bridge（不重启宿主）"
     "$ROOT/scripts/plugin.sh" --app zr-workbuddy install bridge
   fi
+  # 接线时同步写入公司市场 npmrc（不启动 web 也会准备好）
+  # shellcheck source=lib/company_dsh_market.sh
+  . "$ROOT/scripts/lib/company_dsh_market.sh"
+  apply_company_dsh_market
   cmd_verify || true
 }
 
 cmd_ensure_engine() {
+  sync_dev_engine_env
   "$ROOT/scripts/engine.sh" zr-workbuddy ensure
 }
 
@@ -216,8 +232,27 @@ cmd_stop_web() {
   echo "已停止"
 }
 
+# 开发态 :3080 须跟 runtime.yaml 对齐；勿继承桌面 App 注入的 18000（会导致 mes-runtime 连错端口）
+sync_dev_engine_env() {
+  unset WORKBUDDY_DESKTOP DSH_DESKTOP WORKBUDDY_ENGINE_DIR \
+    WORKBUDDY_ENGINE_HOST WORKBUDDY_ENGINE_PORT \
+    APP_ENGINE_HOST APP_ENGINE_PORT APP_ENGINE_PYTHON || true
+  local rt
+  rt="$(python3 "$ROOT/scripts/lib/read_runtime.py" "$ROOT/apps/zr-workbuddy/engine" 2>/dev/null || true)"
+  if [ -n "$rt" ]; then
+    export APP_ENGINE_HOST="$(printf '%s' "$rt" | python3 -c 'import json,sys;print(json.load(sys.stdin)["host"])')"
+    export APP_ENGINE_PORT="$(printf '%s' "$rt" | python3 -c 'import json,sys;print(json.load(sys.stdin)["port"])')"
+    export APP_ENGINE_PYTHON="$(printf '%s' "$rt" | python3 -c 'import json,sys;print(json.load(sys.stdin)["python"])')"
+  fi
+}
+
 _launch_web_daemon() {
   local from_host="$1"
+  sync_dev_engine_env
+  # 公司插件市场：仅注入 DSHM_REGISTRY_URL + @zhongruan npmrc（可被环境变量覆盖）
+  # shellcheck source=lib/company_dsh_market.sh
+  . "$ROOT/scripts/lib/company_dsh_market.sh"
+  apply_company_dsh_market
   mkdir -p "$ROOT/tmp"
   local log="$ROOT/tmp/host-web.log"
   local pidf="$ROOT/tmp/host-web.pid"
@@ -255,6 +290,7 @@ _launch_web_daemon() {
       echo "PATH 无 dsh。可装全局 CLI，或: scripts/host.sh start-web --from-host" >&2
       exit 1
     fi
+    prepend_dsh_node_path "$dsh_bin"
     echo "启动全局 dsh（守护、脱离 IDE 进程组）: $dsh_bin ${web_args[*]} （:$PORT）"
     echo "日志: $log"
     # cwd=HOME：与 restart-dsh.sh 一致，credentials/profile 可解析
@@ -321,6 +357,10 @@ cmd_ensure_web() {
 }
 
 cmd_restart_web() {
+  # 重启前对齐 profile 内 dsh-tools，避免「本轮运行失败 reading prepare」
+  if [ -x "$ROOT/scripts/check-vendor.sh" ]; then
+    "$ROOT/scripts/check-vendor.sh" --fix || true
+  fi
   cmd_stop_web || true
   sleep 1
   cmd_start_web "$@"
@@ -328,6 +368,12 @@ cmd_restart_web() {
 
 cmd_up() {
   echo "=== WorkBuddy up：引擎 + 聊天壳（守护）==="
+  local desk_pid
+  desk_pid="$(lsof -tiTCP:13080 -sTCP:LISTEN 2>/dev/null || true)"
+  if [ -n "$desk_pid" ]; then
+    echo "警告: 桌面 App 仍在 :13080 (PID $desk_pid)，会注入 APP_ENGINE_PORT=18000 污染环境。" >&2
+    echo "      开发请完全退出桌面 App，只用 http://127.0.0.1:$PORT 。" >&2
+  fi
   # 引擎失败不阻断聊天壳；两边各自 ensure
   if ! cmd_ensure_engine; then
     echo "警告: 引擎 ensure 未成功，继续尝试聊天壳…" >&2

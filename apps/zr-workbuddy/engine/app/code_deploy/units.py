@@ -15,10 +15,10 @@ _FEATURE_RE = re.compile(
 @dataclass(frozen=True)
 class DeployUnit:
     id: str
-    kind: str  # feature | engine | bridge | skills | scripts
+    kind: str  # feature | engine | bridge | skills | scripts | workspace
     label: str
     local_rels: tuple[str, ...]  # 相对仓库根，rsync 源
-    action: str  # sync_feature | sync_engine_restart | sync_bridge | sync_bridge_reinstall | sync_only
+    action: str  # sync_feature | sync_engine_restart | sync_bridge | sync_bridge_reinstall | sync_only | sync_build_restart
     risk: str  # low | medium | high
     selected: bool = True
 
@@ -42,6 +42,7 @@ def _action_hint(action: str) -> str:
         "sync_bridge": "仅同步 bridge 文件（一体部署关且未开 auto_restart_bridge 时）",
         "sync_bridge_reinstall": "同步 bridge；一体部署收尾会确保远端聊天壳",
         "sync_only": "仅同步文件",
+        "sync_build_restart": "构建前端 dist、同步 backend，并重启远端 API",
     }.get(action, action)
 
 
@@ -50,6 +51,26 @@ def _norm(rel: str) -> str:
     while r.startswith("./"):
         r = r[2:]
     return r.lstrip("/")
+
+
+def is_workbuddy_layout(root: Path | str | None) -> bool:
+    """是否为本仓 ZR-WorkBuddy 布局（有 apps/zr-workbuddy/engine）。"""
+    p = Path(root or ".").expanduser()
+    try:
+        p = p.resolve()
+    except OSError:
+        return False
+    return (p / "apps" / "zr-workbuddy" / "engine").is_dir()
+
+
+def is_vite_backend_layout(root: Path | str | None) -> bool:
+    """普通项目：frontend/（Vite）+ backend/，预发通常只跑 dist 而不是源码。"""
+    p = Path(root or ".").expanduser()
+    try:
+        p = p.resolve()
+    except OSError:
+        return False
+    return (p / "frontend" / "package.json").is_file() and (p / "backend").is_dir()
 
 
 def path_to_unit_id(rel: str) -> str | None:
@@ -151,21 +172,45 @@ def build_unit(unit_id: str, *, selected: bool = True) -> DeployUnit | None:
             risk="low",
             selected=selected,
         )
+    if uid == "workspace":
+        return DeployUnit(
+            id="workspace",
+            kind="workspace",
+            label="当前项目（前端构建产物 + 后端）",
+            local_rels=(".",),
+            action="sync_build_restart",
+            risk="medium",
+            selected=selected,
+        )
     return None
 
 
-def map_paths_to_units(paths: list[str]) -> list[DeployUnit]:
+def map_paths_to_units(
+    paths: list[str], workspace: Path | str | None = None
+) -> list[DeployUnit]:
     """变更路径 → 去重后的部署单元（默认全选）。"""
+    generic = bool(workspace) and not is_workbuddy_layout(workspace)
     order: list[str] = []
     seen: set[str] = set()
     for p in paths:
-        uid = path_to_unit_id(p)
+        if generic:
+            r = _norm(p)
+            uid = "workspace" if r and r != ".git" and not r.startswith(".git/") else None
+        else:
+            uid = path_to_unit_id(p)
         if not uid or uid in seen:
             continue
         seen.add(uid)
         order.append(uid)
-    # 执行顺序：feature → skills/scripts → engine → bridge
-    rank = {"feature": 0, "skills": 1, "scripts": 2, "engine": 3, "bridge": 4}
+    # 执行顺序：feature → workspace → skills/scripts → engine → bridge
+    rank = {
+        "feature": 0,
+        "workspace": 0,
+        "skills": 1,
+        "scripts": 2,
+        "engine": 3,
+        "bridge": 4,
+    }
 
     def sort_key(uid: str) -> tuple[int, str]:
         u = build_unit(uid)
@@ -206,12 +251,16 @@ def filter_units_by_ids(units: list[DeployUnit], selected_ids: list[str] | None)
 
 
 def list_catalog_units(workspace: Path | str | None = None) -> list[DeployUnit]:
-    """全量目录：扫描 features/* + engine/bridge/skills/scripts（存在才纳入）。"""
+    """全量目录：WorkBuddy 仓扫描 features/* + engine/bridge；普通项目整仓一个单元。"""
     root = Path(workspace or ".").expanduser()
     try:
         root = root.resolve()
     except OSError:
         root = Path(".")
+
+    if not is_workbuddy_layout(root):
+        built = build_unit("workspace", selected=True)
+        return [built] if built else []
 
     ids: list[str] = []
     feat_root = root / "apps" / "zr-workbuddy" / "features"
@@ -234,7 +283,7 @@ def list_catalog_units(workspace: Path | str | None = None) -> list[DeployUnit]:
 
     out: list[DeployUnit] = []
     seen: set[str] = set()
-    rank = {"feature": 0, "skills": 1, "scripts": 2, "engine": 3, "bridge": 4}
+    rank = {"feature": 0, "workspace": 0, "skills": 1, "scripts": 2, "engine": 3, "bridge": 4}
 
     def sort_key(uid: str) -> tuple[int, str]:
         bu = build_unit(uid)

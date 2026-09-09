@@ -66,7 +66,7 @@ is_our_engine_pid() {
   kill -0 "$pid" 2>/dev/null || return 1
   cmd="$(ps -p "$pid" -o args= 2>/dev/null || true)"
   case "$cmd" in
-    *"$ENGINE"*|*"/apps/$APP/engine"*) return 0 ;;
+    *"$ENGINE"*) return 0 ;;
   esac
   # 典型：Python -m uvicorn app.main:app --host … --port …
   case "$cmd" in
@@ -267,7 +267,13 @@ case "$CMD" in
   status) do_status ;;
   stop) do_stop ;;
   ensure) do_start_bg ;;
-  restart) do_stop; do_start_bg ;;
+  restart)
+    do_stop
+    do_start_bg
+    if lsof -tiTCP:3080 -sTCP:LISTEN >/dev/null 2>&1; then
+      echo "提示: 若 :3080 聊天仍报引擎未就绪，请执行 scripts/host.sh restart-web"
+    fi
+    ;;
   start)
     if [ "$DETACH" = "1" ]; then do_start_bg; else do_start_fg; fi
     ;;

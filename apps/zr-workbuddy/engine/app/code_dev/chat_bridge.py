@@ -311,7 +311,7 @@ def confirm_and_start(
                 "validation": {"ok": False, "errors": ["需求摘要过短"], "warnings": []},
             }
         hints = dict(validation["target_hints"])
-        scope = explicit_scope[:40] or write_scope_from_hints(hints)
+        scope = explicit_scope[:40] or write_scope_from_hints(hints, req)
     else:
         validation = validate_requirement_for_start(brief, req)
         if not validation.get("ok"):
@@ -326,7 +326,7 @@ def confirm_and_start(
             or hint2.get("confidence") == "high"
         ):
             hints = hint2
-        scope = explicit_scope[:40] or write_scope_from_hints(hints)
+        scope = explicit_scope[:40] or write_scope_from_hints(hints, req)
 
     out = code_dev_start(
         workspace=ws,

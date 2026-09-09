@@ -150,6 +150,39 @@ def get_job(job_id: str) -> dict[str, Any]:
     }
 
 
+def list_recent_jobs(*, limit: int = 80) -> dict[str, Any]:
+    """列出本机写码任务（按更新时间倒序），供历史核对。"""
+    cap = max(1, min(int(limit or 80), 200))
+    rows = job_store.list_jobs(_dd())[:cap]
+    slim: list[dict[str, Any]] = []
+    for j in rows:
+        brief = j.get("brief") if isinstance(j.get("brief"), dict) else {}
+        req = str(
+            j.get("requirement")
+            or j.get("message")
+            or brief.get("original_goal")
+            or brief.get("summary")
+            or ""
+        ).strip()
+        slim.append(
+            {
+                "id": j.get("id"),
+                "status": j.get("status"),
+                "workspace": j.get("workspace"),
+                "requirement": req[:160],
+                "created_at": j.get("created_at"),
+                "updated_at": j.get("updated_at"),
+                "error": j.get("error"),
+            }
+        )
+    return {
+        "ok": True,
+        "count": len(slim),
+        "jobs": slim,
+        "data_dir": str(_dd() / "local_dev"),
+    }
+
+
 def cancel(job_id: str) -> dict[str, Any]:
     jid = (job_id or "").strip()
     if not jid:

@@ -6,25 +6,74 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import http from "node:http";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-/** plugins/<app>-runtime/lib → apps/<app>/engine */
-export const ENGINE_DIR = path.join(__dirname, "..", "..", "..", "engine");
+
+function _resolveLayout() {
+  const linkRepo = path.join(os.homedir(), ".dsh", "link", "DSH-ZR-WorkBuddy");
+  const candidates = [
+    {
+      engine: path.join(__dirname, "..", "..", "..", "engine"),
+      repo: path.join(__dirname, "..", "..", "..", "..", ".."),
+    },
+    {
+      engine: path.join(linkRepo, "apps", "zr-workbuddy", "engine"),
+      repo: linkRepo,
+    },
+  ];
+  for (const c of candidates) {
+    const runtimePath = path.join(c.engine, "config", "runtime.yaml");
+    const readRuntime = path.join(c.repo, "scripts", "lib", "read_runtime.py");
+    if (fs.existsSync(runtimePath) && fs.existsSync(readRuntime)) {
+      return {
+        engineDir: c.engine,
+        repoRoot: c.repo,
+        readRuntime,
+        runtimePath,
+      };
+    }
+  }
+  const fallback = candidates[0];
+  return {
+    engineDir: fallback.engine,
+    repoRoot: fallback.repo,
+    readRuntime: path.join(fallback.repo, "scripts", "lib", "read_runtime.py"),
+    runtimePath: path.join(fallback.engine, "config", "runtime.yaml"),
+  };
+}
+
+const _LAYOUT = _resolveLayout();
+/** plugins/<app>-runtime/lib → apps/<app>/engine（profile 嵌套安装时回退 link） */
+export const ENGINE_DIR = _LAYOUT.engineDir;
 export const ENGINE_CLI = path.join(ENGINE_DIR, "engine_cli.py");
-/** apps/<app>/engine → 仓库根 */
-const REPO_ROOT = path.join(ENGINE_DIR, "..", "..", "..");
-const READ_RUNTIME = path.join(REPO_ROOT, "scripts", "lib", "read_runtime.py");
-const RUNTIME_PATH = path.join(ENGINE_DIR, "config", "runtime.yaml");
+const REPO_ROOT = _LAYOUT.repoRoot;
+const READ_RUNTIME = _LAYOUT.readRuntime;
+const RUNTIME_PATH = _LAYOUT.runtimePath;
 const CHARTS_DIR = path.join(ENGINE_DIR, "data", "charts");
+
+function runtimeSubprocessEnv() {
+  const env = { ...process.env };
+  // 桌面一体（13080）：保留 APP_ENGINE_PORT（通常 18000）
+  if (env.DSH_DESKTOP === "1" && env.WORKBUDDY_DESKTOP === "1") {
+    return env;
+  }
+  // 开发 :3080：去掉桌面遗留，read_runtime 读 runtime.yaml；host.sh 会显式 export 8000
+  delete env.WORKBUDDY_ENGINE_PORT;
+  delete env.WORKBUDDY_ENGINE_HOST;
+  delete env.WORKBUDDY_ENGINE_DIR;
+  return env;
+}
 
 function loadRuntime() {
   const defaults = { host: "127.0.0.1", port: 8000, python: "python3" };
   try {
-    if (fs.existsSync(READ_RUNTIME)) {
+    if (fs.existsSync(READ_RUNTIME) && fs.existsSync(RUNTIME_PATH)) {
       const out = execFileSync("python3", [READ_RUNTIME, RUNTIME_PATH], {
         encoding: "utf8",
         timeout: 5000,
+        env: runtimeSubprocessEnv(),
       });
       const j = JSON.parse(out.trim());
       return {

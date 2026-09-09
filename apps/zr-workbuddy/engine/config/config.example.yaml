@@ -29,6 +29,15 @@ code_dev:
   model: composer-2.5
   max_concurrent: 1
   cursor_timeout_sec: 2700
+  # 删除/下线核对类：Cursor 读盘上限与超时（秒）；预检跳过 Cursor 默认关闭
+  delete_verify_timeout_sec: 240
+  max_read_tools: 28
+  delete_preflight_auto_skip: false
+  # 删除策略：cursor_plan=Cursor 只读定位清单 + 引擎校验执行（推荐）
+  # engine_first=仅引擎规则 | cursor_full=Cursor 改码（易超时，不推荐）
+  delete_mode: cursor_plan
+  delete_plan_timeout_sec: 120
+  # 旧字段兼容：delete_engine_first: true → engine_first；false → cursor_full
   default_workspace: ""
 
 # P0-3 本机目录直读审码（默认关闭；无 Git / 无 IDE Bridge）
@@ -67,6 +76,7 @@ code_deploy:
   ssh_key_path: ""               # 如 ~/.ssh/id_ed25519（只填路径）
   ssh_app_path: ""               # 远端目录，如 /www/wwwroot/DSH-WorkBuddy（与 8092 旧项目目录无关）
   ssh_port: 22
+  remote_restart_cmd: ""        # 可选；仅允许 systemctl/supervisorctl/service 单条重启。空则自动匹配该目录的服务
   # 引擎只绑 127.0.0.1；公网入口须另开 nginx（例：listen 8093 → 127.0.0.1:8095）
   # 勿把 remote_engine_port 设成与 entry_url 同一端口，否则 nginx 无法 listen
   remote_engine_port: 8095       # 远端引擎回环端口（勿用 8091/8092 旧项目口）

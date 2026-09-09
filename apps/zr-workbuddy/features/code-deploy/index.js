@@ -153,7 +153,7 @@ export function apply(ctx) {
       description:
         "【一体部署唯一入口】用户说部署/上线/预发时：本轮只调用本工具一次，参数全可空。" +
         "禁止传 env=production/prod；禁止再调 mes_code_deploy_prepare；出卡后禁止长回复或重试。" +
-        "人点确认卡才会同步（新项目目录，不动 8092）。",
+        "人点确认卡才会同步（WorkBuddy 仓按单元增量；普通项目同步整个仓库）。",
       parameters: {
         workspace: {
           type: "string",

@@ -83,6 +83,28 @@ MODULE_HINTS: list[dict[str, Any]] = [
         ),
     },
     {
+        "module": "看板管理",
+        "keywords": (
+            "看板管理",
+            "看板",
+            "kanban",
+            "仓储看板",
+            "生产看板",
+            "品质看板",
+            "设备看板",
+            "综合看板",
+        ),
+        "paths": (
+            "frontend/src/views/board/",
+            "frontend/src/views/kanban/",
+            "frontend/src/views/",
+            "frontend/src/router/index.js",
+            "frontend/src/layouts/AppLayout.vue",
+            "frontend/src/api/",
+            "backend/app/routers/",
+        ),
+    },
+    {
         "module": "系统设置",
         "keywords": ("系统设置", "settings", "配置中心"),
         "paths": (
@@ -90,6 +112,27 @@ MODULE_HINTS: list[dict[str, Any]] = [
             "frontend/src/router/index.js",
             "frontend/src/layouts/AppLayout.vue",
             "backend/app/routers/settings.py",
+        ),
+    },
+    {
+        "module": "品质管理",
+        "keywords": (
+            "品质管理",
+            "品质概览",
+            "品质",
+            "检验方案",
+            "quality",
+            "inspection",
+            "quality-management",
+        ),
+        "paths": (
+            "frontend/src/views/quality-management/",
+            "frontend/src/router/index.js",
+            "frontend/src/layouts/AppLayout.vue",
+            "frontend/src/api/qualityInspectionPlans.js",
+            "frontend/src/api/",
+            "backend/app/routers/quality.py",
+            "backend/app/routers/",
         ),
     },
 ]
@@ -362,6 +405,104 @@ def validate_requirement_for_start(
     }
 
 
+_DELETE_INTENT_SKIP = (
+    "新增或删除任何功能",
+    "不在菜单/页面新增或删除",
+    "不删除任何功能",
+)
+_DELETE_INTENT_PATTERNS = (
+    r"删除.{0,16}(?:功能|页面|菜单|模块|子项|入口|接口|路由|视图|组件)",
+    r"移除.{0,16}(?:功能|页面|菜单|模块|子项|入口|接口|路由|视图|组件)",
+    r"去掉.{0,16}(?:功能|页面|菜单|模块|子项|入口|接口|路由|视图|组件)",
+    r"完整移除",
+    r"清理残留",
+    r"下线.{0,12}(?:功能|页面|模块|菜单)",
+)
+
+
+def is_delete_intent(requirement: str) -> bool:
+    text = (requirement or "").strip()
+    if not text:
+        return False
+    if any(skip in text for skip in _DELETE_INTENT_SKIP):
+        return False
+    return any(re.search(p, text) for p in _DELETE_INTENT_PATTERNS)
+
+
+def extract_claimed_deleted_paths(text: str) -> list[str]:
+    """从终稿/过程文案中提取声称已删除的相对路径。"""
+    out: list[str] = []
+    seen: set[str] = set()
+    for line in (text or "").splitlines():
+        if "已删除" not in line and "删除" not in line:
+            continue
+        for m in re.finditer(r"`([^`]+)`", line):
+            p = m.group(1).strip().replace("\\", "/").lstrip("./")
+            if not p or p.startswith("http") or p in seen:
+                continue
+            if "/" not in p and not p.endswith((".vue", ".js", ".py", ".ts", ".tsx", ".jsx")):
+                continue
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def validate_delete_completion(
+    requirement: str,
+    assistant_text: str,
+    deleted_files: list[str],
+    *,
+    target_root: Any | None = None,
+    forced_deletes: list[str] | None = None,
+) -> str:
+    """删除类任务：终稿声称删掉的文件仍在本机则判失败，避免「菜单没了但页面还在」假成功。"""
+    if not is_delete_intent(requirement):
+        return ""
+    from pathlib import Path
+
+    from .delete_verify import verify_delete_on_target
+
+    claimed = extract_claimed_deleted_paths(assistant_text)
+    deleted_norm = {
+        str(p).replace("删除 ", "").replace("\\", "/").strip().lstrip("./")
+        for p in (deleted_files or [])
+    }
+    deleted_norm |= {
+        str(p).replace("\\", "/").strip().lstrip("./") for p in (forced_deletes or [])
+    }
+    root = Path(target_root).resolve() if target_root else None
+    orphans: list[str] = []
+    for rel in claimed:
+        if rel in deleted_norm:
+            continue
+        if root is not None and (root / rel).is_file():
+            orphans.append(rel)
+    if orphans:
+        sample = "、".join(orphans[:8])
+        return (
+            f"删除未完成：以下文件仍在本机工程中：{sample}。"
+            "Cursor 须在沙箱内物理删除这些文件（不可只在文案写「已删除」）；"
+            "请核对需求后重新开工。"
+        )
+    if claimed and not deleted_norm:
+        if root is not None and verify_delete_on_target(root, requirement).get("ok"):
+            return ""
+        return (
+            f"沙箱未产生文件删除（0 个），但终稿声称已删 {len(claimed)} 个文件，"
+            "本机页面/API 不会被自动清理。请重新开工并确认 Cursor 执行了 rm/Delete。"
+        )
+    if not deleted_norm and any(
+        k in (requirement or "") for k in ("页面", "功能", "模块", "视图", "组件", "子项")
+    ):
+        if root is not None and verify_delete_on_target(root, requirement).get("ok"):
+            return ""
+        return (
+            "删除类任务须在沙箱内物理删除页面/组件文件（当前 0 个删除）。"
+            "仅改菜单或路由不够，请重新开工。"
+        )
+    return ""
+
+
 def validate_synced_files(
     brief: CodeDevBrief,
     requirement: str,
@@ -405,13 +546,18 @@ def validate_synced_files(
     return {"ok": False, "mismatch": True, "detail": detail}
 
 
-def write_scope_from_hints(hints: dict[str, Any]) -> list[str]:
+def write_scope_from_hints(hints: dict[str, Any], requirement: str = "") -> list[str]:
     """高置信度时自动限制同步范围，防止改错模块。
 
     含「菜单/页面」类诉求时，强制带上路由/布局/api 等接线路径，
     否则只同步视图文件会导致刷新后看不到新界面。
     """
-    if hints.get("confidence") != "high":
+    corpus = (requirement or "").lower()
+    menu_related = any(
+        k in corpus
+        for k in ("菜单", "路由", "页面", "导航", "tab", "侧边栏", "删除", "移除", "去掉", "清理")
+    )
+    if hints.get("confidence") != "high" and not menu_related:
         return []
     out: list[str] = []
     seen: set[str] = set()
@@ -425,14 +571,22 @@ def write_scope_from_hints(hints: dict[str, Any]) -> list[str]:
 
     for p in hints.get("expected_paths") or []:
         _add(p)
-    # 前端壳：新增页面几乎总要改路由/菜单/API
+    # 前端壳：新增/删除页面、改菜单几乎总要改路由/菜单/API
     for p in (
         "frontend/src/router/",
         "frontend/src/layouts/",
         "frontend/src/api/",
+        "backend/app/routers/",
     ):
         _add(p)
-    return out[:20]
+    # 删除类诉求：页面多在 views/；仅扩必要前缀，禁止整棵 backend/app/
+    if any(k in corpus for k in ("删除", "移除", "去掉", "清理", "下线")):
+        _add("frontend/src/views/")
+        _add("frontend/src/views/board/")
+        _add("frontend/src/views/kanban/")
+        _add("backend/app/main.py")
+        _add("backend/app/routers/")
+    return out[:32]
 
 
 def infer_target_from_text(*texts: str) -> dict[str, Any]:

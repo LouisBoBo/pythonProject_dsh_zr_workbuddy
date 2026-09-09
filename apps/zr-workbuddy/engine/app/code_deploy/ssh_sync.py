@@ -2,25 +2,383 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 import shlex
+import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from .config import CodeDeployConfig, validate_ssh_settings
-from .units import DeployUnit
+from .config import CodeDeployConfig, validate_remote_restart_cmd, validate_ssh_settings
+from .units import DeployUnit, is_vite_backend_layout
 
 _REL_OK = re.compile(r"^[A-Za-z0-9_./\-]+$")
+_UNIT_NAME_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,80}\.service$")
+_SUPERVISOR_NAME_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$")
+_MAX_HTTP_BODY = 2_000_000
+_BACKEND_KEEP = (
+    ".venv",
+    "*.db",
+    "*.sqlite",
+    "*.sqlite3",
+    "*.db-journal",
+    "*.db-wal",
+    "*.db-shm",
+    "uploads",
+    "storage",
+)
+_ROUTER_PREFIX_RE = re.compile(
+    r"APIRouter\s*\((?:[^)]*?prefix\s*=\s*[\"']([^\"']+)[\"'])"
+)
+_ROUTER_ROUTE_RE = re.compile(
+    r"@router\.(?:get|post|put|patch|delete)\(\s*[\"']([^\"']+)[\"']"
+)
+_APP_ROUTE_RE = re.compile(
+    r"@app\.(?:get|post|put|patch|delete)\(\s*[\"']([^\"']+)[\"']"
+)
 
 
-def _run(cmd: list[str], *, timeout: int = 120) -> tuple[int, str, str]:
+def _run(cmd: list[str], *, timeout: int = 120, cwd: str | None = None) -> tuple[int, str, str]:
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd
+        )
         return p.returncode, p.stdout or "", p.stderr or ""
     except (OSError, subprocess.TimeoutExpired) as e:
         return 1, "", str(e)
+
+
+def _which_npm() -> str:
+    found = shutil.which("npm")
+    if found:
+        return found
+    home = Path.home()
+    matches = sorted(home.glob(".nvm/versions/node/v*/bin/npm"), reverse=True)
+    for cand in matches:
+        if cand.is_file():
+            return str(cand)
+    return ""
+
+
+def collect_local_api_paths(backend: Path | str) -> list[str]:
+    """从本机 backend 源码收集 FastAPI 路径，用于部署后核对远端是否已加载新路由。"""
+    root = Path(backend)
+    app_dir = root / "app" if (root / "app").is_dir() else root
+    found: list[str] = []
+    seen: set[str] = set()
+    if not app_dir.is_dir():
+        return []
+    for py in sorted(app_dir.rglob("*.py")):
+        if any(part in {".venv", "venv", "__pycache__", "tests"} for part in py.parts):
+            continue
+        try:
+            text = py.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        prefixes = _ROUTER_PREFIX_RE.findall(text)
+        prefix = prefixes[0].rstrip("/") if prefixes else ""
+        for rel in _ROUTER_ROUTE_RE.findall(text):
+            rel_n = (rel or "").strip()
+            if not rel_n:
+                continue
+            full = f"{prefix}/{rel_n.lstrip('/')}" if prefix else rel_n
+            if not full.startswith("/"):
+                full = "/" + full
+            full = re.sub(r"/{2,}", "/", full)
+            if full not in seen:
+                seen.add(full)
+                found.append(full)
+        for rel in _APP_ROUTE_RE.findall(text):
+            rel_n = (rel or "").strip()
+            if not rel_n.startswith("/"):
+                continue
+            if rel_n not in seen:
+                seen.add(rel_n)
+                found.append(rel_n)
+    return found
+
+
+def parse_discovered_services(stdout: str) -> tuple[list[str], list[str]]:
+    """解析远端探测输出：UNIT:foo.service / SUPERVISOR:name。"""
+    units: list[str] = []
+    supers: list[str] = []
+    seen_u: set[str] = set()
+    seen_s: set[str] = set()
+    for raw in (stdout or "").splitlines():
+        line = raw.strip()
+        if line.startswith("UNIT:"):
+            name = line[5:].strip()
+            if _UNIT_NAME_OK.match(name) and name not in seen_u:
+                seen_u.add(name)
+                units.append(name)
+        elif line.startswith("SUPERVISOR:"):
+            name = line[11:].strip()
+            if _SUPERVISOR_NAME_OK.match(name) and name not in seen_s:
+                seen_s.add(name)
+                supers.append(name)
+    return units, supers
+
+
+def entry_join(entry: str, path: str) -> str:
+    base = (entry or "").strip().rstrip("/")
+    p = path if path.startswith("/") else "/" + path
+    return base + p if base else ""
+
+
+def _app_path_safe_for_discover(app: str) -> bool:
+    parts = [p for p in Path(app).parts if p not in {"/", ""}]
+    return len(parts) >= 3
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    """禁止跟随跳转，避免 health/openapi 被 302 到回环/元数据。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        return None
+
+
+def _http_get(url: str, *, timeout: int = 8) -> tuple[int, bytes]:
+    opener = build_opener(_NoRedirect)
+    req = Request(url, method="GET")
+    with opener.open(req, timeout=timeout) as resp:
+        code = int(getattr(resp, "status", None) or resp.getcode() or 0)
+        raw = resp.read(_MAX_HTTP_BODY + 1)
+    if len(raw) > _MAX_HTTP_BODY:
+        raise ValueError("响应体过大")
+    return code, raw
+
+
+def _fetch_json(url: str, *, timeout: int = 8) -> dict[str, Any] | None:
+    u = (url or "").strip()
+    if not u.startswith(("http://", "https://")):
+        return None
+    try:
+        parsed = urlparse(u)
+    except Exception:  # noqa: BLE001
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    if _is_blocked_health_host(parsed.hostname):
+        return None
+    try:
+        code, raw = _http_get(u, timeout=timeout)
+        if not (200 <= code < 300):
+            return None
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+        return data if isinstance(data, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _discover_backend_services_cmd(app: str) -> str:
+    # 必须匹配 "$APP/"，避免 /www/wwwroot/zr 误配 zr-aicoding
+    return (
+        "APP=" + shlex.quote(app) + "\n"
+        "for f in /etc/systemd/system/*.service; do\n"
+        "  [ -f \"$f\" ] || continue\n"
+        "  if grep -qF \"$APP/\" \"$f\"; then echo \"UNIT:$(basename \"$f\")\"; fi\n"
+        "done\n"
+        "for d in /etc/supervisor/conf.d /etc/supervisord.d; do\n"
+        "  [ -d \"$d\" ] || continue\n"
+        "  for f in \"$d\"/*; do\n"
+        "    [ -f \"$f\" ] || continue\n"
+        "    if grep -qF \"$APP/\" \"$f\"; then\n"
+        "      n=$(grep -E '^\\[program:' \"$f\" | head -1 | sed 's/\\[program://;s/\\]//')\n"
+        "      [ -n \"$n\" ] && echo \"SUPERVISOR:$n\"\n"
+        "    fi\n"
+        "  done\n"
+        "done\n"
+        "echo DISCOVER_DONE\n"
+    )
+
+
+def _install_remote_backend_deps(
+    ssh: list[str],
+    app: str,
+    log: Callable[[str], None],
+    urec: dict[str, Any],
+) -> bool:
+    """在远端 backend/.venv 里按 requirements.txt 安装（有 venv 才执行）。"""
+    remote = (
+        "APP=" + shlex.quote(app) + "\n"
+        "REQ=\"$APP/backend/requirements.txt\"\n"
+        "PIP=\"$APP/backend/.venv/bin/pip\"\n"
+        "if [ ! -f \"$REQ\" ]; then echo pip_skip_no_req; exit 0; fi\n"
+        "if [ ! -x \"$PIP\" ]; then echo pip_skip_no_venv; exit 0; fi\n"
+        "\"$PIP\" install -r \"$REQ\" -q && echo pip_ok\n"
+    )
+    log("远端安装 backend 依赖 …")
+    urec["logs"].append("pip install -r backend/requirements.txt")
+    code, out, err = _run(ssh + [f"bash -lc {shlex.quote(remote)}"], timeout=180)
+    token = (out or "").strip().splitlines()[-1] if (out or "").strip() else ""
+    if code != 0 or token not in {"pip_ok", "pip_skip_no_req", "pip_skip_no_venv"}:
+        urec["ok"] = False
+        urec["error"] = (err or out or "远端 pip install 失败")[:400]
+        urec["logs"].append(urec["error"])
+        return False
+    urec["logs"].append(token)
+    return True
+
+
+def _restart_and_verify_backend(
+    ssh: list[str],
+    *,
+    cfg: CodeDeployConfig,
+    app: str,
+    backend: Path,
+    log: Callable[[str], None],
+    urec: dict[str, Any],
+) -> bool:
+    """同步后必须让远端 API 进程加载新代码；仅 rsync 不够（uvicorn 无 --reload）。"""
+    custom = str(getattr(cfg, "remote_restart_cmd", "") or "").strip()
+    if custom:
+        cmd_err = validate_remote_restart_cmd(custom)
+        if cmd_err:
+            urec["ok"] = False
+            urec["error"] = cmd_err
+            urec["logs"].append(cmd_err)
+            return False
+        log("执行配置的远端重启命令 …")
+        urec["logs"].append("remote_restart_cmd")
+        c3, o3, e3 = _run(ssh + [f"bash -lc {shlex.quote(custom)}"], timeout=120)
+        if c3 != 0:
+            urec["ok"] = False
+            urec["error"] = (e3 or o3 or "远端重启失败")[:400]
+            urec["logs"].append(urec["error"])
+            return False
+        urec["logs"].append("remote restart ok")
+    else:
+        if not _app_path_safe_for_discover(app):
+            urec["ok"] = False
+            urec["error"] = (
+                "后端已同步，但远端目录过浅，无法自动匹配 systemd。"
+                "请在设置填写「远端重启命令」，例如 systemctl restart zr-aicoding-api"
+            )
+            urec["logs"].append(urec["error"])
+            return False
+        log("探测并重启远端 API 进程 …")
+        urec["logs"].append("discover systemd/supervisor")
+        c0, o0, e0 = _run(
+            ssh + [f"bash -lc {shlex.quote(_discover_backend_services_cmd(app))}"],
+            timeout=40,
+        )
+        if c0 != 0 or "DISCOVER_DONE" not in (o0 or ""):
+            urec["ok"] = False
+            urec["error"] = (e0 or o0 or "探测远端 API 服务失败")[:400]
+            urec["logs"].append(urec["error"])
+            return False
+        units, supers = parse_discovered_services(o0 or "")
+        if len(units) > 3:
+            urec["ok"] = False
+            urec["error"] = (
+                f"匹配到过多 systemd 服务（{len(units)}），已中止以免误重启。"
+                "请在设置填写明确的「远端重启命令」"
+            )
+            urec["logs"].append(urec["error"])
+            return False
+        if units:
+            for unit in units:
+                log(f"systemctl restart {unit} …")
+                urec["logs"].append(f"systemctl restart {unit}")
+                c1, o1, e1 = _run(
+                    ssh + [f"bash -lc {shlex.quote('systemctl restart ' + shlex.quote(unit))}"],
+                    timeout=60,
+                )
+                if c1 != 0:
+                    urec["ok"] = False
+                    urec["error"] = (e1 or o1 or f"重启 {unit} 失败")[:400]
+                    urec["logs"].append(urec["error"])
+                    return False
+            urec["logs"].append("remote restart ok")
+        elif supers:
+            for name in supers[:3]:
+                log(f"supervisorctl restart {name} …")
+                urec["logs"].append(f"supervisorctl restart {name}")
+                c1, o1, e1 = _run(
+                    ssh
+                    + [
+                        f"bash -lc {shlex.quote('supervisorctl restart ' + shlex.quote(name))}"
+                    ],
+                    timeout=60,
+                )
+                if c1 != 0:
+                    urec["ok"] = False
+                    urec["error"] = (e1 or o1 or f"重启 supervisor {name} 失败")[:400]
+                    urec["logs"].append(urec["error"])
+                    return False
+            urec["logs"].append("remote restart ok")
+        else:
+            urec["ok"] = False
+            urec["error"] = (
+                "后端文件已同步，但找不到匹配该目录的 systemd/supervisor 服务，"
+                "API 进程不会加载新接口。请在设置填写「远端重启命令」，"
+                "例如 systemctl restart zr-aicoding-api"
+            )
+            urec["logs"].append(urec["error"])
+            return False
+
+    entry = ""
+    if hasattr(cfg, "resolve_entry_url"):
+        entry = cfg.resolve_entry_url()
+    else:
+        entry = (getattr(cfg, "entry_url", None) or cfg.health_url or "").strip()
+    api_health = entry_join(entry, "/api/health")
+    if api_health:
+        log(f"探活 API {api_health} …")
+        last: dict[str, Any] = {}
+        for _ in range(15):
+            last = probe_health(api_health, timeout=min(4, int(cfg.health_timeout_sec or 8)))
+            if last.get("ok"):
+                break
+            time.sleep(1)
+        if not last.get("ok"):
+            urec["ok"] = False
+            urec["error"] = (
+                "已重启 API，但 /api/health 未就绪："
+                + str(last.get("detail") or last.get("status") or "timeout")[:200]
+            )
+            urec["logs"].append(urec["error"])
+            return False
+        urec["logs"].append("api health ok")
+
+    openapi_url = entry_join(entry, "/openapi.json")
+    local_paths = [
+        p
+        for p in collect_local_api_paths(backend)
+        if p.startswith("/api/") and p.count("/") >= 2
+    ][:40]
+    if openapi_url and local_paths:
+        spec = None
+        for _ in range(8):
+            spec = _fetch_json(openapi_url, timeout=8)
+            if spec and isinstance(spec.get("paths"), dict):
+                break
+            time.sleep(1)
+        if spec and isinstance(spec.get("paths"), dict):
+            remote_paths = {str(x) for x in spec["paths"].keys()}
+            missing = [p for p in local_paths if p not in remote_paths]
+            if missing:
+                urec["ok"] = False
+                urec["error"] = (
+                    "远端 API 仍未加载新路由（典型原因：进程没真正重启）。缺："
+                    + "、".join(missing[:5])
+                )
+                urec["logs"].append(urec["error"])
+                return False
+            urec["logs"].append("openapi routes ok")
+        else:
+            urec["ok"] = False
+            urec["error"] = (
+                "无法读取远端 /openapi.json，不能确认 API 已加载新路由。"
+                "请检查 nginx 是否反代了 /openapi.json 与 /api/"
+            )
+            urec["logs"].append(urec["error"])
+            return False
+    return True
 
 
 def _ssh_base(key: Path, port: int, user: str, host: str) -> list[str]:
@@ -96,6 +454,99 @@ def probe_remote_app(cfg: CodeDeployConfig) -> dict[str, Any]:
     return {"ok": False, "empty": None, "error": f"远端探测未知输出：{token!r}"}
 
 
+def _sync_vite_backend_layout(
+    root: Path,
+    *,
+    cfg: CodeDeployConfig,
+    user: str,
+    host: str,
+    app: str,
+    rsh: str,
+    ssh: list[str],
+    excludes: list[str],
+    log: Callable[[str], None],
+) -> dict[str, Any]:
+    """对齐 GitHub deploy-staging：本机 npm run build，再 rsync dist + backend。"""
+    urec: dict[str, Any] = {"id": "workspace", "ok": True, "logs": []}
+    npm = _which_npm()
+    if not npm:
+        urec["ok"] = False
+        urec["error"] = "本机找不到 npm，无法构建前端 dist（8090 跑的是构建产物不是源码）"
+        urec["logs"].append(urec["error"])
+        return urec
+    frontend = root / "frontend"
+    log("本机构建前端 npm run build …")
+    urec["logs"].append("npm run build")
+    c0, o0, e0 = _run([npm, "run", "build"], timeout=420, cwd=str(frontend))
+    if c0 != 0:
+        urec["ok"] = False
+        urec["error"] = (e0 or o0 or "npm run build 失败")[:400]
+        urec["logs"].append(urec["error"])
+        return urec
+    dist = frontend / "dist"
+    if not dist.is_dir():
+        urec["ok"] = False
+        urec["error"] = "构建完成但没有 frontend/dist，无法更新预发页面"
+        urec["logs"].append(urec["error"])
+        return urec
+    backend = root / "backend"
+    mkdir_cmd = (
+        f"mkdir -p -- {shlex.quote(app + '/frontend/dist')} "
+        f"{shlex.quote(app + '/backend')}"
+    )
+    _run(ssh + [mkdir_cmd], timeout=40)
+
+    log("rsync frontend/dist → 远端 …")
+    urec["logs"].append("rsync frontend/dist")
+    cmd_fe = [
+        "rsync",
+        "-az",
+        "--delete",
+        "-e",
+        rsh,
+        f"{dist}/",
+        f"{user}@{host}:{app}/frontend/dist/",
+    ]
+    c1, o1, e1 = _run(cmd_fe, timeout=300)
+    if c1 != 0:
+        urec["ok"] = False
+        urec["error"] = (e1 or o1 or "rsync frontend/dist 失败")[:400]
+        urec["logs"].append(urec["error"])
+        return urec
+
+    log("rsync backend → 远端 …")
+    urec["logs"].append("rsync backend")
+    cmd_be = [
+        "rsync",
+        "-az",
+        "--delete",
+        "-e",
+        rsh,
+        *excludes,
+    ]
+    for pat in _BACKEND_KEEP:
+        cmd_be.extend(["--exclude", pat])
+    cmd_be.extend(
+        [
+            f"{backend}/",
+            f"{user}@{host}:{app}/backend/",
+        ]
+    )
+    c2, o2, e2 = _run(cmd_be, timeout=300)
+    if c2 != 0:
+        urec["ok"] = False
+        urec["error"] = (e2 or o2 or "rsync backend 失败")[:400]
+        urec["logs"].append(urec["error"])
+        return urec
+    if not _install_remote_backend_deps(ssh, app, log, urec):
+        return urec
+    if not _restart_and_verify_backend(
+        ssh, cfg=cfg, app=app, backend=backend, log=log, urec=urec
+    ):
+        return urec
+    return urec
+
+
 def deploy_units_ssh(
     workspace: Path | str,
     units: list[DeployUnit],
@@ -139,6 +590,26 @@ def deploy_units_ssh(
 
     for unit in units:
         urec: dict[str, Any] = {"id": unit.id, "ok": True, "logs": []}
+        if unit.id == "workspace" and is_vite_backend_layout(root):
+            urec = _sync_vite_backend_layout(
+                root,
+                cfg=cfg,
+                user=user,
+                host=host,
+                app=app,
+                rsh=rsh,
+                ssh=ssh,
+                excludes=excludes,
+                log=_log,
+            )
+            results.append(urec)
+            if not urec["ok"]:
+                return {
+                    "ok": False,
+                    "error": f"单元 {unit.id} 失败：{urec.get('error')}",
+                    "results": results,
+                }
+            continue
         for rel in unit.local_rels:
             local = _safe_local_path(root, rel)
             if local is None:
@@ -190,18 +661,23 @@ def deploy_units_ssh(
         if not urec["ok"]:
             return {"ok": False, "error": f"单元 {unit.id} 失败：{urec.get('error')}", "results": results}
 
-    # 远端运行时隔离：专用端口 + venv，禁止抢占/误杀已有服务
-    prep = _ensure_remote_engine_runtime(ssh, app, cfg, log=_log)
-    if not prep.get("ok"):
-        return {
-            "ok": False,
-            "error": prep.get("error") or "远端运行时准备失败",
-            "results": results,
-            "engine_restart": False,
-        }
-    results.append({"id": "_remote_runtime", "ok": True, "logs": prep.get("logs") or []})
-
     unified = bool(getattr(cfg, "unified_product", True))
+    want_engine_runtime = need_engine or unified
+    prep: dict[str, Any] = {"ok": True, "port": None, "logs": []}
+    if want_engine_runtime:
+        # 远端运行时隔离：专用端口 + venv，禁止抢占/误杀已有服务
+        prep = _ensure_remote_engine_runtime(ssh, app, cfg, log=_log)
+        if not prep.get("ok"):
+            return {
+                "ok": False,
+                "error": prep.get("error") or "远端运行时准备失败",
+                "results": results,
+                "engine_restart": False,
+            }
+        results.append({"id": "_remote_runtime", "ok": True, "logs": prep.get("logs") or []})
+    else:
+        _log("非一体部署且无引擎单元，跳过远端 WorkBuddy 引擎准备")
+
     engine_restarted = False
     engine_ensured = False
 
@@ -512,9 +988,14 @@ def _write_remote_deploy_receipt(
         ],
         "note": "本文件由 code-deploy 在远端写入；unit_ids/synced_rels 即本次实际 rsync 范围。",
     }
-    rel_path = "apps/zr-workbuddy/engine/data/code_deploy/last_deploy_receipt.json"
+    unit_ids = {u.id for u in units}
+    if "workspace" in unit_ids and "engine" not in unit_ids and "bridge" not in unit_ids:
+        rel_path = ".workbuddy-deploy/last_deploy_receipt.json"
+        remote_dir = f"{app.rstrip('/')}/.workbuddy-deploy"
+    else:
+        rel_path = "apps/zr-workbuddy/engine/data/code_deploy/last_deploy_receipt.json"
+        remote_dir = f"{app.rstrip('/')}/apps/zr-workbuddy/engine/data/code_deploy"
     remote_path = f"{app.rstrip('/')}/{rel_path}"
-    remote_dir = f"{app.rstrip('/')}/apps/zr-workbuddy/engine/data/code_deploy"
     body = json.dumps(receipt, ensure_ascii=False, indent=2)
     _log(f"写入远端部署回执 → {remote_path}")
 
@@ -684,8 +1165,6 @@ def _is_blocked_health_host(host: str) -> bool:
 
 
 def probe_health(url: str, *, timeout: int = 8) -> dict[str, Any]:
-    import urllib.request
-
     u = (url or "").strip()
     if not u.startswith(("http://", "https://")):
         return {"ok": False, "detail": "health_url 须为 http(s)"}
@@ -698,9 +1177,7 @@ def probe_health(url: str, *, timeout: int = 8) -> dict[str, Any]:
     if _is_blocked_health_host(parsed.hostname):
         return {"ok": False, "detail": "health_url 禁止指向本机/链路本地/元数据地址", "url": u}
     try:
-        req = urllib.request.Request(u, method="GET")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            code = getattr(resp, "status", None) or resp.getcode()
-            return {"ok": 200 <= int(code) < 400, "status": int(code), "url": u}
+        code, _raw = _http_get(u, timeout=timeout)
+        return {"ok": 200 <= int(code) < 400, "status": int(code), "url": u}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "detail": str(e)[:200], "url": u}

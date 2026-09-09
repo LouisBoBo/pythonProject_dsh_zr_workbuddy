@@ -252,7 +252,7 @@ def units_from_diff(
             for p in dirty_paths:
                 if p not in paths:
                     paths.append(p)
-    units = map_paths_to_units(paths)
+    units = map_paths_to_units(paths, workspace=workspace)
     skipped = []
     from .units import path_to_unit_id
 

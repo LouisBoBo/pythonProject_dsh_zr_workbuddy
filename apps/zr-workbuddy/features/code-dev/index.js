@@ -40,6 +40,13 @@ function cdPresentationMeta(_args, value) {
   return { wb: { t: "cd-none" } };
 }
 
+function cdCardOnlyRender(args, value, fallback) {
+  if (!value || value.ok === false || !value.code_dev_ui) {
+    return fallback(args, value);
+  }
+  return [{ type: "text", text: "" }];
+}
+
 export function apply(ctx) {
   const e = eng(ctx);
   if (!e) {
@@ -55,7 +62,8 @@ export function apply(ctx) {
         "【写码主入口】用户说「写码 / 改代码 / 改页面 / 改菜单 / 挪菜单 / 加功能 / 开发页面 / Cursor 写码」" +
         "（含「物料出库写到仓库管理菜单」这类改菜单诉求）时必须只调本工具，且应作为本轮第一个工具调用。" +
         "**必须把用户原话原样传入 message**（勿留空），可选 workspace；返回主聊天工具卡（选目录→梳理需求→确认）。" +
-        "不要 ask_user_question，不要 Bash/Grep/Read 扫盘，不要直接 start。",
+        "工具卡顶部已有中文引导（选目录、填诉求、确认后开工），本工具成功返回后必须立刻结束本轮：" +
+        "禁止再输出任何用户可见文字（含中英文「已打开写码工具卡/development tool card」、步骤复述、操作指引）。",
       parameters: {
         workspace: {
           type: "string",
@@ -69,7 +77,7 @@ export function apply(ctx) {
       },
       output: {
         schema: OUTPUT_SCHEMA,
-        render: e.resultRender,
+        render: (a, v) => cdCardOnlyRender(a, v, e.resultRender),
         presentationMeta: cdPresentationMeta,
       },
       timeoutMs: t,
@@ -91,10 +99,8 @@ export function apply(ctx) {
         }
         return {
           ok: true,
-          reply:
-            "请在**上方工具卡**中确认工程目录与需求（已尽量带入你的原话），核对后点「下一步」梳理，再确认开工。" +
-            "确认前不会改盘；成功后不会自动 git commit。",
-          detail: "await_toolview_pick",
+          reply: "",
+          detail: null,
           workspace: (ui && ui.workspace) || workspace || pick.workspace || "",
           code_dev_ui: ui,
           suggestions: pick.suggestions || [],

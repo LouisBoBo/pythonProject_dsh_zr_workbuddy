@@ -211,7 +211,7 @@ def prepare(
             mapped["dirty_paths"] = dirty_paths
             mapped["dirty_skipped_same_as_last"] = dirty_skipped
             mapped["paths"] = list(dirty_paths)
-            mapped["unit_objs"] = map_paths_to_units(dirty_paths)
+            mapped["unit_objs"] = map_paths_to_units(dirty_paths, workspace=root)
             mapped["units"] = [u.to_dict() for u in mapped["unit_objs"]]
         base_resolved = False
     else:
@@ -238,7 +238,7 @@ def prepare(
                 "paths": dirty_paths,
                 "dirty_paths": dirty_paths,
                 "dirty_skipped_same_as_last": dirty_skipped,
-                "unit_objs": map_paths_to_units(dirty_paths),
+                "unit_objs": map_paths_to_units(dirty_paths, workspace=root),
                 "units": [],
                 "skipped_paths": [],
                 "base_ref": base,
@@ -456,9 +456,13 @@ def _build_confirm_ui(job: dict[str, Any]) -> dict[str, Any]:
             str(x).strip() for x in (reasons[:2] if isinstance(reasons, list) else []) if str(x).strip()
         )[:220],
         "note": (
-            "首次/远端空目录或基线不可用 → 全量锁定"
-            if force_full
-            else ("相对上次部署只同步变更单元" if mode == "incremental" else "全量同步目录全部单元")
+            "将本机构建 frontend/dist、同步 backend 并重启远端 API；不自动 git commit"
+            if any(isinstance(u, dict) and u.get("id") == "workspace" for u in (units or []))
+            else (
+                "首次/远端空目录或基线不可用 → 全量锁定"
+                if force_full
+                else ("相对上次部署只同步变更单元" if mode == "incremental" else "全量同步目录全部单元")
+            )
         ),
     }
 
@@ -659,6 +663,19 @@ def confirm(
                 actions.append("bridge 仅同步（未开一体/宿主收尾）")
         if not actions:
             actions.append("仅同步文件")
+        if "workspace" in unit_ids:
+            actions = [a for a in actions if a != "仅同步文件"]
+            if any("npm run build" in str(x) for x in logs):
+                actions.append("已构建前端 dist 并同步 backend")
+            else:
+                actions.append("已同步项目文件")
+            actions.append("未执行 git commit（提交请用「提交代码」）")
+            if any("remote restart ok" in str(x) for x in logs):
+                actions.append("已重启远端 API 进程")
+            if any("openapi routes ok" in str(x) for x in logs):
+                actions.append("已核对远端接口路由")
+            elif any("未配置远端重启" in str(x) for x in logs):
+                actions.append("未配置远端重启；页面一般已更新，接口改动需在服务器重启 API")
         # 一体成功叙事：入口 + 引擎/壳收尾
         reply_extra = ""
         if getattr(cfg, "unified_product", True):

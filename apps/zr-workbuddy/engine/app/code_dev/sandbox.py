@@ -421,3 +421,30 @@ def sync_changed_to_target(
             f"同步不完整：计划 {len(planned)} 个，实际 {len(written)} 个"
         )
     return written
+
+
+def apply_deletes_to_target(target: Path, rels: list[str]) -> list[str]:
+    """把沙箱中已删除的相对路径从本机工程移除；拒绝逃逸与符号链接。"""
+    target = target.resolve()
+    if not target.is_dir():
+        raise RuntimeError("目标目录无效")
+    removed: list[str] = []
+    for rel in rels:
+        rel_n = str(rel or "").strip().replace("\\", "/")
+        if not rel_n or is_sensitive_rel(rel_n):
+            continue
+        dest = (target / rel_n).resolve()
+        try:
+            dest.relative_to(target)
+        except ValueError as e:
+            raise RuntimeError(f"删除路径逃逸：{rel_n}") from e
+        dest_entry = target / rel_n
+        if dest_entry.is_symlink() or dest.is_symlink():
+            raise RuntimeError(f"目标为符号链接，拒绝删除：{rel_n}")
+        if not dest.exists():
+            continue
+        if not dest.is_file():
+            raise RuntimeError(f"拒绝删除非普通文件：{rel_n}")
+        dest.unlink()
+        removed.append(rel_n)
+    return removed

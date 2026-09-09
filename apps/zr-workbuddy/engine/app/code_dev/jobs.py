@@ -79,6 +79,7 @@ def create_job(
         "messages": [{"role": "user", "content": message, "at": now}],
         "sandbox_path": None,
         "changed_files": [],
+        "deleted_files": [],
         "synced_files": [],
         "write_scope": scope,
         "file_paths": paths,
@@ -96,6 +97,9 @@ def create_job(
         "progress": "",
         "steps": [],
         "live_text": "",
+        "delivery_text": "",
+        "thinking_text": "",
+        "thinking_duration_ms": None,
         "events": [],
         "brief": brief or {},
         "target_hints": target_hints or {},
@@ -181,7 +185,7 @@ def update_job(data_dir: Path, job_id: str, **fields: Any) -> dict[str, Any] | N
 
 
 def record_event(data_dir: Path, job_id: str, event: dict[str, Any]) -> dict[str, Any] | None:
-    """写入进度事件（供面板轮询/SSE）；截断 events，更新 progress / steps / live_text。"""
+    """写入进度事件（供面板轮询/SSE）；截断 events，更新 progress / steps / live_text / thinking。"""
     with _lock:
         job = get_job(data_dir, job_id)
         if not job:
@@ -189,12 +193,15 @@ def record_event(data_dir: Path, job_id: str, event: dict[str, Any]) -> dict[str
         ev = dict(event or {})
         ev.setdefault("at", int(time.time()))
         events = list(job.get("events") or [])
-        events.append(ev)
-        if len(events) > 240:
-            events = events[-240:]
+        et = str(ev.get("type") or "")
+        if et in {"thinking", "replace_text", "replace_delivery"} and events and str(events[-1].get("type") or "") == et:
+            events[-1] = ev
+        else:
+            events.append(ev)
+            if len(events) > 240:
+                events = events[-240:]
         job["events"] = events
 
-        et = str(ev.get("type") or "")
         if et == "status":
             job["progress"] = str(ev.get("text") or ev.get("detail") or job.get("progress") or "")
         elif et == "step":
@@ -218,10 +225,39 @@ def record_event(data_dir: Path, job_id: str, event: dict[str, Any]) -> dict[str
             piece = str(ev.get("text") or "")
             if piece:
                 job["live_text"] = str(job.get("live_text") or "") + piece
-                if len(job["live_text"]) > 12000:
-                    job["live_text"] = job["live_text"][-12000:]
+                if len(job["live_text"]) > 100000:
+                    job["live_text"] = job["live_text"][-100000:]
         elif et == "replace_text":
-            job["live_text"] = str(ev.get("text") or "")[:12000]
+            job["live_text"] = str(ev.get("text") or "")[:100000]
+        elif et == "token_delivery":
+            piece = str(ev.get("text") or "")
+            if piece:
+                job["delivery_text"] = str(job.get("delivery_text") or "") + piece
+                if len(job["delivery_text"]) > 100000:
+                    job["delivery_text"] = job["delivery_text"][-100000:]
+        elif et == "replace_delivery":
+            job["delivery_text"] = str(ev.get("text") or "")[:100000]
+        elif et == "thinking":
+            piece = str(ev.get("text") or "")
+            if piece:
+                prev = str(job.get("thinking_text") or "")
+                if ev.get("snapshot") or ev.get("replaced") or (not prev) or piece.startswith(prev):
+                    job["thinking_text"] = piece[:12000]
+                elif prev.startswith(piece):
+                    pass
+                else:
+                    merged = prev + "\n" + piece
+                    job["thinking_text"] = merged[-12000:]
+            dur = ev.get("thinking_duration_ms")
+            if dur is not None:
+                try:
+                    job["thinking_duration_ms"] = max(0, int(dur))
+                except (TypeError, ValueError):
+                    pass
+        elif et == "tool_call":
+            line = str(ev.get("text") or ev.get("detail") or "").strip()
+            if line:
+                job["current_action"] = line[:240]
         elif et == "error":
             job["progress"] = str(ev.get("message") or ev.get("detail") or "出错")
 

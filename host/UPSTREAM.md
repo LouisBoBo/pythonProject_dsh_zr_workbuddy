@@ -23,9 +23,17 @@
 
 ## 升级策略
 
-1. 更换上游版本时：在干净工作区对新版本再执行同等排除规则的 rsync（或等价导入）。  
-2. 自有补丁尽量薄，记入 `PATCHES.md`（若无补丁可暂不建）。  
-3. **禁止**把 `features/` 业务逻辑合并进本树。
+日常**不要**更新 `host/`。完整步骤（备份说明文件、rsync 排除项、接线、插件中心验收）见仓库文档：
+
+**[docs/宿主与运维排障/host维护与更新.md](../docs/宿主与运维排障/host维护与更新.md)**
+
+摘要：
+
+1. 只用上游确定的 Release / tag，不要从本机无名 `Downloads` 覆盖。  
+2. `rsync` 排除 `node_modules`、`.dsh-build`、`dist`、`.git`；先备份 `UPSTREAM.md`、`WORKBUDDY.md`（及 `PATCHES.md`）。  
+3. `cd host && pnpm install`，再 `scripts/host.sh wire` / `verify`；插件中心装一个第三方能「运行中」才算成功。  
+4. 改本文件：版本号、tag、日期。自有补丁尽量薄，记入 `PATCHES.md`（若无补丁可暂不建）。  
+5. **禁止**把 `features/` 业务逻辑合并进本树。
 
 ## 第三方声明
 

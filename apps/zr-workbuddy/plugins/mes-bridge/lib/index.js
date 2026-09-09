@@ -17,13 +17,15 @@ export const inject = ["tools"];
 
 const WORKBUDDY_CODE_DEV_PROMPT = [
   "## ZR-WorkBuddy 写码路由（强制）",
-  "当用户要改代码、改页面、改菜单、挪菜单、加功能、做报表页、Cursor 写码时：",
+  "当用户要改代码、改页面、改菜单、挪菜单、加功能、做报表页、Cursor 写码、删除菜单子项时：",
   "1. **本轮第一个工具调用必须是 `mes_code_dev_begin`，且 message=用户原话（原样，禁止留空）**。",
-  "2. **禁止**用 Bash / Grep / Glob / Read / Write / StrReplace 去扫或改用户工程来「完成写码」。",
+  "2. **禁止**用 `run_code` / code-mode（会触发 scheduler.prepare 报错 → 本轮运行失败），以及 Bash / Grep / Glob / Read / Write / StrReplace 去扫或改用户工程来「完成写码」。",
   "3. **禁止**先长思考、先查 Vite/日志/HMR；改菜单类诉求同样走 begin → 主聊天工具卡。",
   "4. 工具卡内完成：选目录 → 梳理需求 → 确认后才由 Cursor Local 改盘；未确认禁止 `mes_code_dev_start`。",
-  "5. 写码不会自动 git commit；提交用 `mes_code_commit_begin`。",
-  "示例：「MES系统仓库管理菜单新增物料出库记录」→ 立刻 `mes_code_dev_begin`，message 填该句原文。",
+  "5. `mes_code_dev_begin` 返回后**禁止**再复述「已为您打开写码工具卡…请在卡片中…」——卡已在主聊天展示，回复留空或仅一句「请在上方工具卡确认」。",
+  "6. **禁止**在同一轮里再调其它工具（尤其 `run_code`）；begin 成功即停，等用户在卡片操作。",
+  "7. 写码不会自动 git commit；提交用 `mes_code_commit_begin`。",
+  "示例：「看板管理菜单删除设备看板子项」→ 立刻 `mes_code_dev_begin`，message 填该句原文。",
   "",
   "## ZR-WorkBuddy 一体部署路由（强制）",
   "当用户要部署到预发/上线、自动化部署、发布到服务器时：",
@@ -111,6 +113,50 @@ export function apply(ctx) {
     }
   } catch (e) {
     console.warn("[mes-bridge] systemPrompt 注入失败", e);
+  }
+
+  // 启动时断言 TOOL_RUNTIME_SCHEDULER 可解析：profile 若另装了 dsh-tools，
+  // agent-loop 会在任意工具（含 mes_code_dev_begin）上炸
+  // Cannot read properties of undefined (reading 'prepare')。
+  import("@deepseek-ai/dsh-tools")
+    .then((toolsMod) => {
+      const sym =
+        toolsMod.TOOL_RUNTIME_SCHEDULER ||
+        (toolsMod.default && toolsMod.default.TOOL_RUNTIME_SCHEDULER);
+      const sched = sym && ctx.tools ? ctx.tools[sym] : null;
+      if (!sched || typeof sched.prepare !== "function") {
+        console.error(
+          "[mes-bridge] FATAL: ctx.tools 缺少同源 TOOL_RUNTIME_SCHEDULER.prepare。" +
+            "多为 ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-tools 与宿主双实例。" +
+            "请执行: scripts/check-vendor.sh --fix && scripts/plugin.sh --app zr-workbuddy install bridge --restart",
+        );
+      } else {
+        console.log("[mes-bridge] TOOL_RUNTIME_SCHEDULER.prepare 可用");
+      }
+    })
+    .catch((e) => {
+      console.warn(
+        "[mes-bridge] scheduler 健康检查跳过:",
+        e && e.message ? e.message : e,
+      );
+    });
+
+  // 次要防线：拒绝 run_code（真正的 prepare 崩在 agent-loop Symbol，须靠 check-vendor 对齐）
+  try {
+    if (ctx.tools && typeof ctx.tools.guard === "function") {
+      ctx.tools.guard((exec) => {
+        const name = String((exec && exec.name) || "");
+        if (name === "run_code") {
+          return (
+            "禁止使用 run_code。改菜单/写码请只调用 mes_code_dev_begin，在工具卡内确认后开工。"
+          );
+        }
+        return undefined;
+      });
+      console.log("[mes-bridge] 已注册 tools.guard：拒绝 run_code");
+    }
+  } catch (e) {
+    console.warn("[mes-bridge] tools.guard 注册失败", e);
   }
 
   runtime

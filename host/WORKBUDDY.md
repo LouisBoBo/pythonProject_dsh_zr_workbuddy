@@ -2,7 +2,7 @@
 
 > 上游完整说明见同目录 [`README.md`](./README.md)。  
 > 版本与许可见 [`UPSTREAM.md`](./UPSTREAM.md)。  
-> 产品方案见 [`docs/宿主二次开发-同仓host与部署方案.md`](../docs/宿主二次开发-同仓host与部署方案.md)。
+> 产品方案见 [`docs/架构与选型/宿主二次开发-同仓host与部署方案.md`](../docs/架构与选型/宿主二次开发-同仓host与部署方案.md)。
 
 ## 目标
 

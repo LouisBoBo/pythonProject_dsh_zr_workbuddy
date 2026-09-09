@@ -24,9 +24,13 @@ def mutating_path_guarded(path: str, method: str) -> bool:
         "/api/code-deploy/confirm",
     }:
         return True
+    if p.startswith("/api/code-dev/jobs/") and p.endswith("/cancel"):
+        return True
     if p.startswith("/api/code-review/run"):
         return True
     if p.startswith("/api/config"):
+        return True
+    if p in {"/api/pick-folder"}:
         return True
     return False
 

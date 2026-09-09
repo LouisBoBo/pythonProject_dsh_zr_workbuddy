@@ -85,6 +85,7 @@ class HitlOriginTests(unittest.TestCase):
         self.assertTrue(mutating_path_guarded("/api/code-dev/confirm", "POST"))
         self.assertTrue(mutating_path_guarded("/api/code-review/run/stream", "POST"))
         self.assertTrue(mutating_path_guarded("/api/config", "PUT"))
+        self.assertTrue(mutating_path_guarded("/api/pick-folder", "POST"))
         self.assertFalse(mutating_path_guarded("/api/runtime", "GET"))
         self.assertFalse(mutating_path_guarded("/api/code-dev/confirm", "GET"))
 

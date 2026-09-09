@@ -33,15 +33,16 @@ def _normalize_path(raw: str) -> str:
 
 
 def _pick_macos(prompt: str) -> dict[str, Any]:
-    safe = prompt.replace("\\", "\\\\").replace('"', '\\"')
-    # activate Finder，避免对话框被 DSH/浏览器挡在后面导致一直「选择中…」
-    script = (
-        'tell application "Finder"\n'
-        "  activate\n"
-        f'  set _p to POSIX path of (choose folder with prompt "{safe}")\n'
-        "end tell\n"
-        "return _p"
-    )
+    safe = (
+        (prompt or "选择工程目录")
+        .replace("\r", " ")
+        .replace("\n", " ")
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+    )[:80]
+    # 不要 tell Finder：未授予「自动化」时会报 -1743（一体包里必现）。
+    # choose folder 走 Standard Additions，不控制 Finder。
+    script = f'POSIX path of (choose folder with prompt "{safe}")'
     proc = subprocess.run(
         ["osascript", "-e", script],
         capture_output=True,
@@ -53,6 +54,12 @@ def _pick_macos(prompt: str) -> dict[str, Any]:
         err = (proc.stderr or proc.stdout or "").strip()
         if "User canceled" in err or "-128" in err or not err:
             return {"ok": False, "path": "", "error": "已取消选择"}
+        if "-1743" in err or "Apple事件" in err or "Apple event" in err.lower():
+            return {
+                "ok": False,
+                "path": "",
+                "error": "系统拦截了选文件夹对话框，请手动粘贴本机目录路径",
+            }
         return {"ok": False, "path": "", "error": err or "选文件夹失败"}
     path = _normalize_path(proc.stdout or "")
     if not path:
@@ -61,7 +68,9 @@ def _pick_macos(prompt: str) -> dict[str, Any]:
 
 
 def _pick_windows(prompt: str) -> dict[str, Any]:
-    safe = prompt.replace("'", "''")
+    safe = (
+        (prompt or "选择工程目录").replace("\r", " ").replace("\n", " ").replace("'", "''")
+    )[:80]
     ps = (
         "Add-Type -AssemblyName System.Windows.Forms; "
         "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
@@ -92,9 +101,10 @@ def _pick_windows(prompt: str) -> dict[str, Any]:
 
 
 def _pick_linux(prompt: str) -> dict[str, Any]:
+    title = (prompt or "选择工程目录").replace("\r", " ").replace("\n", " ")[:80]
     for cmd in (
-        ["zenity", "--file-selection", "--directory", f"--title={prompt}"],
-        ["kdialog", "--getexistingdirectory", ".", prompt],
+        ["zenity", "--file-selection", "--directory", f"--title={title}"],
+        ["kdialog", "--getexistingdirectory", ".", title],
     ):
         try:
             proc = subprocess.run(

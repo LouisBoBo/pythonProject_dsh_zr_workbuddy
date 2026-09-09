@@ -1,14 +1,12 @@
 # DSH-ZR-WorkBuddy
 
-**ZR-WorkBuddy** 工作助手（仓库名带 DSH，工程写法用其热插拔范式）。
+**ZR-WorkBuddy** 工作助手。自有业务在引擎；**真正的第三方 DSH 插件走 Studio 插件中心**（不能靠 `features/` zip）。口径见 [docs/产品与口径/最简产品形态.md](docs/产品与口径/最简产品形态.md)。
 
-**三大核心目标**（详见 [docs/三大核心目标落地方案.md](docs/三大核心目标落地方案.md)）：
-
-1. **热插拔**：新能力只进 `features/`，启停约 1s  
+1. **热插拔（自有能力）**：`features/` 启停约 1s  
 2. **按单元增量部署**：改哪发哪（人确认后 rsync）  
-3. **第三方插件**：像装技能一样装进 `features/`（校验 → 启用）  
+3. **第三方生态插件**：Harness Studio 插件中心安装进 Profile（这就是要 `host/` 的原因）  
 
-业务验收以 **引擎网页 / API** 为准。
+业务验收看 **引擎网页 / API**；生态插件验收看 **Studio 插件中心「运行中」**。
 
 ## 分层
 
@@ -33,13 +31,17 @@ scripts/plugin.sh --app zr-workbuddy new report "报表"
 引擎：`status` / `stop` / `restart` / `start`（前台）/ `start -d`（后台）  
 兼容旧入口：`scripts/start-engine.sh zr-workbuddy`
 
-首次接线 bridge（可选，热插拔加载器用）：
+自有功能包（**不是** DSH 生态插件）：
 
 ```bash
-scripts/plugin.sh --app zr-workbuddy install bridge --restart
+scripts/plugin.sh --app zr-workbuddy install-feature /path/to/workbuddy-feature.zip
 ```
+
+DSH 第三方生态插件：先 `scripts/host.sh wire`，再在 **Studio 插件中心**安装（不要塞进引擎功能页）。
 
 测试：`scripts/test.sh zr-workbuddy`  
 约定：`AGENTS.md`  
-目录与用法：[docs/目录结构与用法说明.md](docs/目录结构与用法说明.md)  
-落地方案：[docs/三大核心目标落地方案.md](docs/三大核心目标落地方案.md)
+**两种插件怎么走**：[docs/产品与口径/最简产品形态.md](docs/产品与口径/最简产品形态.md)  
+**文档知识库（分类索引）**：[docs/README.md](docs/README.md)  
+目录与用法：[docs/产品与口径/目录结构与用法说明.md](docs/产品与口径/目录结构与用法说明.md)  
+落地方案：[docs/架构与选型/三大核心目标落地方案.md](docs/架构与选型/三大核心目标落地方案.md)

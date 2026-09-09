@@ -12,6 +12,11 @@ _SSH_KEY_OK = re.compile(r"^[A-Za-z0-9_./\-]+$")
 _HOST_OK = re.compile(r"^[A-Za-z0-9._\-]+$")
 _USER_OK = re.compile(r"^[A-Za-z0-9._\-]+$")
 _ABS_PATH_OK = re.compile(r"^/[A-Za-z0-9_./\-]+$")
+_RESTART_CMD_OK = re.compile(
+    r"^(?:systemctl restart [A-Za-z0-9][A-Za-z0-9_.:@-]{0,80}(?:\.service)?|"
+    r"supervisorctl restart [A-Za-z0-9][A-Za-z0-9_-]{0,80}|"
+    r"service [A-Za-z0-9][A-Za-z0-9_-]{0,80} restart)$"
+)
 
 
 @dataclass
@@ -41,6 +46,7 @@ class CodeDeployConfig:
     auto_restart_engine: bool = True
     # 与 get_config 一致：一体默认 true；非一体默认 false（可显式覆盖）
     auto_restart_bridge: bool = True
+    remote_restart_cmd: str = ""
     rsync_excludes: list[str] = field(
         default_factory=lambda: [
             "__pycache__",
@@ -61,6 +67,7 @@ class CodeDeployConfig:
             "sandboxes",
             "node_modules",
             "host/node_modules",
+            ".git",
         ]
     )
 
@@ -114,6 +121,7 @@ def get_config() -> CodeDeployConfig:
         unified_product=unified,
         auto_restart_engine=bool(raw.get("auto_restart_engine", True)),
         auto_restart_bridge=restart_bridge,
+        remote_restart_cmd=str(raw.get("remote_restart_cmd") or "").strip(),
     )
     if isinstance(excludes, list) and excludes:
         cfg.rsync_excludes = [str(x).strip() for x in excludes if str(x).strip()]
@@ -198,4 +206,22 @@ def validate_ssh_settings(cfg: CodeDeployConfig) -> list[str]:
         errs.append("ssh_app_path 须为绝对路径且不含 ..")
     elif app in {"/", "/home", "/root", "/www", "/var", "/opt", "/Users"}:
         errs.append("ssh_app_path 过浅，拒绝部署到系统根目录")
+    cmd_err = validate_remote_restart_cmd(getattr(cfg, "remote_restart_cmd", "") or "")
+    if cmd_err:
+        errs.append(cmd_err)
     return errs
+
+
+def validate_remote_restart_cmd(cmd: str) -> str:
+    """空=自动发现 systemd。非空仅允许单条重启命令，禁止管道/换行。"""
+    s = (cmd or "").strip()
+    if not s:
+        return ""
+    if "\n" in (cmd or "") or "\r" in (cmd or "") or len(s) > 180:
+        return "remote_restart_cmd 过长或含换行"
+    if not _RESTART_CMD_OK.match(s):
+        return (
+            "remote_restart_cmd 仅允许 systemctl restart <服务>、"
+            "supervisorctl restart <名> 或 service <名> restart"
+        )
+    return ""

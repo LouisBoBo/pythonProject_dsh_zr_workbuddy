@@ -96,3 +96,8 @@ def diff_snapshots(before: dict[str, str], after: dict[str, str]) -> list[str]:
             changed.append(rel)
     changed.sort()
     return changed
+
+
+def deleted_from_snapshots(before: dict[str, str], after: dict[str, str]) -> list[str]:
+    """沙箱里已删、需要从本机工程同步删除的相对路径。"""
+    return sorted(rel for rel in (before or {}) if rel not in (after or {}))

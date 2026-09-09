@@ -5,7 +5,7 @@ alwaysApply: true
 
 # WorkBuddy 企业级安全底线
 
-完整方案与验收清单：`docs/企业级安全加固方案.md`。  
+完整方案与验收清单：`docs/安全/企业级安全加固方案.md`。  
 **不推翻**铁律（见 `workbuddy-ops-standard.mdc`）：加固只加控制面，不另造第二个 bridge、不自造公网鉴权协议替代回环约定。
 
 ## 写/改代码时必须遵守

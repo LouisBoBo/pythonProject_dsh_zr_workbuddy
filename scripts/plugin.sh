@@ -452,6 +452,10 @@ PY
     done
     sync_panel_defaults
     cd "$PROFILE" && pnpm install
+    # pnpm 可能把市场插件的 dsh-tools 又装成独立副本，必须装后再对齐
+    if [ -x "$ROOT/scripts/check-vendor.sh" ]; then
+      "$ROOT/scripts/check-vendor.sh" --fix || true
+    fi
     # bridge 变更需要重启一次
     DO_RESTART="${DO_RESTART:-0}"
     maybe_restart
@@ -471,6 +475,9 @@ PY
       done
     fi
     cd "$PROFILE" && pnpm install
+    if [ -x "$ROOT/scripts/check-vendor.sh" ]; then
+      "$ROOT/scripts/check-vendor.sh" --fix || true
+    fi
     maybe_restart
     ;;
 

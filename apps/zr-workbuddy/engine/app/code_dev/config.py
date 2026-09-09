@@ -96,7 +96,24 @@ class CodeDevConfig:
     copy_max_files: int = 4000
     copy_max_total_bytes: int = 80_000_000
     cursor_timeout_sec: int = 2700
+    delete_verify_timeout_sec: int = 240
+    max_read_tools: int = 28
+    delete_preflight_auto_skip: bool = False
+    delete_mode: str = "cursor_plan"
+    delete_plan_timeout_sec: int = 120
+    live_stream_delay_sec: float = 0.045
     default_workspace: str = ""
+
+
+def _resolve_delete_mode(raw: dict) -> str:
+    """删除执行策略：cursor_plan（默认）| engine_first | cursor_full。"""
+    mode = str(raw.get("delete_mode") or "").strip().lower()
+    allowed = {"cursor_plan", "engine_first", "cursor_full"}
+    if mode in allowed:
+        return mode
+    if "delete_engine_first" in raw:
+        return "engine_first" if bool(raw.get("delete_engine_first")) else "cursor_full"
+    return "cursor_plan"
 
 
 def _sdk_ok() -> tuple[bool, str]:
@@ -128,6 +145,12 @@ def get_config() -> CodeDevConfig:
         copy_max_files=max(100, int(raw.get("copy_max_files") or 4000)),
         copy_max_total_bytes=max(1_000_000, int(raw.get("copy_max_total_bytes") or 80_000_000)),
         cursor_timeout_sec=max(60, int(raw.get("cursor_timeout_sec") or 2700)),
+        delete_verify_timeout_sec=max(60, min(int(raw.get("delete_verify_timeout_sec") or 240), 900)),
+        max_read_tools=max(8, min(int(raw.get("max_read_tools") or 28), 80)),
+        delete_preflight_auto_skip=bool(raw.get("delete_preflight_auto_skip", False)),
+        delete_mode=_resolve_delete_mode(raw),
+        delete_plan_timeout_sec=max(45, min(int(raw.get("delete_plan_timeout_sec") or 120), 300)),
+        live_stream_delay_sec=max(0.0, min(float(raw.get("live_stream_delay_sec") or 0.045), 0.2)),
         default_workspace=str(raw.get("default_workspace") or "").strip(),
     )
 

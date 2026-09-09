@@ -1,0 +1,102 @@
+{
+  "name": "zr-workbuddy-desktop",
+  "version": "0.2.16",
+  "private": true,
+  "description": "ZR-WorkBuddy 宿主一体桌面：内嵌 Host + 引擎；安装后配置即可用",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.zr.workbuddy.dsh.desktop",
+    "productName": "ZR WorkBuddy",
+    "artifactName": "${productName}-${version}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "runtime/bin",
+        "to": "runtime/bin",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "runtime/python",
+        "to": "runtime/python",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "runtime/app",
+        "to": "runtime/app",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "runtime/node",
+        "to": "runtime/node",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "runtime/host/package.json",
+        "to": "host/package.json"
+      },
+      {
+        "from": "runtime/host/node_modules",
+        "to": "host/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "runtime/market/node_modules",
+        "to": "market/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "runtime/pnpm/node_modules/pnpm",
+        "to": "pnpm",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": null
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

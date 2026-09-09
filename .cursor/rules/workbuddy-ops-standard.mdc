@@ -5,8 +5,8 @@ alwaysApply: true
 
 # WorkBuddy 五条铁律（不可推翻）
 
-权威细则：`AGENTS.md` §0、`docs/三大核心目标落地方案.md`、`host/WORKBUDDY.md`。  
-安全加固：`docs/企业级安全加固方案.md` + `.cursor/rules/workbuddy-security-enterprise.mdc`。
+权威细则：`AGENTS.md` §0、`docs/架构与选型/三大核心目标落地方案.md`、`host/WORKBUDDY.md`。  
+安全加固：`docs/安全/企业级安全加固方案.md` + `.cursor/rules/workbuddy-security-enterprise.mdc`。
 
 ## 铁律
 

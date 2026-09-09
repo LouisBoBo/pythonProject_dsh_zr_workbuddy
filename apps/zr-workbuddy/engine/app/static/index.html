@@ -620,8 +620,27 @@
                   <label>常用本机工程路径（可选，仅备忘；启动任务仍须传绝对路径）</label>
                   <input type="text" id="code_dev_default_workspace" placeholder="/Users/你/项目" autocomplete="off">
                 </div>
+                <div>
+                  <label>删除策略</label>
+                  <select id="code_dev_delete_mode">
+                    <option value="cursor_plan">Cursor 定位 + 引擎删除（推荐）</option>
+                    <option value="engine_first">仅引擎规则删除（秒级）</option>
+                    <option value="cursor_full">Cursor 改盘删除（不推荐）</option>
+                  </select>
+                </div>
+                <div>
+                  <label>删除定位超时（秒）</label>
+                  <input type="number" id="code_dev_delete_plan_timeout_sec" min="45" max="300" value="120">
+                </div>
+                <div class="full check-row">
+                  <input type="checkbox" id="code_dev_delete_preflight_auto_skip">
+                  <label for="code_dev_delete_preflight_auto_skip">删除预检通过时跳过 Cursor（默认关闭）</label>
+                </div>
               </div>
-              <div class="hint" style="margin-top:8px;">需已安装 Python 包 <code>cursor-sdk</code>；改完点下方「保存全部配置」后立即生效（无需重启引擎）。</div>
+              <div class="hint" style="margin-top:8px;">
+                删除类推荐 <code>cursor_plan</code>：Cursor 只读输出清单，引擎校验后物理删除并修补菜单/路由。
+                需已安装 Python 包 <code>cursor-sdk</code>；改完点下方「保存全部配置」后立即生效（无需重启引擎）。
+              </div>
               <div style="margin-top: 12px;"><button class="btn ghost" id="btnTestCodeDev">测试写码就绪</button></div>
               <div class="test-result" id="codeDevTestResult"></div>
             </div>
@@ -755,6 +774,10 @@
                 <div>
                   <label>SSH 端口</label>
                   <input type="text" id="code_deploy_ssh_port" placeholder="22" autocomplete="off">
+                </div>
+                <div class="full">
+                  <label>远端重启命令（可选；不填则自动重启该目录的 API 服务）</label>
+                  <input type="text" id="code_deploy_remote_restart_cmd" placeholder="例如 systemctl restart zr-aicoding-api" autocomplete="off">
                 </div>
               </div>
               <div class="hint" style="margin-top:8px;">改完点「保存全部配置」。未确认前不会 rsync；按插件增量，不发整仓。</div>
@@ -1136,6 +1159,21 @@ async function loadStatus() {
 /* ================= 聊天 ================= */
 function esc(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+async function pickLocalFolder(prompt, signal) {
+  const p = prompt || "选择工程目录";
+  const desk = typeof window !== "undefined" ? window.workbuddyDesktop : null;
+  if (desk && typeof desk.pickFolder === "function") {
+    const d = await desk.pickFolder(p);
+    return d && typeof d === "object" ? d : { ok: false, path: "", error: "选文件夹失败" };
+  }
+  const r = await fetch("/api/pick-folder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: p }),
+    signal,
+  });
+  return r.json();
 }
 async function issueHitl(action, bind) {
   const r = await fetch("/api/hitl/issue", {
@@ -1947,13 +1985,7 @@ function renderCcPick(card, ui) {
     const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timer = setTimeout(() => { try { ctrl && ctrl.abort(); } catch (e0) {} }, 120000);
     try {
-      const r = await fetch("/api/pick-folder", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: "选择要提交的 Git 工程目录" }),
-        signal: ctrl ? ctrl.signal : undefined,
-      });
-      const d = await r.json();
+      const d = await pickLocalFolder("选择要提交的 Git 工程目录", ctrl ? ctrl.signal : undefined);
       errEl.style.display = "none";
       if (d.ok && d.path) {
         wsEl.value = d.path;
@@ -2616,13 +2648,7 @@ function renderCrPick(card, ui) {
     const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timer = setTimeout(() => { try { ctrl && ctrl.abort(); } catch (e0) {} }, 120000);
     try {
-      const r = await fetch("/api/pick-folder", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: "选择要审核的工程目录" }),
-        signal: ctrl ? ctrl.signal : undefined,
-      });
-      const d = await r.json();
+      const d = await pickLocalFolder("选择要审核的工程目录", ctrl ? ctrl.signal : undefined);
       errEl.style.display = "none";
       if (d.ok && d.path) wsEl.value = d.path;
       else if (d.error && d.error !== "已取消选择") {
@@ -3212,12 +3238,16 @@ function startCodeDevJobWatch(jobId, startReply, opts) {
   wrap.innerHTML =
     '<div class="cd-job-shell">' +
     '  <div class="cd-plan-host"></div>' +
+    '  <details class="think-box cd-think" open><summary class="cd-think-sum">思考中…</summary><div class="think-body cd-think-body">正在连接 Cursor，等待思考过程…</div></details>' +
     '  <div class="cd-done-banner" style="display:none"></div>' +
     '  <details class="cd-result-details" style="display:none"><summary>改动说明与验收步骤</summary><div class="cd-result-body"></div></details>' +
     "</div>" +
     '<div class="msg-meta">来源：写码顾问 · 数据源：本机写码 · 意图：code_dev · ' + esc(jobId) + "</div>";
   $("msgs").appendChild(wrap);
   const planHost = wrap.querySelector(".cd-plan-host");
+  const thinkWrap = wrap.querySelector(".cd-think");
+  const thinkSum = wrap.querySelector(".cd-think-sum");
+  const thinkBody = wrap.querySelector(".cd-think-body");
   const bannerEl = wrap.querySelector(".cd-done-banner");
   const detailsEl = wrap.querySelector(".cd-result-details");
   const resultBody = wrap.querySelector(".cd-result-body");
@@ -3225,6 +3255,22 @@ function startCodeDevJobWatch(jobId, startReply, opts) {
   let steps = initCodingSteps();
   let finished = false;
   let durationText = "0s";
+  let thinkText = "正在连接 Cursor，等待思考过程…";
+  let thinkMs = null;
+
+  const paintThink = () => {
+    if (!thinkWrap) return;
+    thinkWrap.style.display = "";
+    thinkWrap.open = !finished;
+    if (thinkSum) {
+      thinkSum.textContent = !finished
+        ? "思考中… · 已 " + durationText
+        : thinkMs != null
+          ? "已完成思考（" + formatDuration(Number(thinkMs) / 1000) + "）"
+          : "已完成思考";
+    }
+    if (thinkBody) thinkBody.textContent = thinkText || (finished ? "本轮未捕获到思考正文" : "Cursor 正在思考与调用工具…");
+  };
 
   const paintPlan = () => {
     planHost.innerHTML = renderCodingPlanHtml(steps, { heading: "写码进度 · " + jobId, duration: durationText });
@@ -3235,6 +3281,7 @@ function startCodeDevJobWatch(jobId, startReply, opts) {
     if (finished) { clearInterval(durTimer); return; }
     durationText = formatDuration((Date.now() - startedAt) / 1000);
     paintPlan();
+    paintThink();
   }, 1000);
 
   const finish = (ev) => {
@@ -3245,13 +3292,16 @@ function startCodeDevJobWatch(jobId, startReply, opts) {
     const mismatch = (ev && ev.job && ev.job.sync_mismatch) || "";
     let ok = !!(ev && ev.ok);
     if (ok && mismatch) ok = false;
+    const job = (ev && ev.job) || {};
+    if (job.thinking_text) thinkText = String(job.thinking_text);
+    if (job.thinking_duration_ms != null) thinkMs = job.thinking_duration_ms;
     steps = sealCodingSteps(steps, !ok);
     paintPlan();
-    const synced = (ev && ev.synced_files) || (ev && ev.job && ev.job.synced_files) || [];
+    paintThink();
+    const synced = (ev && ev.synced_files) || job.synced_files || [];
     const n = synced.length;
     bannerEl.style.display = "";
     bannerEl.className = "cd-done-banner " + (ok ? "ok" : "err");
-    const job = (ev && ev.job) || {};
     const shouldResume = !!(job.resume_commit || job.source_gate_job_id || (job.write_scope && job.write_scope.length) || (typeof resumeCommitHint !== "undefined" && resumeCommitHint));
     const wsDone = (typeof workspaceHint !== "undefined" && workspaceHint) || job.workspace || workspace || "";
     bannerEl.innerHTML =
@@ -3307,6 +3357,12 @@ function startCodeDevJobWatch(jobId, startReply, opts) {
     if (ev.type === "step") {
       steps = applyCodingStep(steps, ev);
       paintPlan();
+    } else if (ev.type === "thinking") {
+      if (ev.text) thinkText = String(ev.text);
+      else if (ev.delta) thinkText += String(ev.delta);
+      paintThink();
+    } else if (ev.type === "tool_call") {
+      // 工具动作不塞进思考正文，避免绝对路径刷屏
     } else if (ev.type === "done") {
       finish(ev);
     } else if (ev.type === "error") {
@@ -3541,6 +3597,9 @@ function fillForm(c) {
   $("code_dev_max_concurrent").value = cd.max_concurrent != null ? cd.max_concurrent : 1;
   $("code_dev_cursor_timeout_sec").value = cd.cursor_timeout_sec != null ? cd.cursor_timeout_sec : 2700;
   $("code_dev_default_workspace").value = cd.default_workspace || "";
+  $("code_dev_delete_mode").value = cd.delete_mode || "cursor_plan";
+  $("code_dev_delete_plan_timeout_sec").value = cd.delete_plan_timeout_sec != null ? cd.delete_plan_timeout_sec : 120;
+  $("code_dev_delete_preflight_auto_skip").checked = !!cd.delete_preflight_auto_skip;
   const cr = c.code_review || {};
   $("code_review_enabled").checked = !!cr.enabled;
   $("code_review_max_files").value = cr.max_files != null ? cr.max_files : 40;
@@ -3565,6 +3624,8 @@ function fillForm(c) {
   $("code_deploy_ssh_key_path").value = cdp.ssh_key_path || "";
   $("code_deploy_ssh_app_path").value = cdp.ssh_app_path || "";
   $("code_deploy_ssh_port").value = cdp.ssh_port != null ? cdp.ssh_port : 22;
+  const rst = $("code_deploy_remote_restart_cmd");
+  if (rst) rst.value = cdp.remote_restart_cmd || "";
   updateSummaries(c);
 }
 function syncLlmProvider() {
@@ -3620,6 +3681,9 @@ function collect() {
       max_concurrent: Math.max(1, Number($("code_dev_max_concurrent").value) || 1),
       cursor_timeout_sec: Math.max(60, Number($("code_dev_cursor_timeout_sec").value) || 2700),
       default_workspace: $("code_dev_default_workspace").value.trim(),
+      delete_mode: ($("code_dev_delete_mode").value || "cursor_plan"),
+      delete_plan_timeout_sec: Math.max(45, Math.min(300, Number($("code_dev_delete_plan_timeout_sec").value) || 120)),
+      delete_preflight_auto_skip: $("code_dev_delete_preflight_auto_skip").checked,
     },
     code_review: {
       enabled: $("code_review_enabled").checked,
@@ -3657,6 +3721,9 @@ function collect() {
       entry_url: $("code_deploy_health_url").value.trim(),
       health_url: $("code_deploy_health_url").value.trim(),
       health_timeout_sec: 8,
+      remote_restart_cmd: ($("code_deploy_remote_restart_cmd")
+        ? $("code_deploy_remote_restart_cmd").value.trim()
+        : ""),
     },
   };
 }

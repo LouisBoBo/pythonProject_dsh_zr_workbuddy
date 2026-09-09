@@ -12,6 +12,9 @@
 !**/.env.example
 **/credentials.json
 **/secrets.yaml
+# 应用侧本地市场/私有源配置（勿提交）
+apps/*/config/*.env
+apps/*/config/company-*.env
 
 # python
 **/__pycache__/
@@ -38,6 +41,8 @@ apps/*/plugins/*/node_modules/
 **/engine/data/plugins.json.lock
 **/engine/data/local_dev/sandboxes/
 **/engine/data/local_dev/jobs/
+**/engine/data/_cursor_probe/
+**/engine/data/_cursor_probe2/
 **/engine/data/code_review/reports/
 **/engine/data/code_commit/jobs/
 **/engine/data/code_deploy/jobs/
@@ -56,6 +61,12 @@ host/coverage/
 host/apps/web/dist/
 host/apps/desktop/dist/
 host/apps/desktop/runtime-host/
+
+# 桌面体验包产物（scripts/package-desktop.sh）
+desktop/node_modules/
+desktop/runtime/
+desktop/release/
+desktop/dist/
 host/.artifacts/
 host/tmp/
 host/**/.DS_Store

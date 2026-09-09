@@ -5,7 +5,7 @@
 > **决策依据**：要「源码二次开发宿主 + 可装生态插件」，同时保留三大核心目标与现有业务增量部署  
 > **上游导入**：`/Users/hebo/Downloads/deepseek-harness-studio-main` → `host/`（`@deepseek-ai/dsh-root@0.1.0-rc.8`，MIT）  
 > **版本注意**：本机全局 `dsh` 现为 **0.1.1-rc.2**；`host/` 源码为 **0.1.0-rc.8**。P2 默认用全局 dsh 启 web（credentials `version`+`refs` 兼容）。源码 CLI（`start-web --from-host`）需先对齐版本并 `pnpm run build`，否则会失败。  
-> **相关**： [三大核心目标落地方案.md](./三大核心目标落地方案.md) · [P1-自动化部署-按单元增量.md](./功能实现/P1-自动化部署-按单元增量.md) · [AGENTS.md](../AGENTS.md) · [host/WORKBUDDY.md](../host/WORKBUDDY.md) · [host/UPSTREAM.md](../host/UPSTREAM.md) · nginx 示例 [`scripts/deploy/nginx-one-entry.example.conf`](../scripts/deploy/nginx-one-entry.example.conf)
+> **相关**： [三大核心目标落地方案.md](./三大核心目标落地方案.md) · [P1-自动化部署-按单元增量.md](../功能实现/P1-自动化部署-按单元增量.md) · [AGENTS.md](../../AGENTS.md) · [host/WORKBUDDY.md](../../host/WORKBUDDY.md) · [host/UPSTREAM.md](../../host/UPSTREAM.md) · nginx 示例 [`scripts/deploy/nginx-one-entry.example.conf`](../../scripts/deploy/nginx-one-entry.example.conf)
 
 ---
 

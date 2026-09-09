@@ -85,6 +85,100 @@ class CodeDeployUnitTests(unittest.TestCase):
         self.assertIn("engine", ids)
         self.assertIn("bridge", ids)
         self.assertIn("scripts", ids)
+        self.assertNotIn("workspace", ids)
+
+    def test_generic_repo_catalog_is_workspace(self):
+        import tempfile
+        from pathlib import Path
+
+        from app.code_deploy.units import list_catalog_units, map_paths_to_units
+
+        td = tempfile.mkdtemp()
+        Path(td, "main.py").write_text("print(1)\n", encoding="utf-8")
+        Path(td, "scripts").mkdir()
+        Path(td, "scripts", "run.sh").write_text("echo ok\n", encoding="utf-8")
+        units = list_catalog_units(td)
+        self.assertEqual([u.id for u in units], ["workspace"])
+        mapped = map_paths_to_units(["main.py", "scripts/run.sh"], workspace=td)
+        self.assertEqual([u.id for u in mapped], ["workspace"])
+
+    def test_vite_backend_layout(self):
+        import tempfile
+        from pathlib import Path
+
+        from app.code_deploy.units import is_vite_backend_layout, list_catalog_units
+
+        td = tempfile.mkdtemp()
+        Path(td, "frontend").mkdir()
+        Path(td, "frontend", "package.json").write_text("{}", encoding="utf-8")
+        Path(td, "backend").mkdir()
+        self.assertTrue(is_vite_backend_layout(td))
+        units = list_catalog_units(td)
+        self.assertEqual([u.id for u in units], ["workspace"])
+        self.assertEqual(units[0].action, "sync_build_restart")
+
+    def test_collect_local_api_paths_and_discover_parse(self):
+        import tempfile
+        from pathlib import Path
+
+        from app.code_deploy.ssh_sync import (
+            collect_local_api_paths,
+            entry_join,
+            parse_discovered_services,
+        )
+
+        td = tempfile.mkdtemp()
+        app = Path(td, "app")
+        app.mkdir()
+        (app / "routers").mkdir()
+        (app / "routers" / "quality.py").write_text(
+            'router = APIRouter(prefix="/api/quality", tags=["quality"])\n'
+            '@router.get("/inspection-records")\n'
+            "def list_records():\n"
+            "    return {}\n",
+            encoding="utf-8",
+        )
+        (app / "main.py").write_text(
+            '@app.get("/api/health")\n'
+            "def health():\n"
+            "    return {\"ok\": True}\n",
+            encoding="utf-8",
+        )
+        paths = collect_local_api_paths(td)
+        self.assertIn("/api/quality/inspection-records", paths)
+        self.assertIn("/api/health", paths)
+
+        units, supers = parse_discovered_services(
+            "UNIT:zr-aicoding-api.service\n"
+            "UNIT:../../evil.service\n"
+            "SUPERVISOR:pcb-graphrag\n"
+            "DISCOVER_DONE\n"
+        )
+        self.assertEqual(units, ["zr-aicoding-api.service"])
+        self.assertEqual(supers, ["pcb-graphrag"])
+        self.assertEqual(
+            entry_join("http://175.178.238.31:8090/", "/api/health"),
+            "http://175.178.238.31:8090/api/health",
+        )
+
+    def test_remote_restart_cmd_allowlist(self):
+        from app.code_deploy.config import validate_remote_restart_cmd
+
+        self.assertEqual(validate_remote_restart_cmd(""), "")
+        self.assertEqual(validate_remote_restart_cmd("systemctl restart zr-aicoding-api"), "")
+        self.assertEqual(
+            validate_remote_restart_cmd("systemctl restart zr-aicoding-api.service"), ""
+        )
+        self.assertTrue(validate_remote_restart_cmd("systemctl restart foo; rm -rf /"))
+        self.assertTrue(validate_remote_restart_cmd("bash -lc 'id'"))
+        self.assertTrue(validate_remote_restart_cmd("systemctl restart foo\nreboot"))
+
+    def test_discover_cmd_requires_path_slash(self):
+        from app.code_deploy.ssh_sync import _discover_backend_services_cmd
+
+        cmd = _discover_backend_services_cmd("/www/wwwroot/zr-aicoding")
+        self.assertIn('"$APP/"', cmd)
+        self.assertNotIn('"$APP"', cmd.replace('"$APP/"', ""))
 
     def test_normalize_mode_first_full(self):
         from app.code_deploy.ops import _normalize_mode
