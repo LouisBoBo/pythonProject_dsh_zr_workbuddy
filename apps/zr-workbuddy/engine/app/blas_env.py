@@ -35,17 +35,27 @@ def _install_numpy_macos_guard() -> None:
             with open(self.origin, "r", encoding="utf-8") as f:
                 src = f.read()
             # 跳过 Accelerate polyfit 自检（仅改导入期行为，不影响数值 API）
-            src = src.replace(
+            needle = (
                 "if sys.platform == \"darwin\":\n"
                 "        from . import exceptions\n"
                 "        with warnings.catch_warnings(record=True) as w:\n"
-                "            _mac_os_check()",
-                "if False:  # patched by WorkBuddy blas_env (macOS Accelerate SIGFPE)\n"
-                "        from . import exceptions\n"
-                "        with warnings.catch_warnings(record=True) as w:\n"
-                "            _mac_os_check()",
-                1,
+                "            _mac_os_check()"
             )
+            if needle not in src:
+                import logging
+                logging.getLogger("workbuddy.blas_env").warning(
+                    "numpy macOS Accelerate patch 未命中源码特征（numpy 版本可能已变）；"
+                    "若启动 SIGFPE，请升级 numpy 或检查 VECLIB_MAXIMUM_THREADS。"
+                )
+            else:
+                src = src.replace(
+                    needle,
+                    "if False:  # patched by WorkBuddy blas_env (macOS Accelerate SIGFPE)\n"
+                    "        from . import exceptions\n"
+                    "        with warnings.catch_warnings(record=True) as w:\n"
+                    "            _mac_os_check()",
+                    1,
+                )
             code = compile(src, self.origin, "exec")
             exec(code, module.__dict__)
 

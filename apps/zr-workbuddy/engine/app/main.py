@@ -63,20 +63,24 @@ app = FastAPI(
     ],
 )
 
-# CORS：允许本机任意端口的 http Origin（DSH Web / 引擎页常见 3080、动态端口）。
+# CORS：允许本机任意端口的 http Origin（开发壳 :3081 / 桌面 :13080 / 引擎页等）。
 # 引擎默认只绑 127.0.0.1，无自定义鉴权协议（不另造 token）；勿把 host 改成非回环。
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
 _LOCAL_ORIGINS = [
+    "http://127.0.0.1:3081",
+    "http://localhost:3081",
     "http://127.0.0.1:3080",
     "http://localhost:3080",
+    "http://127.0.0.1:13080",
+    "http://localhost:13080",
     "http://127.0.0.1:8000",
     "http://localhost:8000",
 ]
 app.add_middleware(
     CORSMiddleware,
+    # 企业默认：仅固定本机白名单端口，禁止任意 127.0.0.1:* Origin 读取引擎
     allow_origins=_LOCAL_ORIGINS,
-    allow_origin_regex=r"http://(127\.0\.0\.1|localhost):\d+",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -219,6 +223,11 @@ class CodeDevConfirmBody(BaseModel):
         "",
         description="确认卡签发的一次性 HITL nonce（POST /api/hitl/issue）；无 nonce 拒绝开工",
     )
+    ui_call_id: str = Field(
+        "",
+        description="DSH 工具卡 callId：绑定 Job，刷新后按 callId 恢复进度卡",
+    )
+    ui_session_id: str = Field("", description="DSH 会话 sessionId（可选）")
 
 
 class HitlIssueBody(BaseModel):
@@ -229,6 +238,8 @@ class HitlIssueBody(BaseModel):
     workspace: str = Field("", description="写码绑定工程路径")
     job_id: str = Field("", description="提交/部署绑定 job_id")
     path: str = Field("", description="（已废弃）path_ticket 请走列文件/校验，勿经本接口")
+    requirement: str = Field("", description="写码确认时绑定的需求摘要（用于 nonce 防篡改）")
+    payload_hash: str = Field("", description="可选：需求摘要 sha256 前 32 位；与 requirement 二选一")
 
 
 class CodeDevDiscussBody(BaseModel):
@@ -268,11 +279,41 @@ def api_hitl_issue(body: HitlIssueBody, request: Request):
             },
             status_code=400,
         )
+    from .hitl import ACTION_DEV
+    from .hitl.tokens import normalize_payload_hash
+
+    req = (body.requirement or "").strip()
+    ph = (body.payload_hash or "").strip().lower()
+    # 写码确认：必须带 requirement，hash 一律由服务端从正文计算，防 UI 展示与绑定脱节
+    if act == ACTION_DEV:
+        if not req:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "detail": "写码确认签发须带 requirement（与确认卡正文一致）",
+                    "code": "hitl_requirement_missing",
+                },
+                status_code=400,
+            )
+        computed = normalize_payload_hash(req)
+        if ph and ph != computed:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "detail": "requirement 与 payload_hash 不一致",
+                    "code": "hitl_payload_mismatch",
+                },
+                status_code=400,
+            )
+        ph = computed
+    elif not ph and req:
+        ph = normalize_payload_hash(req)
     out = issue(
         action=act,
         workspace=body.workspace or "",
         job_id=body.job_id or "",
         path=body.path or "",
+        payload_hash=ph,
     )
     if not out.get("ok"):
         return JSONResponse(out, status_code=400)
@@ -321,10 +362,13 @@ def api_code_dev_confirm(body: CodeDevConfirmBody):
     blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机 Cursor 写码")
     if blocked:
         return JSONResponse(blocked, status_code=400)
+    from .hitl.tokens import normalize_payload_hash
+
     gate = require_confirm_nonce(
         nonce=body.nonce or "",
         action=ACTION_DEV,
         workspace=body.workspace or "",
+        payload_hash=normalize_payload_hash(body.requirement or ""),
     )
     if not gate.get("ok"):
         return JSONResponse(gate, status_code=400)
@@ -334,6 +378,8 @@ def api_code_dev_confirm(body: CodeDevConfirmBody):
         client_brief=body.code_dev_brief,
         write_scope=body.write_scope,
         source_gate_job_id=body.source_gate_job_id or "",
+        ui_call_id=body.ui_call_id or "",
+        ui_session_id=body.ui_session_id or "",
     )
     if not out.get("ok"):
         return JSONResponse(out, status_code=400)
@@ -344,10 +390,12 @@ def api_code_dev_confirm(body: CodeDevConfirmBody):
     "/api/code-dev/jobs",
     tags=["本机写码"],
     summary="列出本机写码任务历史",
-    description="按更新时间倒序返回任务摘要（id、状态、诉求、时间），便于核对今日测试记录。",
+    description="按更新时间倒序返回任务摘要（id、状态、诉求、时间），便于核对今日测试记录。"
+    "传入 ui_call_id 时只返回绑定该 DSH 工具卡的任务（刷新恢复进度用）。",
 )
 def api_code_dev_jobs_list(
     limit: int = Query(80, ge=1, le=200, description="最多返回条数"),
+    ui_call_id: str = Query("", description="按 DSH 工具卡 callId 过滤"),
 ):
     from . import plugins_store
     from .code_dev.ops import FEATURE_ID, list_recent_jobs
@@ -355,7 +403,7 @@ def api_code_dev_jobs_list(
     blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机 Cursor 写码")
     if blocked:
         return JSONResponse(blocked, status_code=400)
-    return list_recent_jobs(limit=limit)
+    return list_recent_jobs(limit=limit, ui_call_id=ui_call_id or "")
 
 
 @app.post(

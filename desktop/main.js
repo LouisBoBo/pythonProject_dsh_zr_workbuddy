@@ -412,7 +412,9 @@ function applyDesktopToolchain(env) {
   env.CI = env.CI || 'true'
   if (ok) {
     env.PNPM_HOME = home
-    env.npm_config_store_dir = path.join(app.getPath('userData'), 'pnpm-store')
+    // 必须与既有 node_modules 的 store 一致，否则插件市场 pnpm add 会报
+    // ERR_PNPM_UNEXPECTED_STORE，或被迫全量重拉（含 gh-proxy 皮肤包）。
+    env.npm_config_store_dir = path.join(home, 'store')
   }
   const dirs = []
   if (ok) dirs.push(home)
@@ -475,6 +477,45 @@ function loadCompanyDshMarketEnv(appRoot) {
     out.ZHONGRUAN_NPM_REGISTRY = process.env.ZHONGRUAN_NPM_REGISTRY
   }
   return out
+}
+
+/**
+ * 皮肤包 dsh-whale-musume 若写成 gh-proxy/codeload URL，公司插件安装时 pnpm
+ * 会顺带重拉它，UI 卡在「下载中 · https://gh-p...」。改为本地 file: 依赖。
+ */
+function ensureWhaleMusumeOffline(profileDir) {
+  if (!profileDir || !fs.existsSync(profileDir)) return
+  const pkgPath = path.join(profileDir, 'package.json')
+  if (!fs.existsSync(pkgPath)) return
+  let pkg
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+  } catch {
+    return
+  }
+  const dep = pkg.dependencies && pkg.dependencies['dsh-whale-musume']
+  if (typeof dep !== 'string') return
+  if (!/gh-proxy\.com|codeload\.github\.com/i.test(dep)) return
+
+  const fromNm = path.join(profileDir, 'node_modules', 'dsh-whale-musume')
+  const vendorDir = path.join(dshHome(), 'vendor', 'dsh-whale-musume')
+  const hasNm = fs.existsSync(path.join(fromNm, 'package.json'))
+  const hasVendor = fs.existsSync(path.join(vendorDir, 'package.json'))
+  try {
+    if (hasNm) {
+      fs.mkdirSync(path.dirname(vendorDir), { recursive: true })
+      fs.cpSync(fromNm, vendorDir, { recursive: true, dereference: true, force: true })
+    } else if (!hasVendor) {
+      console.warn('[desktop] whale-musume 仍是远程 URL，且本地无副本，跳过离线化')
+      return
+    }
+    // profiles/web → ../../vendor/dsh-whale-musume
+    pkg.dependencies['dsh-whale-musume'] = 'file:../../vendor/dsh-whale-musume'
+    fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
+    console.log('[desktop] whale-musume 已改为本地 file:，避免插件安装卡在 gh-proxy')
+  } catch (e) {
+    console.warn('[desktop] whale-musume 离线化失败:', e && e.message ? e.message : e)
+  }
 }
 
 /** 只重写标记块，保留 profile .npmrc 其它内容 */
@@ -811,6 +852,13 @@ function ensureWorkBuddyWire(appRoot) {
     ensureCompanyMarketNpmrc(profile, market.ZHONGRUAN_NPM_REGISTRY)
   } catch (e) {
     console.warn('[desktop] company market npmrc:', e && e.message ? e.message : e)
+  }
+
+  // 避免市场装公司插件时被 gh-proxy 皮肤包拖死
+  try {
+    ensureWhaleMusumeOffline(profile)
+  } catch (e) {
+    console.warn('[desktop] whale offline:', e && e.message ? e.message : e)
   }
 
   return { ok: true, detail: `link → ${appRoot}` }

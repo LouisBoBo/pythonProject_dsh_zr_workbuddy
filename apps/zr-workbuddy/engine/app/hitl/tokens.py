@@ -1,11 +1,15 @@
 """HITL nonce / path_ticket 内存存储（进程内；重启失效可接受）。"""
 from __future__ import annotations
 
+import hashlib
+import re
 import secrets
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+_PAYLOAD_HASH_RE = re.compile(r"^[0-9a-f]{32,64}$")
 
 _LOCK = threading.Lock()
 _STORE: dict[str, dict[str, Any]] = {}
@@ -35,6 +39,14 @@ def _purge(now: float) -> None:
         _STORE.pop(k, None)
 
 
+def normalize_payload_hash(raw: str) -> str:
+    """需求摘要等绑定物的稳定短哈希（空串表示未绑定）。"""
+    s = " ".join(str(raw or "").split())
+    if not s:
+        return ""
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()[:32]
+
+
 def normalize_bind_path(path: str) -> str:
     raw = (path or "").strip()
     if not raw:
@@ -51,6 +63,7 @@ def issue(
     workspace: str = "",
     job_id: str = "",
     path: str = "",
+    payload_hash: str = "",
     ttl_sec: int | None = None,
 ) -> dict[str, Any]:
     """签发一次性票据。返回 {ok, nonce, action, exp, …}。"""
@@ -61,9 +74,14 @@ def issue(
     jid = (job_id or "").strip()
     ws = normalize_bind_path(workspace) if workspace else ""
     p = normalize_bind_path(path) if path else ""
+    ph = (payload_hash or "").strip().lower()
+    if ph and not _PAYLOAD_HASH_RE.fullmatch(ph):
+        return {"ok": False, "detail": "payload_hash 格式无效（须为 sha256 十六进制截断）"}
 
     if act in {ACTION_DEV} and not ws:
         return {"ok": False, "detail": "code-dev.confirm 须绑定 workspace"}
+    if act in {ACTION_DEV} and not ph:
+        return {"ok": False, "detail": "code-dev.confirm 须绑定需求摘要 hash"}
     if act in {ACTION_COMMIT, ACTION_DEPLOY} and not jid:
         return {"ok": False, "detail": f"{act} 须绑定 job_id"}
     if act == ACTION_PATH and not p:
@@ -78,6 +96,7 @@ def issue(
         "workspace": ws,
         "job_id": jid,
         "path": p,
+        "payload_hash": ph,
         "exp": now + ttl,
         "jti": secrets.token_hex(8),
     }
@@ -107,6 +126,7 @@ def consume(
     workspace: str = "",
     job_id: str = "",
     path: str = "",
+    payload_hash: str = "",
 ) -> dict[str, Any]:
     """校验并作废票据。成功 {ok: True}；失败带 detail。"""
     token = (nonce or "").strip()
@@ -153,6 +173,15 @@ def consume(
                 "detail": "HITL nonce 与 workspace 不匹配",
                 "code": "hitl_bind_mismatch",
             }
+        want_h = (payload_hash or "").strip().lower()
+        got_h = str(rec.get("payload_hash") or "").strip().lower()
+        # 旧票据无 hash 时兼容；签发时带了 hash 则确认必须一致
+        if got_h and want_h != got_h:
+            return {
+                "ok": False,
+                "detail": "HITL nonce 与需求摘要不匹配（请重新点确认卡）",
+                "code": "hitl_payload_mismatch",
+            }
     elif act in {ACTION_COMMIT, ACTION_DEPLOY}:
         want = (job_id or "").strip()
         got = str(rec.get("job_id") or "")
@@ -181,8 +210,15 @@ def require_confirm_nonce(
     action: str,
     workspace: str = "",
     job_id: str = "",
+    payload_hash: str = "",
 ) -> dict[str, Any]:
-    return consume(nonce=nonce, action=action, workspace=workspace, job_id=job_id)
+    return consume(
+        nonce=nonce,
+        action=action,
+        workspace=workspace,
+        job_id=job_id,
+        payload_hash=payload_hash,
+    )
 
 
 def attach_path_ticket(payload: dict[str, Any], path: str) -> dict[str, Any]:

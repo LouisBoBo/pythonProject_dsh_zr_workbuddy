@@ -195,9 +195,11 @@ def merge_secrets(saved: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, 
 
 def yaml_safe_load(text: str):
     import yaml
+
     return yaml.safe_load(text)
 
 
 def yaml_dump(cfg: Dict[str, Any]) -> str:
     import yaml
+
     return yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False)

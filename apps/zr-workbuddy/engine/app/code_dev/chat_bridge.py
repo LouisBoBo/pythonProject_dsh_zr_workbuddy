@@ -272,6 +272,8 @@ def confirm_and_start(
     client_brief: dict[str, Any] | None = None,
     write_scope: list[str] | None = None,
     source_gate_job_id: str = "",
+    ui_call_id: str = "",
+    ui_session_id: str = "",
 ) -> dict[str, Any]:
     """用户点确认卡后调用：真正启动 Job。"""
     ws = (workspace or "").strip()
@@ -336,6 +338,8 @@ def confirm_and_start(
         target_hints=hints,
         resume_commit=from_gate,
         source_gate_job_id=gate_id,
+        ui_call_id=ui_call_id,
+        ui_session_id=ui_session_id,
     )
     job_id = out.get("job_id") or ""
     if out.get("ok"):

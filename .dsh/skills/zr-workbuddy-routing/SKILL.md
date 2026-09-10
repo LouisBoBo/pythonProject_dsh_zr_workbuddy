@@ -2,9 +2,9 @@
 name: zr-workbuddy-routing
 description: >-
   ZR-WorkBuddy 工具路由：根据用户意图选择 mes_ask / mes_pcb / pcb_count_bom /
-  pcb_parse_dimensions / weather_query / weather_forecast / mes_code_dev_* /
-  mes_code_review_* / mes_code_commit_* / mes_config 等工具。查数、PCB 工艺、
-  BOM 统计、板尺寸、天气、本机写码审码提交分流。
+  pcb_parse_dimensions / pcb_8d_* / weather_query / weather_forecast /
+  mes_code_dev_* / mes_code_review_* / mes_code_commit_* / mes_config 等工具。
+  查数、PCB 工艺、BOM、板尺寸、8D 报告、天气、本机写码审码提交分流。
 ---
 
 # ZR-WorkBuddy 工具路由
@@ -21,6 +21,7 @@ description: >-
 | PCB **工艺问答**（叠层、DFM、AOI/飞针、IPC、缺陷排障） | `mes_pcb` | feature mes-pcb |
 | **统计 BOM 清单**（位号+数量文本：有几行、总数量） | `pcb_count_bom` | 插件 @zhongruan/dsh-pcb-helper |
 | **解析板尺寸字符串**（如 100x80mm、长宽多少） | `pcb_parse_dimensions` | 插件 @zhongruan/dsh-pcb-helper |
+| **PCB 8D 报告**（新建/补全/完整模拟样例/导出） | `pcb_8d_create` / `pcb_8d_fill` / `pcb_8d_demo` / `pcb_8d_export` | 插件 @zhongruan/dsh-pcb-8d |
 | **查某城市现在天气**（气温、湿度、风力） | `weather_query` | 插件 @zhongruan/dsh-weather |
 | **查未来几天天气预报** | `weather_forecast` | 插件 @zhongruan/dsh-weather |
 | 在本机工程 **写代码 / 改页面 / 改菜单 / 加功能 / 做报表页** | **立刻** `mes_code_dev_begin`（禁止 Bash 扫仓） | code-dev |
@@ -44,6 +45,11 @@ description: >-
 3b. **查天气 ≠ 闲聊编造**  
    「深圳今天天气怎么样」「北京未来三天预报」→ `weather_query` / `weather_forecast`（`city` 填城市名）。  
    禁止凭记忆报气温；若工具不存在，提示去插件市场安装 `@zhongruan/dsh-weather`。
+
+3c. **8D 报告 ≠ 工艺闲聊**  
+   「开一份 8D」「补全 D4」→ `pcb_8d_create` / `pcb_8d_fill`。  
+   「完整模拟 8D」「输出完整样例报告」→ **`pcb_8d_demo`**（一键填满 D0～D8 并导出）。  
+   不要用 `mes_pcb` 只口头写报告。若工具不存在，提示安装 `@zhongruan/dsh-pcb-8d`。
 
 4. **做页面/改代码/改菜单 ≠ 查数，也 ≠ 宿主自己改仓**  
    「员工工时报表页面」「加一个列表 CRUD」「物料出库要写在仓库管理菜单」  
@@ -79,6 +85,13 @@ description: >-
 - `pcb_count_bom`：用户给出多行「位号,数量」，统计行数与总数量。
 - `pcb_parse_dimensions`：解析板尺寸字符串。
 - 示例：「下面 BOM 有多少行、元器件总共多少」「帮我看下 120x80mm 长宽」。
+
+### pcb-8d 插件（`pcb_8d_demo` / `create` / `fill` / `get` / `list` / `export`）
+
+- 公司市场插件 `@zhongruan/dsh-pcb-8d` 提供。
+- `pcb_8d_demo`：一键完整模拟业务数据（PCB-A100 虚焊）并导出 Markdown。
+- 亦可逐步 `create` → `fill` → `export`；草稿在 `~/.zhongruan/pcb-8d-drafts/`。
+- 示例：「生成一份完整模拟 8D 报告」「开一份虚焊的 8D」。
 
 ### weather 插件（`weather_query` / `weather_forecast`）
 
@@ -124,7 +137,7 @@ scripts/plugin.sh --app zr-workbuddy features
 scripts/plugin.sh --app zr-workbuddy enable <feature-id>
 ```
 
-公司插件：设置 → 插件市场 → 安装 `@zhongruan/dsh-pcb-helper` 或 `@zhongruan/dsh-weather`。
+公司插件：设置 → 插件市场 → 安装 `@zhongruan/dsh-pcb-helper` / `@zhongruan/dsh-pcb-8d` / `@zhongruan/dsh-weather`。
 
 写码还需引擎配置中心 → **写码车道** 打开开关；提交还需 **提交车道**。
 

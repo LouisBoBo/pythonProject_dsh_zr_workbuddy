@@ -93,16 +93,6 @@ TYPE_MAP = {
     "布尔": "布尔", "boolean": "布尔", "bool": "布尔",
 }
 
-
-def guess_table(text: str) -> str:
-    """按加权关键词打分猜测归属数据表。"""
-    t = (text or "").lower()
-    scored = [(k, *_score_table(t, k)) for k in TABLE_KEYS]
-    scored.sort(key=lambda x: (-x[1], -x[2]))
-    best = scored[0]
-    return best[0] if best[1] > 0 else "other"
-
-
 def suggest_std(mes_field: str) -> str:
     f = (mes_field or "").strip()
     if f in STD_SUGGEST:

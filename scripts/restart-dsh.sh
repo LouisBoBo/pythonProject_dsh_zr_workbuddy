@@ -4,7 +4,7 @@
 # 可选：--fg 前台运行（本机终端调试用）
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PORT="${DSH_WEB_PORT:-3080}"
+PORT="${DSH_WEB_PORT:-3081}"
 FG=0
 for a in "$@"; do
   case "$a" in --fg|--foreground) FG=1 ;; esac
@@ -21,7 +21,7 @@ if [ -z "$DSH_BIN" ]; then
 fi
 [ -n "$DSH_BIN" ] || { echo "找不到 dsh 可执行文件，请设置 DSH_BIN"; exit 1; }
 
-WEB_ARGS=(web --no-open)
+WEB_ARGS=(web --no-open --host 127.0.0.1 --port "$PORT")
 if [ -n "${DSH_TRUSTED_HOSTS:-}" ]; then
   old_ifs=$IFS
   IFS=','

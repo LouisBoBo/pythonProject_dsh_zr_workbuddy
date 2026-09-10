@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # 产出 Mac 宿主一体安装包：内嵌 Host（staged dsh）+ 内嵌引擎
 # 用法:
-#   ./scripts/package-desktop.sh           # 默认 unified（宿主一体）
+#   ./scripts/package-desktop.sh           # 默认 unified；主产物 zip（不打 dmg）
 #   ./scripts/package-desktop.sh unified
 #   ./scripts/package-desktop.sh engine    # 仅引擎壳（旧体验包，需本机 dsh）
-#   SKIP_RUNTIME=1 SKIP_HOST=1 SKIP_NODE=1 SKIP_MARKET=1 SKIP_PNPM=1 ./scripts/package-desktop.sh  # 跳过重建
+#   MAKE_DMG=1 ./scripts/package-desktop.sh  # 额外打 DMG（需本机 hdiutil 健康）
+#   SKIP_RUNTIME=1 SKIP_HOST=1 SKIP_NODE=1 SKIP_MARKET=1 SKIP_PNPM=1 ./scripts/package-desktop.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -304,7 +305,7 @@ else
     > "$PNPM_STAGED/node_modules/pnpm/bin/pnpm.cjs"
 fi
 
-log "electron-builder ..."
+log "electron-builder（仅 dir+zip；DMG 自研，避开 builder 内置 UDRW+zlib 慢管线）..."
 export ELECTRON_MIRROR="${ELECTRON_MIRROR:-https://npmmirror.com/mirrors/electron/}"
 export ELECTRON_BUILDER_BINARIES_MIRROR="${ELECTRON_BUILDER_BINARIES_MIRROR:-https://npmmirror.com/mirrors/electron-builder-binaries/}"
 export CSC_IDENTITY_AUTO_DISCOVERY="${CSC_IDENTITY_AUTO_DISCOVERY:-false}"
@@ -319,15 +320,68 @@ node --check "$ROOT/desktop/preload.js" || { err "desktop/preload.js 语法错�
   if [[ -n "$EB_TARGET" ]]; then
     npx electron-builder --"$EB_TARGET"
   else
+    # --mac 走 package.json mac.target = dir+zip
     npx electron-builder --mac
   fi
 )
 
+APP_BUNDLE="$ROOT/desktop/release/mac/ZR WorkBuddy.app"
+ZIP_OUT="$ROOT/desktop/release/ZR WorkBuddy-${DESKTOP_VERSION}.zip"
+DMG_OUT="$ROOT/desktop/release/ZR WorkBuddy-${DESKTOP_VERSION}.dmg"
+test -d "$APP_BUNDLE" || { err "缺少 $APP_BUNDLE（electron-builder dir 失败）"; exit 1; }
+test -f "$ZIP_OUT" || log "警告: 未找到 zip（$ZIP_OUT）；仍可继续打 DMG"
+
+# DMG：默认跳过（本机 hdiutil 易对 ~1GB 一体包假死；zip 已够用）。
+# 需要 dmg 时：MAKE_DMG=1 DMG_FORMAT=ULFO ./scripts/package-desktop.sh
+SKIP_DMG="${SKIP_DMG:-1}"
+if [[ "${MAKE_DMG:-0}" == "1" ]]; then
+  SKIP_DMG=0
+fi
+DMG_OK=0
+if [[ "$SKIP_DMG" == "1" ]]; then
+  log "跳过 DMG（默认；主产物 zip）。需要时: MAKE_DMG=1"
+else
+  # 预检：15s 内打不出 1KB 测试镜像 → 认定 DiskImages 卡死，直接放弃
+  PRE=$(mktemp -d "${TMPDIR:-/tmp}/wb-dmg-pre-XXXX")
+  echo ok >"$PRE/a.txt"
+  PRE_DMG="${TMPDIR:-/tmp}/wb-dmg-pre-$$.dmg"
+  rm -f "$PRE_DMG"
+  log "DMG 预检 hdiutil（15s）…"
+  hdiutil create -srcfolder "$PRE" -ov -format UDRO "$PRE_DMG" &
+  PRE_PID=$!
+  pre_ok=0
+  for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    if ! kill -0 "$PRE_PID" 2>/dev/null; then
+      wait "$PRE_PID" && pre_ok=1
+      break
+    fi
+    sleep 1
+  done
+  if kill -0 "$PRE_PID" 2>/dev/null; then
+    kill -9 "$PRE_PID" 2>/dev/null || true
+    pkill -9 -f "hdiutil create.*wb-dmg-pre" 2>/dev/null || true
+    err "hdiutil 预检超时：DiskImages 可能卡死。请执行: killall diskimages-helper；或重启后再 MAKE_DMG=1"
+    pre_ok=0
+  fi
+  rm -rf "$PRE" "$PRE_DMG"
+  if [[ "$pre_ok" == "1" ]]; then
+    log "生成 DMG（DMG_FORMAT=${DMG_FORMAT:-ULFO}，超时 ${DMG_TIMEOUT_SEC:-300}s）…"
+    if bash "$ROOT/scripts/lib/make_desktop_dmg.sh" \
+      "$APP_BUNDLE" "$DMG_OUT" "ZR WorkBuddy ${DESKTOP_VERSION}"; then
+      DMG_OK=1
+    else
+      err "DMG 失败或超时。可用产物: zip / release/mac/*.app"
+    fi
+  fi
+fi
+
 mkdir -p "$ROOT/desktop/release"
-NOTE="宿主一体包（未 Apple 公证）；配置中心 / 设置填写 Key 后使用"
+NOTE="宿主一体包（未 Apple 公证）；配置中心 / 设置填写 Key 后使用。主推 zip；dmg 为可选拖拽安装。"
 if [[ "$MODE" != "unified" ]]; then
   NOTE="仅引擎壳；完整聊天需本机 dsh 或改用 unified 打包"
 fi
+ARTIFACTS="zip"
+[[ "$DMG_OK" == "1" ]] && ARTIFACTS="zip,dmg"
 cat > "$ROOT/desktop/release/build-info.json" <<EOF
 {
   "product": "ZR WorkBuddy",
@@ -336,12 +390,19 @@ cat > "$ROOT/desktop/release/build-info.json" <<EOF
   "git_commit": "${GIT_COMMIT}",
   "built_at": "${BUILD_TIME}",
   "platform": "$(uname -s)-$(uname -m)",
+  "artifacts": "${ARTIFACTS}",
+  "dmg_format": "${DMG_FORMAT:-ULFO}",
   "note": "${NOTE}"
 }
 EOF
 
 log "完成。安装包目录: $ROOT/desktop/release"
-log "产物: ZR WorkBuddy-${DESKTOP_VERSION}.dmg / .zip"
+[[ -f "$ZIP_OUT" ]] && log "主产物 zip: $ZIP_OUT ($(du -h "$ZIP_OUT" | awk '{print $1}'))"
+if [[ "$DMG_OK" == "1" ]]; then
+  log "DMG: $DMG_OUT ($(du -h "$DMG_OUT" | awk '{print $1}'))"
+else
+  log "无 DMG（可 unzip 后把 .app 拖进「应用程序」）"
+fi
 log "macOS 未签名：若拦截，请右键「打开」一次。"
 if [[ "$MODE" == "unified" ]]; then
   log "一体包：内嵌 Host + Node≥22 + 引擎；启动用内嵌 Node 跑 dsh（勿用 Electron Node 20）。"

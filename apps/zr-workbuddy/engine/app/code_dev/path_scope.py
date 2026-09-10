@@ -138,6 +138,18 @@ def _extract_local_import_rels(source_rel: str, text: str) -> list[str]:
         return []
     parent = "/".join(src.split("/")[:-1])
     found: list[str] = []
+    def _expand_cands(cand: str) -> None:
+        cand = cand.split("?", 1)[0].split("#", 1)[0]
+        if not cand:
+            return
+        found.append(cand)
+        if not cand.rsplit("/", 1)[-1].count("."):
+            for ext in (".vue", ".js", ".ts", ".tsx", ".jsx"):
+                found.append(cand + ext)
+            found.append(cand + "/index.js")
+            found.append(cand + "/index.ts")
+            found.append(cand + "/index.vue")
+
     # JS/TS/Vue: from '...'; import '...'; require('...')
     for m in re.finditer(
         r"""(?:from|import|require\()\s*['"](\.\.?/[^'"]+)['"]""",
@@ -154,16 +166,22 @@ def _extract_local_import_rels(source_rel: str, text: str) -> list[str]:
                     base_parts.pop()
                 continue
             base_parts.append(part)
-        cand = "/".join(base_parts)
-        # drop query/hash; try with common extensions if bare
-        cand = cand.split("?", 1)[0].split("#", 1)[0]
-        found.append(cand)
-        if not cand.rsplit("/", 1)[-1].count("."):
-            for ext in (".vue", ".js", ".ts", ".tsx", ".jsx"):
-                found.append(cand + ext)
-            found.append(cand + "/index.js")
-            found.append(cand + "/index.ts")
-            found.append(cand + "/index.vue")
+        _expand_cands("/".join(base_parts))
+    # Vue/Vite 常见别名：@/ → frontend/src/（若源文件在 frontend 下）
+    src_root = "frontend/src"
+    if src.startswith("frontend/"):
+        src_root = "frontend/src"
+    elif src.startswith("src/"):
+        src_root = "src"
+    for m in re.finditer(
+        r"""(?:from|import|require\()\s*['"](@/[^'"]+|~/[^'"]+)['"]""",
+        text,
+    ):
+        raw = m.group(1).replace("\\", "/")
+        if raw.startswith("@/"):
+            _expand_cands(src_root + "/" + raw[2:])
+        elif raw.startswith("~/"):
+            _expand_cands(src_root + "/" + raw[2:])
     # Python: from .x import / from ..pkg import — skip complex; routers already covered
     return [normalize_rel(x) for x in found if normalize_rel(x)]
 

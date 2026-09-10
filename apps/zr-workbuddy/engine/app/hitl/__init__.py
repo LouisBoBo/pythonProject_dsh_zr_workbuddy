@@ -13,6 +13,7 @@ from .origin import (
     mutating_path_guarded,
 )
 from .tokens import (
+    normalize_payload_hash,
     ACTION_COMMIT,
     ACTION_DEPLOY,
     ACTION_DEV,
@@ -43,6 +44,7 @@ __all__ = [
     "issue_surface_ok",
     "local_origin_ok",
     "mutating_path_guarded",
+    "normalize_payload_hash",
     "require_confirm_nonce",
     "reset_store_for_tests",
 ]

@@ -37,22 +37,78 @@ class HitlTokenTests(unittest.TestCase):
         reset_store_for_tests()
 
     def test_issue_consume_once(self):
+        from app.hitl.tokens import normalize_payload_hash
+
         with tempfile.TemporaryDirectory() as td:
             ws = str(Path(td).resolve())
-            issued = issue(action=ACTION_DEV, workspace=ws)
+            ph = normalize_payload_hash("一次性 nonce 消耗测试需求摘要")
+            issued = issue(action=ACTION_DEV, workspace=ws, payload_hash=ph)
             self.assertTrue(issued.get("ok"), issued)
             nonce = issued["nonce"]
-            ok = consume(nonce=nonce, action=ACTION_DEV, workspace=ws)
+            ok = consume(nonce=nonce, action=ACTION_DEV, workspace=ws, payload_hash=ph)
             self.assertTrue(ok.get("ok"), ok)
-            again = consume(nonce=nonce, action=ACTION_DEV, workspace=ws)
+            again = consume(nonce=nonce, action=ACTION_DEV, workspace=ws, payload_hash=ph)
             self.assertFalse(again.get("ok"))
             self.assertEqual(again.get("code"), "hitl_nonce_invalid")
 
-    def test_workspace_mismatch(self):
+    def test_issue_requires_payload_hash(self):
         with tempfile.TemporaryDirectory() as td:
             ws = str(Path(td).resolve())
-            issued = issue(action=ACTION_DEV, workspace=ws)
-            bad = consume(nonce=issued["nonce"], action=ACTION_DEV, workspace=ws + "-other")
+            bare = issue(action=ACTION_DEV, workspace=ws)
+            self.assertFalse(bare.get("ok"))
+            bad = issue(action=ACTION_DEV, workspace=ws, payload_hash="not-hex")
+            self.assertFalse(bad.get("ok"))
+
+    def test_payload_hash_mismatch(self):
+        from app.hitl.tokens import normalize_payload_hash
+
+        with tempfile.TemporaryDirectory() as td:
+            ws = str(Path(td).resolve())
+            req = "报表中心菜单删除设备管理子项"
+            issued = issue(
+                action=ACTION_DEV,
+                workspace=ws,
+                payload_hash=normalize_payload_hash(req),
+            )
+            self.assertTrue(issued.get("ok"), issued)
+            bad = consume(
+                nonce=issued["nonce"],
+                action=ACTION_DEV,
+                workspace=ws,
+                payload_hash=normalize_payload_hash(req + "-篡改"),
+            )
+            self.assertFalse(bad.get("ok"))
+            self.assertEqual(bad.get("code"), "hitl_payload_mismatch")
+
+    def test_payload_hash_ok(self):
+        from app.hitl.tokens import normalize_payload_hash
+
+        with tempfile.TemporaryDirectory() as td:
+            ws = str(Path(td).resolve())
+            req = "报表中心菜单删除设备管理子项"
+            ph = normalize_payload_hash(req)
+            issued = issue(action=ACTION_DEV, workspace=ws, payload_hash=ph)
+            ok = consume(
+                nonce=issued["nonce"],
+                action=ACTION_DEV,
+                workspace=ws,
+                payload_hash=ph,
+            )
+            self.assertTrue(ok.get("ok"), ok)
+
+    def test_workspace_mismatch(self):
+        from app.hitl.tokens import normalize_payload_hash
+
+        with tempfile.TemporaryDirectory() as td:
+            ws = str(Path(td).resolve())
+            ph = normalize_payload_hash("workspace 绑定测试")
+            issued = issue(action=ACTION_DEV, workspace=ws, payload_hash=ph)
+            bad = consume(
+                nonce=issued["nonce"],
+                action=ACTION_DEV,
+                workspace=ws + "-other",
+                payload_hash=ph,
+            )
             self.assertFalse(bad.get("ok"))
             self.assertEqual(bad.get("code"), "hitl_bind_mismatch")
 
@@ -136,12 +192,24 @@ class HitlHttpTests(unittest.TestCase):
 
             r = self.client.post(
                 "/api/hitl/issue",
-                json={"action": "code-dev.confirm", "workspace": ws},
+                json={
+                    "action": "code-dev.confirm",
+                    "workspace": ws,
+                    "requirement": "报表中心菜单删除设备管理子项并验收",
+                },
                 headers=_UI_HEADERS,
             )
             self.assertEqual(r.status_code, 200, r.text)
             self.assertTrue(r.json().get("ok"))
             self.assertTrue(r.json().get("nonce", "").startswith("htl_"))
+
+            missing_req = self.client.post(
+                "/api/hitl/issue",
+                json={"action": "code-dev.confirm", "workspace": ws},
+                headers=_UI_HEADERS,
+            )
+            self.assertEqual(missing_req.status_code, 400)
+            self.assertEqual(missing_req.json().get("code"), "hitl_requirement_missing")
 
             no_nonce = self.client.post(
                 "/api/code-dev/confirm",

@@ -948,7 +948,7 @@ def build_delete_delivery(
         "",
         "**结论**",
         f"已由引擎直接下线 {feat_label}：删除页面/API 文件并修补菜单与路由"
-        + ("；本机验尸通过。" if ok else "。"),
+        + ("；本机核对通过。" if ok else "。"),
         "",
         "**改动文件**",
     ]
@@ -968,13 +968,36 @@ def build_delete_delivery(
             "- 保留：同模块其余子功能",
             "- 未改动：其它业务模块",
             "",
-            "**验收**",
-            "1. 菜单中确认无该项",
-            "2. 原路由应 404 或重定向",
-            "3. 同模块其余页面正常",
         ]
+        + _acceptance_lines(label=feat_label)
     )
     return "\n".join(lines) + "\n"
+
+
+def _acceptance_lines(*, label: str = "", verify_detail: str = "") -> list[str]:
+    """删除终稿「验收」四条：面向业务同学，避免路由/404/验尸等术语。"""
+    detail = str(verify_detail or "").strip()
+    detail = (
+        detail.replace("本机工程验尸通过", "")
+        .replace("本机工程核对通过", "")
+        .replace("验尸通过", "")
+        .replace("核对通过", "")
+        .lstrip("：:")
+        .strip()
+    )
+    if detail:
+        check4 = f"4. 本机代码已核对：{detail}"
+    elif label:
+        check4 = f"4. 本机代码已核对：{label}相关菜单、页面与路由已清除"
+    else:
+        check4 = "4. 本机代码已核对：相关菜单、页面与路由已清除"
+    return [
+        "**验收**",
+        "1. 打开系统，在对应模块菜单中确认该项已消失",
+        "2. 原先功能页地址不应再进入该功能",
+        "3. 同模块其它功能仍可正常使用",
+        check4,
+    ]
 
 
 def _change_note_for_rel(rel: str, *, deleted: bool) -> str:
@@ -1035,7 +1058,7 @@ def build_engine_delete_delivery(
         )
     elif mode_n == "already_done":
         intro = (
-            f"本机工程验尸通过：{label} 相关菜单、路由与页面文件已不存在，"
+            f"本机代码已核对：{label}相关菜单、页面与路由已清除，"
             "目标状态已达成，本次无需再删文件。"
         )
     else:
@@ -1067,14 +1090,9 @@ def build_engine_delete_delivery(
             "- 保留：同模块其余子功能",
             "- 未改动：其它业务模块",
             "",
-            "**验收**",
-            "1. 登录后在对应模块菜单中确认无该项",
-            "2. 访问原路由应 404 或重定向",
-            "3. 同模块其余页面正常",
         ]
     )
-    if verify_detail:
-        lines.extend(["", verify_detail])
+    lines.extend(_acceptance_lines(label=label, verify_detail=verify_detail))
     if mode_n == "already_done":
         from .delete_verify import runtime_hint_always
 

@@ -102,7 +102,7 @@ window.__ModuleLoader__.load({
     var cssInjected = false;
     function ensureCss() {
       if (typeof document === "undefined") return;
-      var ver = "composer-11";
+      var ver = "composer-17";
       if (cssInjected && document.querySelector("style[data-wb-cd-css='" + ver + "']")) return;
       document.querySelectorAll("style[data-plugin='@dsh-external/dsh-mes-bridge']").forEach(function (el) {
         if (el.parentNode) el.parentNode.removeChild(el);
@@ -170,13 +170,21 @@ window.__ModuleLoader__.load({
         ".wb-cd-li:first-child{border-top:none}" +
         ".wb-cd-ico{width:18px;height:18px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;font-size:11px;font-weight:700}" +
         ".wb-cd-li.is-pending .wb-cd-ico{background:#e5e7eb;color:#6b7280}" +
-        ".wb-cd-li.is-running .wb-cd-ico{background:#cffafe;color:#0e7490}" +
+        ".wb-cd-li.is-running .wb-cd-ico{background:#dcfce7;color:#15803d}" +
         ".wb-cd-li.is-done .wb-cd-ico{background:#d1fae5;color:#047857}" +
         ".wb-cd-li.is-error .wb-cd-ico{background:#fee2e2;color:#b91c1c}" +
         ".wb-cd-title{font-weight:600;color:#111827;display:block}" +
         ".wb-cd-state{color:#64748b;font-size:11px}" +
         ".wb-cd-pulse{display:inline-block;width:8px;height:8px;border-radius:999px;background:#06b6d4;animation:wbCdPulse 1s ease-in-out infinite}" +
         "@keyframes wbCdPulse{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}" +
+        ".wb-cd-dot-live{display:inline-block;width:8px;height:8px;border-radius:999px;background:#16a34a;box-shadow:0 0 0 2px rgba(22,163,74,.18)}" +
+        ".wb-cd-spin{display:inline-block;width:12px;height:12px;box-sizing:border-box;border:2px solid #bae6fd;border-top-color:#0284c7;border-radius:999px;animation:wbCdSpin .65s linear infinite;vertical-align:middle}" +
+        "@keyframes wbCdSpin{to{transform:rotate(360deg)}}" +
+        ".wb-cd-pipecard-h .hint .wb-cd-spin{display:block}" +
+        ".wb-cd-act ul{list-style:none;margin:0;padding:0}" +
+        ".wb-cd-act li{display:flex;align-items:flex-start;gap:8px}" +
+        ".wb-cd-act li::before{content:'';flex:none;width:8px;height:8px;margin-top:5px;border-radius:999px;background:#94a3b8}" +
+        ".wb-cd-act li.is-live::before{background:#16a34a;box-shadow:0 0 0 2px rgba(22,163,74,.18)}" +
         ".wb-cd-flow{width:100%;min-width:0;max-width:100%;overflow:visible;background:transparent;border:none;padding:0;margin:8px 0;box-sizing:border-box}" +
         ".wb-cd-composer{width:100%;min-width:0;margin:4px 0 8px;padding:0}" +
         ".wb-cd-composer-bar{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:12px;color:#64748b}" +
@@ -206,15 +214,26 @@ window.__ModuleLoader__.load({
         ".wb-cd-codewrap pre.wb-cd-code .wb-hl-punct{color:#59636e!important}" +
         ".wb-cd-codewrap pre.wb-cd-code .wb-hl-tag{color:#59636e!important}" +
         ".wb-cd-md{font:15px/1.85 -apple-system,'PingFang SC','Microsoft YaHei',sans-serif;color:#0f172a;white-space:normal;width:100%;max-width:100%;min-width:0;box-sizing:border-box;overflow:visible;background:transparent;border:none;padding:0;margin:4px 0 0;overflow-wrap:break-word;word-break:normal}" +
-        ".wb-cd-proc{list-style:none;margin:4px 0 8px;padding:0;border-left:2px solid #e2e8f0}" +
-        ".wb-cd-proc-li{display:flex;gap:10px;align-items:flex-start;margin:0;padding:8px 0 8px 12px;position:relative}" +
-        ".wb-cd-proc-li + .wb-cd-proc-li{border-top:1px dashed #eef2f7}" +
-        ".wb-cd-proc-tag{flex:none;min-width:3.2em;margin-top:1px;padding:1px 6px;border-radius:4px;background:#ecfeff;color:#0e7490;font-size:11px;font-weight:650;line-height:1.5;text-align:center}" +
-        ".wb-cd-proc-dot{flex:none;width:8px;height:8px;margin-top:7px;margin-left:2px;border-radius:999px;background:#94a3b8}" +
-        ".wb-cd-proc-body{flex:1;min-width:0}" +
-        ".wb-cd-proc-t{margin:0;font-size:14px;line-height:1.7;color:#0f172a;overflow-wrap:break-word}" +
-        ".wb-cd-proc-t + .wb-cd-proc-t,.wb-cd-proc-t + .wb-cd-proc-path,.wb-cd-proc-path + .wb-cd-proc-path{margin-top:4px}" +
+        ".wb-cd-proc{list-style:none;margin:6px 0 12px;padding:0!important;position:relative;border-left:none}" +
+        ".wb-cd-proc-li{display:flex;gap:12px;align-items:flex-start;margin:0;padding:0 0 16px;position:relative;border-top:none}" +
+        ".wb-cd-proc-li:last-child{padding-bottom:0}" +
+        ".wb-cd-proc-rail{flex:none;width:22px;position:relative;display:flex;justify-content:center;align-items:flex-start;padding-top:3px;align-self:stretch}" +
+        ".wb-cd-proc-li:not(:last-child) .wb-cd-proc-rail::before{content:'';position:absolute;left:50%;top:14px;bottom:-16px;width:1px;transform:translateX(-50%);background:#e5e7eb;pointer-events:none;z-index:0}" +
+        ".wb-cd-proc-node{flex:none;width:22px;height:22px;border-radius:999px;background:#fff;border:1px solid #e5e7eb;display:inline-flex;align-items:center;justify-content:center;position:relative;z-index:1;box-sizing:border-box;color:#64748b}" +
+        ".wb-cd-proc-node.is-dot{border-color:transparent;background:transparent}" +
+        ".wb-cd-proc-node.is-live{border-color:#86efac;color:#15803d;box-shadow:0 0 0 2px rgba(22,163,74,.14)}" +
+        ".wb-cd-proc-node.is-dot.is-live{border-color:transparent;box-shadow:none;color:#64748b}" +
+        ".wb-cd-proc-node.is-dot::after{content:'';width:8px;height:8px;border-radius:999px;background:#94a3b8;box-shadow:0 0 0 3px #fff}" +
+        ".wb-cd-proc-node.is-dot.is-live::after{background:#16a34a;box-shadow:0 0 0 3px #fff,0 0 0 5px rgba(22,163,74,.16)}" +
+        ".wb-cd-proc-node svg{width:12px;height:12px;display:block}" +
+        ".wb-cd-proc-body{flex:1;min-width:0;padding-top:1px}" +
+        ".wb-cd-proc-t{margin:0;font-size:14px;line-height:1.75;color:#0f172a;overflow-wrap:break-word}" +
+        ".wb-cd-proc-t + .wb-cd-proc-t,.wb-cd-proc-t + .wb-cd-proc-path,.wb-cd-proc-path + .wb-cd-proc-path{margin-top:6px}" +
         ".wb-cd-proc-path{margin:0;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;color:#334155;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:4px 8px;overflow-wrap:anywhere}" +
+        ".wb-cd-proc-meta{margin:0 0 4px;font-size:12px;font-weight:650;color:#64748b;letter-spacing:.02em}" +
+        ".wb-cd-proc-links{list-style:none;margin:6px 0 0;padding:0}" +
+        ".wb-cd-proc-links li{margin:0 0 4px;font-size:13px;line-height:1.55;color:#334155}" +
+        ".wb-cd-proc-links li:last-child{margin-bottom:0}" +
         ".wb-cd-md h3,.wb-cd-md h4{margin:18px 0 8px;font-size:15px;font-weight:650;color:#111827}" +
         ".wb-cd-md p{margin:0 0 12px;max-width:100%;overflow-wrap:break-word}" +
         ".wb-cd-md table{border-collapse:collapse;width:100%;margin:8px 0 14px;font-size:13px;table-layout:auto;display:block;overflow-x:auto}" +
@@ -260,8 +279,9 @@ window.__ModuleLoader__.load({
         ".wb-cd-alive{font-size:12px;color:#0f766e;margin:0 0 8px}" +
         ".wb-cd-act{margin:0 0 12px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;max-height:min(36vh,280px);overflow:auto}" +
         ".wb-cd-act-h{font-size:11px;font-weight:650;color:#64748b;margin:0 0 8px;letter-spacing:.04em}" +
-        ".wb-cd-act li{margin:0 0 6px;font-size:12px;line-height:1.55;color:#334155;font-family:ui-monospace,Menlo,monospace;word-break:break-all}" +
+        ".wb-cd-act li{display:flex;align-items:flex-start;gap:8px;margin:0 0 6px;font-size:12px;line-height:1.55;color:#334155;font-family:ui-monospace,Menlo,monospace;word-break:break-all}" +
         ".wb-cd-act li.is-live{color:#0369a1;font-weight:600}" +
+        ".wb-cd-act li.is-live::before{background:#16a34a;box-shadow:0 0 0 2px rgba(22,163,74,.18)}" +
         ".wb-cd-stack{display:flex;flex-direction:column;gap:8px;width:100%;min-width:0}" +
         ".wb-cd-intro{margin:0 0 4px;padding:10px 12px;border:1px solid #bae6fd;border-radius:10px;background:#f0f9ff;font-size:13px;line-height:1.65;color:#0c4a6e}" +
         ".wb-cd-guide{margin:0;padding:10px 14px 10px 1.7em;border:1px solid #e5e7eb;border-radius:12px;background:#fff;font-size:13px;line-height:1.75;color:#334155}" +
@@ -285,10 +305,10 @@ window.__ModuleLoader__.load({
         ".wb-cd-pipecard-h .ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
         ".wb-cd-pipecard-h .hint{margin-left:auto;font-weight:500;font-size:10px;color:#64748b;flex:none}" +
         ".wb-cd-pipecard.is-done .hint{color:#047857}" +
-        ".wb-cd-pipecard.is-running .hint{color:#0369a1}" +
+        ".wb-cd-pipecard.is-running .hint{color:#0369a1;display:inline-flex;align-items:center}" +
         ".wb-cd-pipecard .wb-cd-ico{background:#e5e7eb;color:#6b7280}" +
         ".wb-cd-pipecard.is-done .wb-cd-ico{background:#d1fae5;color:#047857}" +
-        ".wb-cd-pipecard.is-running .wb-cd-ico{background:#cffafe;color:#0e7490}" +
+        ".wb-cd-pipecard.is-running .wb-cd-ico{background:#dcfce7;color:#15803d}" +
         ".wb-cd-stepcard{border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;overflow:hidden}" +
         ".wb-cd-stepcard-h{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;font-weight:600;color:#111827}" +
         ".wb-cd-stepcard-h .hint{margin-left:auto;font-weight:500;color:#64748b;font-size:11px}" +
@@ -1861,8 +1881,10 @@ window.__ModuleLoader__.load({
       "delete-exec": "dev",
       "sync-del": "sync",
     };
-    var CD_PERSIST_VER = 2;
-    var CD_UI_REV = "2026-09-09h";
+    /** 持久化版本：升主版本时须兼容读取旧版，禁止 prune 直接删光导致刷新回表单。 */
+    var CD_PERSIST_VER = 3;
+    var CD_PERSIST_MIN_VER = 2;
+    var CD_UI_REV = "2026-09-10j-hitl";
     var CD_ICON_COPY =
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
     var CD_ICON_DOWNLOAD =
@@ -1892,38 +1914,335 @@ window.__ModuleLoader__.load({
       return sealed;
     }
 
-    function cdPersistKey(block) {
-      if (!block) return "wb-cd-card:anon";
-      var tid = String(block.threadId || block.thread_id || block.sessionId || block.session_id || "").trim();
-      if (tid) return "wb-cd-card:" + tid;
-      var bid = String(block.id || block.toolCallId || block.callId || "").trim();
-      if (bid) return "wb-cd-card:block:" + bid;
+    function cdBlockCallId(block, callIdProp) {
+      if (callIdProp != null && String(callIdProp).trim()) return String(callIdProp).trim();
+      if (!block) return "";
+      var nested = block.call && typeof block.call === "object" ? block.call : null;
+      return String(
+        block.callId ||
+          block.toolCallId ||
+          (nested && (nested.callId || nested.toolCallId || nested.id)) ||
+          block.id ||
+          "",
+      ).trim();
+    }
+
+    function cdBlockSessionId(block, sessionId) {
+      return String(
+        sessionId ||
+          (block &&
+            (block.threadId ||
+              block.thread_id ||
+              block.sessionId ||
+              block.session_id ||
+              block.conversationId ||
+              "")) ||
+          "",
+      ).trim();
+    }
+
+    /**
+     * DSH toolview 的稳定身份在 props.callId（见 ToolCallTree owner），
+     * 不要只读 block —— 刷新后 block 形态常变，会导致 key 漂移回表单。
+     */
+    function cdPersistKey(block, sessionId, callIdProp) {
+      var callId = cdBlockCallId(block, callIdProp);
+      var sid = cdBlockSessionId(block, sessionId);
+      if (callId && sid) return "wb-cd-card:" + sid + ":" + callId;
+      if (callId) return "wb-cd-card:call:" + callId;
+      if (sid) return "wb-cd-card:session:" + sid + ":lone";
       return "wb-cd-card:anon";
+    }
+
+    function cdPersistKeyAliases(block, sessionId, callIdProp) {
+      var callId = cdBlockCallId(block, callIdProp);
+      var sid = cdBlockSessionId(block, sessionId);
+      var keys = [];
+      var primary = cdPersistKey(block, sessionId, callIdProp);
+      keys.push(primary);
+      // 有 callId 时只认 call 专属 key，禁止 session/anon 共享键（否则新 begin 会吞掉上一张卡的完成态）
+      if (callId) {
+        keys.push("wb-cd-card:call:" + callId);
+        keys.push("wb-cd-card:block:" + callId);
+        if (sid) keys.push("wb-cd-card:" + sid + ":" + callId);
+      } else if (sid) {
+        keys.push("wb-cd-card:" + sid);
+        keys.push("wb-cd-card:session:" + sid + ":lone");
+      } else {
+        keys.push("wb-cd-card:anon");
+      }
+      var uniq = [];
+      var seen = {};
+      keys.forEach(function (k) {
+        if (!k || seen[k]) return;
+        seen[k] = true;
+        uniq.push(k);
+      });
+      return uniq;
+    }
+
+    /** 持久化记录是否属于当前工具卡（按 callId 硬绑定）。 */
+    function cdPersistBelongsToCall(saved, callId) {
+      if (!saved || typeof saved !== "object") return false;
+      var cid = String(callId || "").trim();
+      // callId 缺失时绝不认领任何完成态（否则新 begin 会吞掉 session 里上一张卡）
+      if (!cid) return false;
+      var savedCid = String(saved.callId || "").trim();
+      if (!savedCid) return false;
+      return savedCid === cid;
+    }
+
+    /**
+     * 新开 mes_code_dev_begin（pick）必须停在 HITL。
+     * 返回 true = 丢弃 done/running 持久化，强制表单。
+     * 仅当本 callId 已绑定 jobId（用户点过确认后刷新）才允许恢复完成态。
+     */
+    function cdPickMustStayHitl(wb, ui, saved, callId) {
+      var isPick =
+        (ui && String(ui.kind || "") === "pick") ||
+        (wb && (wb.t === "cd-pick" || wb.t === "cd-none"));
+      // meta 尚未到位时也按 pick 保守处理：禁止直接出完成态
+      if (!isPick && wb && wb.t && String(wb.t).indexOf("cd-") === 0 && wb.t !== "cd-pick") {
+        return false;
+      }
+      if (!isPick && wb && wb.t) return false;
+      if (!saved) return true;
+      var phase = String(saved.phase || "");
+      if (phase === "done" || phase === "running" || saved.jobId) {
+        return !(
+          cdPersistBelongsToCall(saved, callId) &&
+          String(callId || "").trim() &&
+          String(saved.jobId || "").trim()
+        );
+      }
+      // options/propose：也必须同 callId
+      if (phase === "options" || phase === "propose") {
+        return !cdPersistBelongsToCall(saved, callId);
+      }
+      return false;
+    }
+
+    function cdPersistNormalize(o) {
+      if (!o || typeof o !== "object") return null;
+      var ver = Number(o.v || 0);
+      if (!ver || ver < CD_PERSIST_MIN_VER) return null;
+      if (o.streamText) {
+        o.streamText = cdStripExplorationFromProcess(cdStripBoilerplate(String(o.streamText || "")));
+      }
+      if (o.thinkingText) o.thinkingText = cdDedupeThinkText(String(o.thinkingText || ""));
+      return o;
     }
 
     function cdPersistLoad(key) {
       try {
         var raw = localStorage.getItem(key);
         if (!raw) return null;
-        var o = JSON.parse(raw);
-        if (!o || o.v !== CD_PERSIST_VER) return null;
-        if (o.streamText) {
-          o.streamText = cdStripExplorationFromProcess(cdStripBoilerplate(String(o.streamText || "")));
-        }
-        if (o.thinkingText) o.thinkingText = cdDedupeThinkText(String(o.thinkingText || ""));
-        return o;
+        return cdPersistNormalize(JSON.parse(raw));
       } catch (e) {
         return null;
       }
     }
 
+    /** 扫整仓 localStorage：按 callId 字段或 key 后缀找回（防 key 算法变更丢进度）。 */
+    function cdPersistScanByCallId(callId) {
+      var cid = String(callId || "").trim();
+      if (!cid) return null;
+      var best = null;
+      try {
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (!k || k.indexOf("wb-cd-card:") !== 0) continue;
+          var hit = false;
+          if (k === "wb-cd-card:call:" + cid || k === "wb-cd-card:block:" + cid || k.slice(-cid.length - 1) === ":" + cid) {
+            hit = true;
+          }
+          var o = null;
+          try {
+            o = cdPersistNormalize(JSON.parse(localStorage.getItem(k) || "null"));
+          } catch (e1) {
+            continue;
+          }
+          if (!o) continue;
+          if (!hit && String(o.callId || "") !== cid) continue;
+          if (!(o.phase === "done" || o.phase === "running" || o.jobId)) continue;
+          if (!best || Number(o.at || 0) > Number(best.at || 0)) best = o;
+        }
+      } catch (e2) {}
+      return best;
+    }
+
+    /** 兼容旧 key + 全库扫描，避免升级或刷新后找不到进度。 */
+    function cdPersistLoadForCard(block, sessionId, callIdProp) {
+      try {
+        var callId = cdBlockCallId(block, callIdProp);
+        var sid = cdBlockSessionId(block, sessionId);
+        var key = cdPersistKey(block, sessionId, callIdProp);
+        var aliases = cdPersistKeyAliases(block, sessionId, callIdProp);
+        for (var i = 0; i < aliases.length; i++) {
+          var hit = cdPersistLoad(aliases[i]);
+          if (
+            hit &&
+            cdPersistBelongsToCall(hit, callId) &&
+            (hit.phase === "done" ||
+              hit.phase === "running" ||
+              hit.jobId ||
+              hit.phase === "options" ||
+              hit.phase === "propose")
+          ) {
+            return { key: key, saved: hit, migrateFrom: aliases[i] !== key ? aliases[i] : "" };
+          }
+        }
+        var scanned = cdPersistScanByCallId(callId);
+        if (scanned && cdPersistBelongsToCall(scanned, callId)) {
+          return { key: key, saved: scanned, migrateFrom: "" };
+        }
+        // 无 callId 的旧卡才允许读 session/anon；有 callId 时绝不从共享键偷完成态
+        if (!callId) {
+          var orphans = ["wb-cd-card:anon"];
+          if (sid) orphans.push("wb-cd-card:session:" + sid + ":lone", "wb-cd-card:" + sid);
+          for (var j = 0; j < orphans.length; j++) {
+            var orphan = cdPersistLoad(orphans[j]);
+            if (
+              orphan &&
+              (orphan.phase === "done" || orphan.phase === "running") &&
+              orphan.jobId
+            ) {
+              return { key: key, saved: orphan, migrateFrom: orphans[j] };
+            }
+          }
+        }
+        return { key: key, saved: null };
+      } catch (eLoad) {
+        try {
+          console.warn("[dsh-mes-bridge] cdPersistLoadForCard failed", eLoad);
+        } catch (eLog) {}
+        return {
+          key: cdPersistKey(block, sessionId, callIdProp),
+          saved: null,
+        };
+      }
+    }
+
+    function cdPersistPrune() {
+      try {
+        var now = Date.now();
+        var maxAge = 7 * 24 * 3600 * 1000;
+        var keys = [];
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (k && (k.indexOf("wb-cd-card:") === 0 || k.indexOf("wb-cd-job:") === 0)) keys.push(k);
+        }
+        keys.forEach(function (k) {
+          try {
+            var o = JSON.parse(localStorage.getItem(k) || "null");
+            if (!o || Number(o.v || 0) < CD_PERSIST_MIN_VER) {
+              localStorage.removeItem(k);
+              return;
+            }
+            var at = Number(o.at || 0);
+            if (at && now - at > maxAge) localStorage.removeItem(k);
+            else if (k.indexOf("wb-cd-card:") === 0 && o.phase === "done" && at && now - at > 10 * 60 * 1000) {
+              if (o.streamText || o.thinkingText) {
+                delete o.streamText;
+                delete o.thinkingText;
+                o.at = now;
+                o.v = CD_PERSIST_VER;
+                localStorage.setItem(k, JSON.stringify(o));
+              }
+            }
+          } catch (e2) {
+            try {
+              localStorage.removeItem(k);
+            } catch (e3) {}
+          }
+        });
+      } catch (e4) {}
+    }
+
     function cdPersistSave(key, data) {
       try {
-        localStorage.setItem(
-          key,
-          JSON.stringify(Object.assign({ v: CD_PERSIST_VER, at: Date.now() }, data || {})),
-        );
-      } catch (e0) {}
+        // 禁止「空表单」覆盖已有 running/done（刷新后短暂 form 态写回是丢进度主因之一）
+        try {
+          var prev = JSON.parse(localStorage.getItem(key) || "null");
+          var nextPhase = data && data.phase;
+          if (
+            prev &&
+            Number(prev.v || 0) >= CD_PERSIST_MIN_VER &&
+            (prev.phase === "done" || prev.phase === "running") &&
+            nextPhase === "form" &&
+            prev.jobId &&
+            !(data && data.jobId)
+          ) {
+            return;
+          }
+        } catch (eGuard) {}
+
+        var payload = Object.assign({ v: CD_PERSIST_VER, at: Date.now() }, data || {});
+        if (payload.phase === "done") {
+          delete payload.streamText;
+          delete payload.thinkingText;
+        }
+        localStorage.setItem(key, JSON.stringify(payload));
+        if (payload.jobId) {
+          try {
+            localStorage.setItem(
+              "wb-cd-job:" + String(payload.jobId),
+              JSON.stringify({
+                v: CD_PERSIST_VER,
+                at: Date.now(),
+                cardKey: key,
+                phase: payload.phase,
+                jobId: payload.jobId,
+                callId: payload.callId || "",
+                workspace: payload.workspace || "",
+              }),
+            );
+          } catch (eJob) {}
+        }
+        cdPersistPrune();
+      } catch (e0) {
+        try {
+          cdPersistPrune();
+          localStorage.setItem(
+            key,
+            JSON.stringify(
+              Object.assign({ v: CD_PERSIST_VER, at: Date.now() }, data || {}, {
+                streamText: undefined,
+                deliveryText: undefined,
+                thinkingText: undefined,
+              }),
+            ),
+          );
+        } catch (e1) {}
+      }
+    }
+
+    /** 同一进度写入所有别名 key，刷新时无论 DSH 给哪种 block 形态都能命中。 */
+    function cdPersistSaveCard(block, sessionId, callIdProp, data) {
+      var callId = cdBlockCallId(block, callIdProp) || (data && data.callId) || "";
+      var aliases = cdPersistKeyAliases(block, sessionId, callIdProp);
+      var payload = Object.assign({}, data || {}, {
+        callId: callId,
+        sessionId: cdBlockSessionId(block, sessionId) || (data && data.sessionId) || "",
+      });
+      // 只写 call 专属 key；顺带清掉历史上污染过的 session/anon 共享完成态
+      aliases.forEach(function (k) {
+        cdPersistSave(k, payload);
+      });
+      if (callId) {
+        var sid = cdBlockSessionId(block, sessionId);
+        ["wb-cd-card:anon"]
+          .concat(sid ? ["wb-cd-card:" + sid, "wb-cd-card:session:" + sid + ":lone"] : [])
+          .forEach(function (sharedKey) {
+            try {
+              var old = cdPersistLoad(sharedKey);
+              if (old && (old.phase === "done" || old.phase === "running" || old.jobId)) {
+                localStorage.removeItem(sharedKey);
+              }
+            } catch (eClr) {}
+          });
+      }
+      return aliases[0];
     }
 
     function cdPersistClear(key) {
@@ -2534,7 +2853,7 @@ window.__ModuleLoader__.load({
       t = t.replace(/^[ \t]*做了什么[ \t]*[：:]?[ \t]*/gm, "结论\n");
       t = t.replace(/^[ \t]*改动文件表?[ \t]*[：:]?[ \t]*/gm, "改动文件\n");
       t = t.replace(/^[ \t]*行为约定[ \t]*[：:]?[ \t]*/gm, "行为约定\n");
-      t = t.replace(/^[ \t]*验收步骤?[ \t]*[：:]?[ \t]*/gm, "验收\n");
+      t = t.replace(/^[ \t]*验收(?:步骤)?[ \t]*[：:]?[ \t]*/gm, "验收\n");
       t = t.replace(/\n{3,}/g, "\n\n");
       return t.trim();
     }
@@ -2693,7 +3012,11 @@ window.__ModuleLoader__.load({
           }
           if (/^验收/.test(body)) {
             mode = "checks";
-            var crest = body.replace(/^验收步骤?[：:]?/, "").trim().replace(/^\d+[\.、]\s*/, "");
+            // 标题行「验收 / 验收步骤」本身不要进列表（否则会出现「1. 验收」）
+            var crest = body
+              .replace(/^验收(?:步骤)?[：:]?/, "")
+              .trim()
+              .replace(/^\d+[\.、]\s*/, "");
             if (crest) checks.push(crest);
             return;
           }
@@ -3174,12 +3497,53 @@ window.__ModuleLoader__.load({
         section,
       );
     }
+    function cdProcNodeKind(tag, lines) {
+      var blob = [tag].concat(lines || []).join(" ");
+      if (/搜索|检索|查找|grep|Glob|定位待删|网页/.test(blob)) return "search";
+      if (/查看|阅读|浏览|Read|打开|核对|确认.*路由|确认.*菜单|读盘/.test(blob)) return "read";
+      if (/删除清单|清单|待删路径|阶段\s*\d+/.test(blob) || tag === "清单") return "list";
+      return "dot";
+    }
+    function cdProcNodeHtml(kind, isLast) {
+      var k = kind || "dot";
+      var live = isLast ? " is-live" : "";
+      if (k === "search") {
+        return (
+          '<span class="wb-cd-proc-node is-search' +
+          live +
+          '" aria-hidden="true">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+          '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span>'
+        );
+      }
+      if (k === "read") {
+        return (
+          '<span class="wb-cd-proc-node is-read' +
+          live +
+          '" aria-hidden="true">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+          '<path d="M7 4h8l3 3v13H7V4z"/><path d="M15 4v3h3"/><path d="M9 12h6M9 16h6"/></svg></span>'
+        );
+      }
+      if (k === "list") {
+        return (
+          '<span class="wb-cd-proc-node is-list' +
+          live +
+          '" aria-hidden="true">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+          '<path d="M8 7h11M8 12h11M8 17h11"/><circle cx="4.5" cy="7" r="1" fill="currentColor" stroke="none"/>' +
+          '<circle cx="4.5" cy="12" r="1" fill="currentColor" stroke="none"/>' +
+          '<circle cx="4.5" cy="17" r="1" fill="currentColor" stroke="none"/></svg></span>'
+        );
+      }
+      return '<span class="wb-cd-proc-node is-dot' + live + '" aria-hidden="true"></span>';
+    }
     function cdMdBlocksProseProcess(text) {
       // 过程正文：一步一块，方便扫读（不再把相邻行拼成一大段）
       var raw = String(text || "").replace(/\r\n/g, "\n");
       raw = raw
         .replace(
-          /([^\n])\n(?!\n)(阶段\s*\d+\s*\/\s*\d+|开始处理|Cursor 定位说明|本机验尸|正在同步|正在本机|已删除|已修补|定位过程|引擎将|引擎校验|引擎直接)/g,
+          /([^\n])\n(?!\n)(阶段\s*\d+\s*\/\s*\d+|开始处理|Cursor 定位说明|本机验尸|本机核对|本机代码已核对|正在同步|正在本机|已删除|已修补|定位过程|引擎将|引擎校验|引擎直接)/g,
           "$1\n\n$2",
         )
         .replace(/(Cursor 定位说明[：:])\s*/g, "$1\n")
@@ -3220,25 +3584,76 @@ window.__ModuleLoader__.load({
           lines = lines.slice(1);
         }
         if (!lines.length) return;
-        var bodyHtml = lines
+        var pathLines = [];
+        var textLines = [];
+        lines.forEach(function (ln) {
+          var pathOnly = ln.replace(/^[-*]\s*/, "").replace(/^`([^`]+)`$/, "$1");
+          var mBullet = ln.match(/^[-*]\s+`([^`]+)`\s*[：:]?\s*(.*)$/);
+          if (mBullet) {
+            pathLines.push({ path: mBullet[1], desc: String(mBullet[2] || "").trim() });
+            return;
+          }
+          if (/^(frontend|backend|apps|src)\//.test(pathOnly) && pathOnly.indexOf(" ") < 0) {
+            pathLines.push({ path: pathOnly, desc: "" });
+            return;
+          }
+          textLines.push(ln);
+        });
+        var kind = cdProcNodeKind(tag, textLines.length ? textLines : lines);
+        var bodyHtml = "";
+        if (tag) {
+          bodyHtml += '<div class="wb-cd-proc-meta">' + cdInline(tag) + "</div>";
+        }
+        bodyHtml += textLines
           .map(function (ln) {
-            var pathOnly = ln.replace(/^`([^`]+)`$/, "$1");
-            if (/^(frontend|backend|apps|src)\//.test(pathOnly) && pathOnly.indexOf(" ") < 0) {
-              return '<div class="wb-cd-proc-path">' + cdInline(pathOnly) + "</div>";
-            }
             return '<div class="wb-cd-proc-t">' + cdInline(ln) + "</div>";
           })
           .join("");
-        items.push(
-          '<li class="wb-cd-proc-li">' +
-            (tag ? '<span class="wb-cd-proc-tag">' + cdInline(tag) + "</span>" : '<span class="wb-cd-proc-dot"></span>') +
-            '<div class="wb-cd-proc-body">' +
-            bodyHtml +
-            "</div></li>",
-        );
+        if (pathLines.length) {
+          if (tag === "清单" || kind === "list") {
+            bodyHtml +=
+              '<ul class="wb-cd-proc-links">' +
+              pathLines
+                .map(function (p) {
+                  return (
+                    "<li>" +
+                    "<code>" +
+                    cdInline(p.path) +
+                    "</code>" +
+                    (p.desc ? "：" + cdInline(p.desc) : "") +
+                    "</li>"
+                  );
+                })
+                .join("") +
+              "</ul>";
+          } else {
+            bodyHtml += pathLines
+              .map(function (p) {
+                return '<div class="wb-cd-proc-path">' + cdInline(p.path) + (p.desc ? "：" + cdInline(p.desc) : "") + "</div>";
+              })
+              .join("");
+          }
+        }
+        items.push({ kind: kind, bodyHtml: bodyHtml });
       });
       if (!items.length) return "";
-      return '<ul class="wb-cd-proc">' + items.join("") + "</ul>";
+      return (
+        '<ul class="wb-cd-proc">' +
+        items
+          .map(function (it, idx) {
+            return (
+              '<li class="wb-cd-proc-li">' +
+              '<span class="wb-cd-proc-rail">' +
+              cdProcNodeHtml(it.kind, idx === items.length - 1) +
+              "</span>" +
+              '<div class="wb-cd-proc-body">' +
+              it.bodyHtml +
+              "</div></li>"
+            );
+          })
+          .join("") +
+        "</ul>"
+      );
     }
     function cdMdBlocksProse(text) {
       var lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
@@ -3698,7 +4113,7 @@ window.__ModuleLoader__.load({
             var st = s.state || "pending";
             var icon =
               st === "running"
-                ? h("span", { className: "wb-cd-pulse" })
+                ? h("span", { className: "wb-cd-dot-live", "aria-hidden": "true" })
                 : st === "done"
                   ? "✓"
                   : st === "error"
@@ -3706,7 +4121,7 @@ window.__ModuleLoader__.load({
                     : String(i + 1);
             var hint =
               st === "running"
-                ? "进行中"
+                ? h("span", { className: "wb-cd-spin", role: "status", "aria-label": "进行中" })
                 : st === "done"
                   ? "已完成"
                   : st === "error"
@@ -3766,7 +4181,7 @@ window.__ModuleLoader__.load({
         "div",
         { className: "wb-cd-act" },
         h("div", { className: "wb-cd-act-h" }, "实时进展 · 同文件只保留最后一次"),
-        h("ul", { style: { margin: 0, paddingLeft: "1.2em" } }, kids),
+        h("ul", null, kids),
       );
     }
 
@@ -3787,6 +4202,9 @@ window.__ModuleLoader__.load({
       t = t.replace(/已为您打开写码工具卡[（(，,][\s\S]*?后?再?(开工|执行)[。．]?\s*/g, "");
       t = t.replace(/已为您打开写码工具卡[\s\S]{0,200}?确认需求后开工[。．]?\s*/g, "");
       t = t.replace(/写码工具卡已打开[。．][\s\S]*?确认后再?(开工|执行)[。．]?\s*/g, "");
+      // Agent 空转提示（卡已在 toolview，勿再复述）
+      t = t.replace(/请在(上方)?工具卡(中)?确认[。．]?\s*/g, "");
+      t = t.replace(/请在卡片中确认[。．]?\s*/g, "");
       return t.trim();
     }
 
@@ -3805,7 +4223,7 @@ window.__ModuleLoader__.load({
             st === "done"
               ? "✓"
               : st === "running"
-                ? h("span", { className: "wb-cd-pulse" })
+                ? h("span", { className: "wb-cd-dot-live", "aria-hidden": "true" })
                 : st === "error"
                   ? "!"
                   : st === "skipped"
@@ -3815,7 +4233,7 @@ window.__ModuleLoader__.load({
             st === "done"
               ? "已完成"
               : st === "running"
-                ? "进行中"
+                ? h("span", { className: "wb-cd-spin", role: "status", "aria-label": "进行中" })
                 : st === "error"
                   ? "失败"
                   : st === "skipped"
@@ -3853,73 +4271,86 @@ window.__ModuleLoader__.load({
     function CodeDevBeginCard(props) {
       ensureCss();
       var block = props.block;
+      var toolCallId = String(props.callId || "").trim();
       var wb = useMemo(function () {
         return readMeta(block);
       }, [block]);
       var ui = (wb && wb.ui) || {};
       var dshCwd = resolveDshCwd(props);
-      var persistKey = useMemo(function () {
-        return cdPersistKey(block);
-      }, [block]);
+      var persistBoot = useMemo(
+        function () {
+          return cdPersistLoadForCard(block, props.sessionId, toolCallId);
+        },
+        [block, props.sessionId, toolCallId],
+      );
+      var persistKey = persistBoot.key;
+      // 只恢复本 callId；pick 上的 done/running 仅允许「本卡已确认过」的 job 刷新恢复
+      var bootSavedRaw =
+        persistBoot.saved && cdPersistBelongsToCall(persistBoot.saved, toolCallId)
+          ? persistBoot.saved
+          : null;
+      var bootSaved = null;
+      if (bootSavedRaw) {
+        if (cdPickMustStayHitl(wb, ui, bootSavedRaw, toolCallId)) {
+          if (
+            (bootSavedRaw.phase === "options" || bootSavedRaw.phase === "propose") &&
+            cdPersistBelongsToCall(bootSavedRaw, toolCallId)
+          ) {
+            bootSaved = bootSavedRaw;
+          }
+        } else {
+          bootSaved = bootSavedRaw;
+        }
+      }
 
       // 对齐原 WorkBuddy：form(原始诉求) → options → propose → confirm 开工
       var _phase = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.phase) || "form";
+        return (bootSaved && bootSaved.phase) || "form";
       }); // form | options | propose | running | done
       var phase = _phase[0];
       var setPhase = _phase[1];
       var _ws = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.workspace) || initialWorkspace(props, ui);
+        return (bootSaved && bootSaved.workspace) || initialWorkspace(props, ui);
       });
       var workspace = _ws[0];
       var setWorkspace = _ws[1];
       var _req = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.requirement) || initialRequirement(props, ui);
+        return (bootSaved && bootSaved.requirement) || initialRequirement(props, ui);
       });
       var requirement = _req[0];
       var setRequirement = _req[1];
       var _goal = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.goal) || initialRequirement(props, ui);
+        return (bootSaved && bootSaved.goal) || initialRequirement(props, ui);
       });
       var goal = _goal[0];
       var setGoal = _goal[1];
       var _brief = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.brief) || ui.brief || null;
+        return (bootSaved && bootSaved.brief) || ui.brief || null;
       });
       var brief = _brief[0];
       var setBrief = _brief[1];
       var _optionsUi = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.optionsUi) || null;
+        return (bootSaved && bootSaved.optionsUi) || null;
       });
       var optionsUi = _optionsUi[0];
       var setOptionsUi = _optionsUi[1];
       var _proposeUi = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.proposeUi) || null;
+        return (bootSaved && bootSaved.proposeUi) || null;
       });
       var proposeUi = _proposeUi[0];
       var setProposeUi = _proposeUi[1];
       var _sel = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.selectedOpts) || {};
+        return (bootSaved && bootSaved.selectedOpts) || {};
       });
       var selectedOpts = _sel[0];
       var setSelectedOpts = _sel[1];
       var _notes = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.notes) || "";
+        return (bootSaved && bootSaved.notes) || "";
       });
       var notes = _notes[0];
       var setNotes = _notes[1];
       var _ack = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return !!(s && s.ackWarn);
+        return !!(bootSaved && bootSaved.ackWarn);
       });
       var ackWarn = _ack[0];
       var setAckWarn = _ack[1];
@@ -3930,8 +4361,7 @@ window.__ModuleLoader__.load({
       var busy = _busy[0];
       var setBusy = _busy[1];
       var _jobId = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.jobId) || "";
+        return (bootSaved && bootSaved.jobId) || "";
       });
       var jobId = _jobId[0];
       var setJobId = _jobId[1];
@@ -3939,73 +4369,63 @@ window.__ModuleLoader__.load({
       var log = _log[0];
       var setLog = _log[1];
       var _result = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.result) || "";
+        return (bootSaved && bootSaved.result) || "";
       });
       var result = _result[0];
       var setResult = _result[1];
       var _runtimeHint = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.runtimeHint) || "";
+        return (bootSaved && bootSaved.runtimeHint) || "";
       });
       var runtimeHint = _runtimeHint[0];
       var setRuntimeHint = _runtimeHint[1];
       var _synced = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.synced) || [];
+        return (bootSaved && bootSaved.synced) || [];
       });
       var synced = _synced[0];
       var setSynced = _synced[1];
       var _deferred = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.deferred) || [];
+        return (bootSaved && bootSaved.deferred) || [];
       });
       var deferred = _deferred[0];
       var setDeferred = _deferred[1];
       var _deleted = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.deleted) || [];
+        return (bootSaved && bootSaved.deleted) || [];
       });
       var deleted = _deleted[0];
       var setDeleted = _deleted[1];
       var _steps = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
+        var s = bootSaved;
         return (s && s.steps && s.steps.length && s.steps) || cdInitSteps();
       });
       var steps = _steps[0];
       var setSteps = _steps[1];
       var _stream = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.streamText) || "";
+        return (bootSaved && bootSaved.streamText) || "";
       });
       var streamText = _stream[0];
       var setStreamText = _stream[1];
       var _elapsed = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.elapsed) || 0;
+        return (bootSaved && bootSaved.elapsed) || 0;
       });
       var elapsed = _elapsed[0];
       var setElapsed = _elapsed[1];
       var _alive = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.aliveHint) || "准备启动…";
+        return (bootSaved && bootSaved.aliveHint) || "准备启动…";
       });
       var aliveHint = _alive[0];
       var setAliveHint = _alive[1];
       var _think = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.thinkingText) || "";
+        return (bootSaved && bootSaved.thinkingText) || "";
       });
       var thinkingText = _think[0];
       var setThinkingText = _think[1];
       var _delivery = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
-        return (s && s.deliveryText) || "";
+        return (bootSaved && bootSaved.deliveryText) || "";
       });
       var deliveryText = _delivery[0];
       var setDeliveryText = _delivery[1];
       var _thinkMs = useState(function () {
-        var s = cdPersistLoad(cdPersistKey(block));
+        var s = bootSaved;
         return s && s.thinkingMs != null ? s.thinkingMs : null;
       });
       var thinkingMs = _thinkMs[0];
@@ -4114,12 +4534,16 @@ window.__ModuleLoader__.load({
       );
 
       function cdSnapshotPersist(extra) {
-        cdPersistSave(
-          persistKey,
+        cdPersistSaveCard(
+          block,
+          props.sessionId,
+          toolCallId,
           Object.assign(
             {
               phase: phase,
               jobId: jobId,
+              callId: toolCallId || cdBlockCallId(block),
+              sessionId: cdBlockSessionId(block, props.sessionId),
               workspace: workspace,
               requirement: requirement,
               goal: goal,
@@ -4145,6 +4569,12 @@ window.__ModuleLoader__.load({
             extra || {},
           ),
         );
+        if (persistBoot.migrateFrom && persistBoot.migrateFrom !== persistKey) {
+          try {
+            localStorage.removeItem(persistBoot.migrateFrom);
+          } catch (eMig) {}
+          persistBoot.migrateFrom = "";
+        }
       }
 
       function hydrateFromJob(job, pack) {
@@ -4493,9 +4923,11 @@ window.__ModuleLoader__.load({
                 ev.deferred_files.slice(0, 6).join("、"),
             );
           }
-          cdPersistSave(persistKey, {
+          cdPersistSaveCard(block, props.sessionId, toolCallId, {
             phase: "done",
             jobId: jid,
+            callId: toolCallId || cdBlockCallId(block),
+            sessionId: cdBlockSessionId(block, props.sessionId),
             workspace: (ev && ev.job && ev.job.workspace) || workspace,
             requirement: requirement,
             goal: goal,
@@ -4689,27 +5121,150 @@ window.__ModuleLoader__.load({
         function () {
           if (restoreOnceRef.current) return;
           restoreOnceRef.current = true;
-          var saved = cdPersistLoad(persistKey);
-          var jid = (saved && saved.jobId) || (wb && wb.t === "cd-job" && wb.job_id) || "";
-          if (!jid) return;
-          if (!saved || (saved.phase !== "running" && saved.phase !== "done")) {
-            if (!(wb && wb.t === "cd-job" && wb.job_id)) return;
+          var pack = cdPersistLoadForCard(block, props.sessionId, toolCallId);
+          var savedRaw =
+            pack.saved && cdPersistBelongsToCall(pack.saved, toolCallId) ? pack.saved : null;
+          var forceHitl = cdPickMustStayHitl(wb, ui, savedRaw, toolCallId);
+          var saved = null;
+          if (savedRaw && !forceHitl) saved = savedRaw;
+          else if (
+            savedRaw &&
+            forceHitl &&
+            (savedRaw.phase === "options" || savedRaw.phase === "propose")
+          ) {
+            saved = savedRaw;
           }
-          fetch(engineBase() + "/api/code-dev/jobs/" + encodeURIComponent(jid))
-            .then(function (r) {
-              return r.json();
-            })
-            .then(function (jd) {
-              if (!jd || !jd.ok) return;
-              hydrateFromJob(jd.job || {}, jd);
-              var st = String((jd.job && jd.job.status) || "");
-              if (st === "queued" || st === "running") {
-                resumeWatchRef.current = jid;
+
+          // pick 新卡：清共享键污染，停在 HITL，绝不 hydrate 完成 Job
+          if (forceHitl || (ui && ui.kind === "pick") || (wb && wb.t === "cd-pick") || !toolCallId) {
+            var sidClr = cdBlockSessionId(block, props.sessionId);
+            ["wb-cd-card:anon"]
+              .concat(
+                sidClr ? ["wb-cd-card:" + sidClr, "wb-cd-card:session:" + sidClr + ":lone"] : [],
+              )
+              .forEach(function (sharedKey) {
+                try {
+                  localStorage.removeItem(sharedKey);
+                } catch (eRm) {}
+              });
+            if (forceHitl || !toolCallId) {
+              if (phase === "done" || phase === "running") {
+                setPhase(
+                  saved && (saved.phase === "options" || saved.phase === "propose")
+                    ? saved.phase
+                    : "form",
+                );
+                setJobId("");
+                setResult("");
+                setDeliveryText("");
+                setStreamText("");
+                setSteps(cdInitSteps());
+                setAliveHint("准备启动…");
               }
-            })
-            .catch(function () {});
+              if (saved && (saved.phase === "options" || saved.phase === "propose")) {
+                cdPersistSaveCard(block, props.sessionId, toolCallId, saved);
+              }
+              return;
+            }
+          }
+
+          var jid =
+            (saved && saved.jobId) ||
+            (wb && wb.t === "cd-job" && wb.job_id) ||
+            "";
+
+          function hydrateJobId(foundId) {
+            if (!foundId) return Promise.resolve();
+            // 未确认的 pick 卡禁止 hydrate
+            if ((ui && ui.kind === "pick") || (wb && wb.t === "cd-pick")) {
+              if (!saved || !saved.jobId || String(saved.jobId) !== String(foundId)) {
+                return Promise.resolve();
+              }
+              if (!cdPersistBelongsToCall(saved, toolCallId)) return Promise.resolve();
+            }
+            return fetch(engineBase() + "/api/code-dev/jobs/" + encodeURIComponent(foundId))
+              .then(function (r) {
+                return r.json();
+              })
+              .then(function (jd) {
+                if (!jd || !jd.ok) return;
+                var job = jd.job || {};
+                var jobCall = String(job.ui_call_id || "").trim();
+                if (toolCallId && jobCall && jobCall !== toolCallId) return;
+                if (toolCallId && !jobCall) return;
+                setJobId(foundId);
+                hydrateFromJob(job, jd);
+                cdPersistSaveCard(block, props.sessionId, toolCallId, {
+                  phase:
+                    String(job.status || "") === "queued" || String(job.status || "") === "running"
+                      ? "running"
+                      : "done",
+                  jobId: foundId,
+                  callId: toolCallId,
+                  sessionId: props.sessionId || "",
+                  workspace: job.workspace || workspace,
+                  requirement: requirement,
+                  goal: goal,
+                  brief: brief,
+                  deliveryText: job.delivery_text || "",
+                  streamText: job.live_text || "",
+                  thinkingText: job.thinking_text || "",
+                  thinkingMs: job.thinking_duration_ms,
+                  steps: cdJobStepsFromRecord(job),
+                  synced: job.synced_files || [],
+                  deferred: job.deferred_files || [],
+                  deleted: job.deleted_files || [],
+                  result: (jd && jd.reply) || "",
+                  runtimeHint: job.runtime_hint || "",
+                  aliveHint: cdJobAliveHint(job),
+                });
+                var st = String(job.status || "");
+                if (st === "queued" || st === "running") {
+                  resumeWatchRef.current = foundId;
+                }
+              })
+              .catch(function () {});
+          }
+
+          if (jid) {
+            hydrateJobId(jid);
+            return;
+          }
+
+          if (toolCallId) {
+            fetch(
+              engineBase() +
+                "/api/code-dev/jobs?limit=5&ui_call_id=" +
+                encodeURIComponent(toolCallId),
+            )
+              .then(function (r) {
+                return r.json();
+              })
+              .then(function (d) {
+                var rows = (d && d.jobs) || [];
+                if (!rows.length) {
+                  if (saved && (saved.phase === "options" || saved.phase === "propose")) {
+                    cdPersistSaveCard(block, props.sessionId, toolCallId, saved);
+                  }
+                  return;
+                }
+                // 仅当本卡已有同 job 持久化才 hydrate（防止仅凭 callId 误挂历史）
+                if (!saved || !saved.jobId) return;
+                var hit = rows.filter(function (row) {
+                  return String((row && row.id) || "") === String(saved.jobId);
+                })[0];
+                if (!hit) return;
+                return hydrateJobId(String(hit.id || ""));
+              })
+              .catch(function () {});
+            return;
+          }
+
+          if (saved && (saved.phase === "options" || saved.phase === "propose")) {
+            cdPersistSaveCard(block, props.sessionId, toolCallId, saved);
+          }
         },
-        [persistKey],
+        [persistKey, toolCallId],
       );
 
       useEffect(
@@ -4782,7 +5337,7 @@ window.__ModuleLoader__.load({
         }
         setBusy(true);
         setErr("");
-        issueHitl("code-dev.confirm", { workspace: ws })
+        issueHitl("code-dev.confirm", { workspace: ws, requirement: req })
           .then(function (nonce) {
             return fetch(engineBase() + "/api/code-dev/confirm", {
               method: "POST",
@@ -4803,6 +5358,8 @@ window.__ModuleLoader__.load({
                   pui.write_scope && pui.write_scope.length ? pui.write_scope : undefined,
                 source_gate_job_id: pui.source_gate_job_id || undefined,
                 nonce: nonce,
+                ui_call_id: toolCallId || undefined,
+                ui_session_id: props.sessionId || undefined,
               }),
             });
           })
@@ -4832,8 +5389,19 @@ window.__ModuleLoader__.load({
             setPhase("running");
             setLog((d.reply || "已启动") + "\n");
             setResult("");
-            if (jid) watchJob(jid);
-            else {
+            if (jid) {
+              cdPersistSaveCard(block, props.sessionId, toolCallId, {
+                phase: "running",
+                jobId: jid,
+                callId: toolCallId || "",
+                sessionId: props.sessionId || "",
+                workspace: ws,
+                requirement: req,
+                goal: goal || req,
+                brief: brief,
+              });
+              watchJob(jid);
+            } else {
               setPhase("done");
               setBusy(false);
               setResult(d.reply || "已启动（无 job_id）");
@@ -4862,13 +5430,6 @@ window.__ModuleLoader__.load({
         });
         if (notes) lines.push("备注：" + notes);
         return lines.join("\n");
-      }
-      function flowStepIndex() {
-        if (phase === "form") return 0;
-        if (phase === "options") return 1;
-        if (phase === "propose") return 2;
-        if (phase === "running" || phase === "done") return 3;
-        return 0;
       }
       function confirmTrailCards() {
         var cards = [];
@@ -4914,11 +5475,12 @@ window.__ModuleLoader__.load({
         return cards;
       }
       function pipelineForHitl() {
-        return CD_PIPELINE.map(function (p, i) {
+        // HITL 未开工：四步全是「等待中」，不要把第 1 步伪装成进行中（刷新后易被当成任务又跑回去了）
+        return CD_PIPELINE.map(function (p) {
           return {
             id: p.id,
             title: p.title,
-            state: i === 0 ? "running" : "pending",
+            state: "pending",
           };
         });
       }

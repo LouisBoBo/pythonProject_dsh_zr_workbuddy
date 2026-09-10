@@ -21,9 +21,9 @@ const WORKBUDDY_CODE_DEV_PROMPT = [
   "1. **本轮第一个工具调用必须是 `mes_code_dev_begin`，且 message=用户原话（原样，禁止留空）**。",
   "2. **禁止**用 `run_code` / code-mode（会触发 scheduler.prepare 报错 → 本轮运行失败），以及 Bash / Grep / Glob / Read / Write / StrReplace 去扫或改用户工程来「完成写码」。",
   "3. **禁止**先长思考、先查 Vite/日志/HMR；改菜单类诉求同样走 begin → 主聊天工具卡。",
-  "4. 工具卡内完成：选目录 → 梳理需求 → 确认后才由 Cursor Local 改盘；未确认禁止 `mes_code_dev_start`。",
-  "5. `mes_code_dev_begin` 返回后**禁止**再复述「已为您打开写码工具卡…请在卡片中…」——卡已在主聊天展示，回复留空或仅一句「请在上方工具卡确认」。",
-  "6. **禁止**在同一轮里再调其它工具（尤其 `run_code`）；begin 成功即停，等用户在卡片操作。",
+  "4. 工具卡内完成：选目录 → 梳理需求 → 确认后才由 Cursor Local 改盘；未确认禁止开工（确认只走 UI → /api/code-dev/confirm）。",
+  "5. `mes_code_dev_begin` 返回后**禁止**再输出任何用户可见文字（含「请在卡片中确认」「请在上方工具卡确认」）——卡已在主聊天展示，回复必须留空。",
+  "6. **禁止**在同一轮里再调其它工具（尤其 `run_code` / Write / StrReplace / Bash 改盘）；begin 成功即停，等用户在卡片操作。",
   "7. 写码不会自动 git commit；提交用 `mes_code_commit_begin`。",
   "示例：「看板管理菜单删除设备看板子项」→ 立刻 `mes_code_dev_begin`，message 填该句原文。",
   "",
@@ -34,6 +34,55 @@ const WORKBUDDY_CODE_DEV_PROMPT = [
   "3. **禁止**自己 SSH/rsync；出卡后只说一句「请点确认部署」，不要复述原因/单元列表。",
   "示例：「部署上线」→ 立刻 `mes_code_deploy_begin()`。",
 ].join("\n");
+
+/** 磁盘写入类工具：禁止绕过 code-dev 沙箱+HITL 直接改用户工程 */
+const DISK_WRITE_TOOLS = new Set([
+  "Write",
+  "write",
+  "StrReplace",
+  "str_replace",
+  "Edit",
+  "edit",
+  "Delete",
+  "delete",
+  "ApplyPatch",
+  "apply_patch",
+  "MultiEdit",
+  "multi_edit",
+  "NotebookEdit",
+  "notebook_edit",
+]);
+
+function bashLooksLikeDiskWrite(raw) {
+  const s = String(raw || "");
+  if (!s.trim()) return false;
+  if (/(^|[\s;|&])(rm|mv|cp|install|tee|truncate|chmod|chown|ln)\b/i.test(s)) return true;
+  if (/(^|[\s;|&])sed\s+(-[^\s]*i|--in-place)/i.test(s)) return true;
+  if (/(^|[\s;|&])perl\s+(-[^\s]*i)/i.test(s)) return true;
+  if (/(^|[^=])>{1,2}\s*\S/.test(s) && !/>&\s*\d/.test(s)) return true;
+  if (/\b(git\s+(add|commit|push|checkout|reset|clean|rebase|merge)|npm\s+install|pnpm\s+i|yarn\s+add)\b/i.test(s))
+    return true;
+  return false;
+}
+
+function toolExecPayload(exec) {
+  if (!exec || typeof exec !== "object") return "";
+  const parts = [];
+  for (const k of ["args", "arguments", "input", "params", "command", "cmd", "code", "script"]) {
+    const v = exec[k];
+    if (v == null) continue;
+    if (typeof v === "string") parts.push(v);
+    else {
+      try {
+        parts.push(JSON.stringify(v));
+      } catch {
+        parts.push(String(v));
+      }
+    }
+  }
+  return parts.join("\n");
+}
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** plugins/mes-bridge/lib → apps/zr-workbuddy */
@@ -80,15 +129,55 @@ function readEnabled() {
   return listFeatureIds();
 }
 
+function resolveBridgePython() {
+  const cands = [
+    runtime.PYTHON,
+    process.env.APP_ENGINE_PYTHON,
+    "/usr/local/bin/python3",
+    "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
+    "/opt/homebrew/bin/python3",
+    "python3",
+  ].filter(Boolean);
+  const seen = new Set();
+  for (const c of cands) {
+    const bin = String(c);
+    if (seen.has(bin)) continue;
+    seen.add(bin);
+    try {
+      execFileSync(bin, ["-c", "import sys; assert sys.version_info[:2] >= (3, 10)"], {
+        encoding: "utf8",
+        timeout: 4000,
+      });
+      return bin;
+    } catch (e) {
+      /* try next */
+    }
+  }
+  throw new Error(
+    "找不到可用的 Python 3.10+（plugins_store）。请安装 Python 3.10+，或在 runtime.yaml / APP_ENGINE_PYTHON 指定解释器。",
+  );
+}
+
 function pluginsStore(op, idOrJson) {
   const args = ["-m", "app.plugins_store", op];
   if (idOrJson != null && idOrJson !== "") args.push(String(idOrJson));
-  const out = execFileSync("python3", args, {
-    cwd: ENGINE_DIR,
-    encoding: "utf8",
-    timeout: 8000,
-  });
-  return JSON.parse(String(out).trim() || "{}");
+  let bin;
+  try {
+    bin = resolveBridgePython();
+  } catch (e) {
+    throw new Error(String(e && e.message ? e.message : e));
+  }
+  try {
+    const out = execFileSync(bin, args, {
+      cwd: ENGINE_DIR,
+      encoding: "utf8",
+      timeout: 8000,
+    });
+    return JSON.parse(String(out).trim() || "{}");
+  } catch (e) {
+    const detail = String((e && (e.stderr || e.message)) || e).slice(0, 400);
+    throw new Error("plugins_store 调用失败（python=" + bin + "）：" + detail);
+  }
 }
 
 export function apply(ctx) {
@@ -141,19 +230,34 @@ export function apply(ctx) {
       );
     });
 
-  // 次要防线：拒绝 run_code（真正的 prepare 崩在 agent-loop Symbol，须靠 check-vendor 对齐）
+  // 硬防线：拒绝绕过 code-dev 的磁盘写入（run_code / Write / StrReplace / 危险 Bash）
   try {
     if (ctx.tools && typeof ctx.tools.guard === "function") {
       ctx.tools.guard((exec) => {
         const name = String((exec && exec.name) || "");
-        if (name === "run_code") {
+        const lower = name.toLowerCase();
+        if (name === "run_code" || lower === "run_code") {
+          return "禁止使用 run_code。改菜单/写码请只调用 mes_code_dev_begin，在工具卡内确认后开工。";
+        }
+        if (DISK_WRITE_TOOLS.has(name) || DISK_WRITE_TOOLS.has(lower)) {
           return (
-            "禁止使用 run_code。改菜单/写码请只调用 mes_code_dev_begin，在工具卡内确认后开工。"
+            "禁止直接 " +
+            name +
+            " 改用户工程。写码/删菜单必须走 mes_code_dev_begin → 确认卡 → Cursor 沙箱。"
           );
+        }
+        if (lower === "bash" || lower === "shell" || lower === "run_terminal_cmd" || lower === "terminal") {
+          if (bashLooksLikeDiskWrite(toolExecPayload(exec))) {
+            return (
+              "禁止用 " +
+              name +
+              " 改盘（rm/mv/cp/重定向/git 写等）。请走 mes_code_dev_begin 工具卡。"
+            );
+          }
         }
         return undefined;
       });
-      console.log("[mes-bridge] 已注册 tools.guard：拒绝 run_code");
+      console.log("[mes-bridge] 已注册 tools.guard：拒绝 run_code / 写盘工具 / 危险 Bash");
     }
   } catch (e) {
     console.warn("[mes-bridge] tools.guard 注册失败", e);
@@ -179,6 +283,7 @@ export function apply(ctx) {
   let syncing = false;
   let syncDirty = false;
   let lastKey = "";
+  let featureReloadCount = 0;
 
   async function unload(id) {
     const f = fibers.get(id);
@@ -210,6 +315,14 @@ export function apply(ctx) {
       // ?t= 强制新加载；旧 ESM 模块对象可能仍留在内存（可接受的小泄漏）
       const url = pathToFileURL(file).href + "?t=" + Date.now();
       const mod = await import(url);
+      featureReloadCount += 1;
+      if (featureReloadCount === 40 || featureReloadCount === 80) {
+        console.warn(
+          "[mes-bridge] feature 热重载已累计 " +
+            featureReloadCount +
+            " 次（ESM 模块对象可能残留）。开发态建议适时重启 DSH 回收内存。",
+        );
+      }
       // 必须收成普通对象再交给 Cordis：部分运行时对 Module Namespace 的
       // `typeof apply === "function"` 检测会失败（报 received object）。
       const plugin = {

@@ -36,6 +36,43 @@ _RT_JSON="$(load_runtime_json)"
 HOST="$(printf '%s' "$_RT_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["host"])')"
 PORT="$(printf '%s' "$_RT_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["port"])')"
 PYTHON="$(printf '%s' "$_RT_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["python"])')"
+
+# macOS 上 PATH 里的 python3 常落到 CommandLineTools（无 uvicorn）。
+# 选第一个能 import uvicorn 的解释器，避免引擎假启动 → 写码卡 Failed to fetch。
+resolve_engine_python() {
+  local cand="$1" try resolved
+  for try in \
+    "$cand" \
+    /usr/local/bin/python3 \
+    /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 \
+    /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 \
+    /opt/homebrew/bin/python3 \
+    python3.12 \
+    python3; do
+    [ -n "$try" ] || continue
+    if [ -x "$try" ]; then
+      resolved="$try"
+    else
+      resolved="$(command -v "$try" 2>/dev/null || true)"
+    fi
+    [ -n "$resolved" ] || continue
+    if "$resolved" -c "import uvicorn" >/dev/null 2>&1; then
+      printf '%s' "$resolved"
+      return 0
+    fi
+  done
+  return 1
+}
+_PY_RESOLVED="$(resolve_engine_python "$PYTHON" || true)"
+if [ -z "$_PY_RESOLVED" ]; then
+  echo "找不到带 uvicorn 的 Python（runtime 配置: $PYTHON）。" >&2
+  echo "请安装依赖，或在 runtime.yaml / APP_ENGINE_PYTHON 指定可用解释器。" >&2
+  exit 1
+fi
+if [ "$_PY_RESOLVED" != "$PYTHON" ] && [ "$_PY_RESOLVED" != "$(command -v "$PYTHON" 2>/dev/null || true)" ]; then
+  echo "提示: 改用 $_PY_RESOLVED（原配置 '$PYTHON' 无 uvicorn）"
+fi
+PYTHON="$_PY_RESOLVED"
 # 允许: engine.sh app start 9000 / engine.sh app start -d
 DETACH=0
 for a in "$@"; do
@@ -252,8 +289,8 @@ do_start_bg() {
   python3 "$ROOT/scripts/lib/daemonize.py" \
     --cwd "$ENGINE" --log "$LOG_FILE" --pid "$PID_FILE" -- \
     "$PYTHON" -m uvicorn app.main:app --host "$HOST" --port "$PORT"
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-    sleep 0.5
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+    sleep 1
     if health_ok; then
       echo "引擎就绪 PID=$(our_engine_pid || listening_pid)"
       return 0
@@ -270,8 +307,8 @@ case "$CMD" in
   restart)
     do_stop
     do_start_bg
-    if lsof -tiTCP:3080 -sTCP:LISTEN >/dev/null 2>&1; then
-      echo "提示: 若 :3080 聊天仍报引擎未就绪，请执行 scripts/host.sh restart-web"
+    if lsof -tiTCP:3081 -sTCP:LISTEN >/dev/null 2>&1; then
+      echo "提示: 若 :3081 聊天仍报引擎未就绪，请执行 scripts/host.sh restart-web"
     fi
     ;;
   start)

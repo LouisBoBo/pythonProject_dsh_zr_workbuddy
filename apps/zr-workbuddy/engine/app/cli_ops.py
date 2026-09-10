@@ -595,6 +595,7 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
             return blocked
         from .code_dev.chat_bridge import confirm_and_start
         from .hitl import ACTION_DEV, require_confirm_nonce
+        from .hitl.tokens import normalize_payload_hash
 
         if not rest:
             return {
@@ -610,14 +611,16 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
                 parts.append(a)
         if not parts:
             return {"ok": False, "detail": "缺少 workspace"}
+        req = " ".join(parts[1:]).strip()
         gate = require_confirm_nonce(
             nonce=nonce,
             action=ACTION_DEV,
             workspace=parts[0],
+            payload_hash=normalize_payload_hash(req),
         )
         if not gate.get("ok"):
             return gate
-        return confirm_and_start(workspace=parts[0], requirement=" ".join(parts[1:]).strip())
+        return confirm_and_start(workspace=parts[0], requirement=req)
     if cmd == "code-review-status":
         blocked = plugins_store.require_enabled(FEATURE_CODE_REVIEW, capability="本机目录审码")
         if blocked:

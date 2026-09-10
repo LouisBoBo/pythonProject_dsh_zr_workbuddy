@@ -101,7 +101,7 @@ class CodeDevConfig:
     delete_preflight_auto_skip: bool = False
     delete_mode: str = "cursor_plan"
     delete_plan_timeout_sec: int = 120
-    live_stream_delay_sec: float = 0.045
+    live_stream_delay_sec: float = 0.0
     default_workspace: str = ""
 
 
@@ -150,7 +150,7 @@ def get_config() -> CodeDevConfig:
         delete_preflight_auto_skip=bool(raw.get("delete_preflight_auto_skip", False)),
         delete_mode=_resolve_delete_mode(raw),
         delete_plan_timeout_sec=max(45, min(int(raw.get("delete_plan_timeout_sec") or 120), 300)),
-        live_stream_delay_sec=max(0.0, min(float(raw.get("live_stream_delay_sec") or 0.045), 0.2)),
+        live_stream_delay_sec=max(0.0, min(float(raw.get("live_stream_delay_sec") if raw.get("live_stream_delay_sec") is not None else 0.0), 0.2)),
         default_workspace=str(raw.get("default_workspace") or "").strip(),
     )
 

@@ -66,21 +66,45 @@ function runtimeSubprocessEnv() {
   return env;
 }
 
+function candidatePythons() {
+  return [
+    process.env.APP_ENGINE_PYTHON,
+    "/usr/local/bin/python3",
+    "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
+    "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3",
+    "/opt/homebrew/bin/python3",
+    "python3",
+  ].filter(Boolean);
+}
+
 function loadRuntime() {
   const defaults = { host: "127.0.0.1", port: 8000, python: "python3" };
   try {
     if (fs.existsSync(READ_RUNTIME) && fs.existsSync(RUNTIME_PATH)) {
-      const out = execFileSync("python3", [READ_RUNTIME, RUNTIME_PATH], {
-        encoding: "utf8",
-        timeout: 5000,
-        env: runtimeSubprocessEnv(),
-      });
-      const j = JSON.parse(out.trim());
-      return {
-        host: j.host || defaults.host,
-        port: Number(j.port || defaults.port),
-        python: j.python || defaults.python,
-      };
+      let lastErr = null;
+      for (const bin of candidatePythons()) {
+        try {
+          const out = execFileSync(bin, [READ_RUNTIME, RUNTIME_PATH], {
+            encoding: "utf8",
+            timeout: 5000,
+            env: runtimeSubprocessEnv(),
+          });
+          const j = JSON.parse(out.trim());
+          return {
+            host: j.host || defaults.host,
+            port: Number(j.port || defaults.port),
+            python: j.python || bin || defaults.python,
+          };
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (lastErr) {
+        console.warn(
+          "[mes-runtime] 读取 runtime.yaml 失败：需要 Python 3.10+。",
+          lastErr && lastErr.message ? String(lastErr.message).slice(0, 180) : lastErr,
+        );
+      }
     }
   } catch {
     /* fallback below */

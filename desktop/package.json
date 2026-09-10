@@ -1,6 +1,6 @@
 {
   "name": "zr-workbuddy-desktop",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "private": true,
   "description": "ZR-WorkBuddy 宿主一体桌面：内嵌 Host + 引擎；安装后配置即可用",
   "main": "main.js",
@@ -84,7 +84,7 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
-        "dmg",
+        "dir",
         "zip"
       ],
       "identity": null

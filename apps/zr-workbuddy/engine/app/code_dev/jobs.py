@@ -56,6 +56,8 @@ def create_job(
     target_hints: dict[str, Any] | None = None,
     resume_commit: bool = False,
     source_gate_job_id: str = "",
+    ui_call_id: str = "",
+    ui_session_id: str = "",
 ) -> dict[str, Any]:
     now = int(time.time())
     rt = (runtime or "cursor_local").strip() or "cursor_local"
@@ -68,11 +70,15 @@ def create_job(
     notes = list((brief or {}).get("notes") or []) if isinstance(brief, dict) else []
     gate_from_notes = any("source=code_commit_gate" in str(n) for n in notes)
     resume = bool(resume_commit) or gate_from_notes or bool(scope)
+    call_id = str(ui_call_id or "").strip()[:200]
+    sess_id = str(ui_session_id or "").strip()[:200]
     job: dict[str, Any] = {
         "id": new_job_id(),
         "user_id": "" if user_id is None else str(user_id),
         "username": username or "",
-        "thread_id": thread_id or "",
+        "thread_id": thread_id or sess_id or "",
+        "ui_call_id": call_id or None,
+        "ui_session_id": sess_id or None,
         "workspace": workspace,
         "empty_target": bool(empty_target),
         "status": "queued",
@@ -343,6 +349,26 @@ def list_jobs(
         out.append(job)
     out.sort(key=lambda j: int(j.get("updated_at") or 0), reverse=True)
     return out
+
+
+def find_jobs_by_ui_call_id(
+    data_dir: Path,
+    ui_call_id: str,
+    *,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """按 DSH 工具卡 callId 找回 Job（刷新后 localStorage 丢了也能恢复）。"""
+    cid = str(ui_call_id or "").strip()
+    if not cid:
+        return []
+    cap = max(1, min(int(limit or 5), 50))
+    hits: list[dict[str, Any]] = []
+    for j in list_jobs(data_dir):
+        if str(j.get("ui_call_id") or "").strip() == cid:
+            hits.append(j)
+            if len(hits) >= cap:
+                break
+    return hits
 
 
 def write_job_document(data_dir: Path, job: dict[str, Any]) -> dict[str, Any]:

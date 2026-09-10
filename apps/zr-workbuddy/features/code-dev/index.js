@@ -63,7 +63,7 @@ export function apply(ctx) {
         "（含「物料出库写到仓库管理菜单」这类改菜单诉求）时必须只调本工具，且应作为本轮第一个工具调用。" +
         "**必须把用户原话原样传入 message**（勿留空），可选 workspace；返回主聊天工具卡（选目录→梳理需求→确认）。" +
         "工具卡顶部已有中文引导（选目录、填诉求、确认后开工），本工具成功返回后必须立刻结束本轮：" +
-        "禁止再输出任何用户可见文字（含中英文「已打开写码工具卡/development tool card」、步骤复述、操作指引）。",
+        "禁止再输出任何用户可见文字（含「请在卡片中确认」「请在上方工具卡确认」、中英文「已打开写码工具卡/development tool card」、步骤复述、操作指引）；成功时 reply 留空。",
       parameters: {
         workspace: {
           type: "string",
@@ -154,54 +154,6 @@ export function apply(ctx) {
     }),
   );
 
-  ctx.tools.register(
-    e.defineTool({
-      name: "mes_code_dev_start",
-      description:
-        "仅当用户已在工具卡确认并拿到 HITL nonce 时使用。日常请用 mes_code_dev_begin；禁止仅凭 confirmed=true 开工。",
-      parameters: {
-        workspace: {
-          type: "string",
-          required: true,
-          description: "本机工程绝对路径",
-        },
-        message: {
-          type: "string",
-          required: true,
-          description: "已确认的改码需求摘要",
-        },
-        nonce: {
-          type: "string",
-          required: true,
-          description: "确认卡签发的一次性 HITL nonce（须来自 UI，不可伪造）",
-        },
-      },
-      output: {
-        schema: OUTPUT_SCHEMA,
-        render: e.resultRender,
-        presentationMeta: cdPresentationMeta,
-      },
-      timeoutMs: t,
-      async execute(args) {
-        const nonce = String(args.nonce || "").trim();
-        if (!nonce) {
-          return {
-            ok: false,
-            detail: "缺少 HITL nonce：请让用户在写码确认卡点击确认",
-            reply: "请先完成写码确认卡，再启动。",
-          };
-        }
-        const workspace = String(args.workspace || "").trim();
-        const message = String(args.message || "").trim();
-        if (!workspace) return { ok: false, detail: "workspace 不能为空" };
-        if (!message) return { ok: false, detail: "message 不能为空" };
-        return await e.runEngine(
-          ["code-dev-confirm", workspace, message, "nonce=" + nonce],
-          t,
-        );
-      },
-    }),
-  );
 
   ctx.tools.register(
     e.defineTool({

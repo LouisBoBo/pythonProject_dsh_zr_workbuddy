@@ -127,7 +127,7 @@ def _prepare_sandbox_sparse(
         if raw.endswith("/"):
             sub = target_workspace / raw.rstrip("/")
             if sub.is_dir():
-                for dirpath, dirnames, filenames in os_walk_filtered(sub):
+                for dirpath, dirnames, filenames in os_walk_raw(sub):
                     rel_dir = Path(dirpath).relative_to(target_workspace)
                     dirnames[:] = [
                         d for d in list(dirnames) if not _should_skip_dirname(d, rel_dir)
@@ -226,7 +226,7 @@ def prepare_sandbox(
     if on_progress:
         on_progress("正在将目标工程受限拷贝到沙箱…")
 
-    for dirpath, dirnames, filenames in os_walk_filtered(target_workspace):
+    for dirpath, dirnames, filenames in os_walk_raw(target_workspace):
         rel_dir = Path(dirpath).relative_to(target_workspace)
         keep: list[str] = []
         for d in list(dirnames):
@@ -267,7 +267,8 @@ def prepare_sandbox(
     }
 
 
-def os_walk_filtered(root: Path):
+def os_walk_raw(root: Path):
+    """无过滤的 os.walk 包装（过滤在调用方）。"""
     import os
 
     yield from os.walk(root)

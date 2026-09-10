@@ -21,7 +21,8 @@
 
 ## 日常入口（只开一个地址 · 主聊天）
 
-**打开：http://127.0.0.1:3080** → **强制刷新** → 点 **「新会话」** → 在中间输入框直接说需求。
+**浏览器开发壳：http://127.0.0.1:3081**（`~/.dsh` 会话库）→ **强制刷新** → 点 **「新会话」** → 在中间输入框直接说需求。  
+**桌面一体包**：内嵌壳默认 **:13080**（另一套 `dsh-home` 会话，勿与 3081 混看）。
 
 **配置中心（不必开 :8000）**：侧栏底 **「设置」** → 左侧导航与「通用 / 模型 / 插件」同级的 **WorkBuddy**（MES、LLM、写码/审码/提交/部署全车道）。保存走引擎 `/api/config` → `config.yaml`。
 
@@ -63,9 +64,9 @@ pnpm install          # 依赖很大，请预留磁盘与时间
 
 ```bash
 scripts/host.sh wire              # 写 ~/.dsh/link + profile Bridge（不重启）
-scripts/host.sh verify            # link / patch / 引擎 / :3080
+scripts/host.sh verify            # link / patch / 引擎 / :3081
 scripts/host.sh ensure-engine     # 业务引擎
-scripts/host.sh start-web         # 默认全局 dsh → http://127.0.0.1:3080
+scripts/host.sh start-web         # 默认全局 dsh → http://127.0.0.1:3081
 scripts/host.sh stop-web
 ```
 

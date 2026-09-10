@@ -54,6 +54,8 @@ def start(
     target_hints: dict[str, Any] | None = None,
     resume_commit: bool = False,
     source_gate_job_id: str = "",
+    ui_call_id: str = "",
+    ui_session_id: str = "",
 ) -> dict[str, Any]:
     """创建并启动 Job。sync=True 时前台跑完（测试用）；默认后台。"""
     cfg = get_config()
@@ -99,7 +101,7 @@ def start(
         _dd(),
         user_id="",
         username="",
-        thread_id="",
+        thread_id=str(ui_session_id or "").strip(),
         workspace=str(check["path"]),
         message=msg,
         empty_target=bool(check.get("empty")),
@@ -109,6 +111,8 @@ def start(
         target_hints=target_hints,
         resume_commit=resume_commit,
         source_gate_job_id=source_gate_job_id,
+        ui_call_id=ui_call_id,
+        ui_session_id=ui_session_id,
     )
     job_id = str(job["id"])
     if sync:
@@ -150,10 +154,14 @@ def get_job(job_id: str) -> dict[str, Any]:
     }
 
 
-def list_recent_jobs(*, limit: int = 80) -> dict[str, Any]:
-    """列出本机写码任务（按更新时间倒序），供历史核对。"""
-    cap = max(1, min(int(limit or 80), 200))
-    rows = job_store.list_jobs(_dd())[:cap]
+def list_recent_jobs(*, limit: int = 80, ui_call_id: str = "") -> dict[str, Any]:
+    """列出本机写码任务（按更新时间倒序），供历史核对；可按 DSH callId 过滤。"""
+    cid = str(ui_call_id or "").strip()
+    if cid:
+        rows = job_store.find_jobs_by_ui_call_id(_dd(), cid, limit=max(1, min(int(limit or 80), 200)))
+    else:
+        cap = max(1, min(int(limit or 80), 200))
+        rows = job_store.list_jobs(_dd())[:cap]
     slim: list[dict[str, Any]] = []
     for j in rows:
         brief = j.get("brief") if isinstance(j.get("brief"), dict) else {}
@@ -164,12 +172,17 @@ def list_recent_jobs(*, limit: int = 80) -> dict[str, Any]:
             or brief.get("summary")
             or ""
         ).strip()
+        # messages[0] 常是用户需求
+        if not req and isinstance(j.get("messages"), list) and j["messages"]:
+            req = str((j["messages"][0] or {}).get("content") or "").strip()
         slim.append(
             {
                 "id": j.get("id"),
                 "status": j.get("status"),
                 "workspace": j.get("workspace"),
                 "requirement": req[:160],
+                "ui_call_id": j.get("ui_call_id"),
+                "ui_session_id": j.get("ui_session_id"),
                 "created_at": j.get("created_at"),
                 "updated_at": j.get("updated_at"),
                 "error": j.get("error"),

@@ -351,7 +351,9 @@ def verify_delete_on_target(
 
     return {
         "ok": True,
-        "detail": "本机工程验尸通过：" + "、".join(f"「{f}」" for f in features) + " 相关菜单/路由/页面已不存在",
+        "detail": "「"
+        + "」、「".join(features)
+        + "」相关菜单、页面与路由已清除",
         "runtime_hint": _maybe_runtime_hint(synced_files, deleted_files),
         "features": features,
     }

@@ -6,19 +6,37 @@
 #   scripts/host.sh wire                # 复用 plugin.sh install bridge（默认不 --restart）
 #   scripts/host.sh wire --restart      # 接线后重启宿主（走 restart-dsh.sh）
 #   scripts/host.sh ensure-engine       # 仅 ensure 业务引擎
-#   scripts/host.sh ensure-web          # :3080 未监听则后台拉起（脱离 IDE 进程组）
+#   scripts/host.sh ensure-web          # :3081 未监听则后台拉起（脱离 IDE 进程组）
 #   scripts/host.sh up                  # ensure-engine + ensure-web（推荐日常入口）
 #   scripts/host.sh start-web [--from-host]  # 强制启动（已在跑则报错）
 #   scripts/host.sh restart-web         # stop-web + start-web（守护式）
-#   scripts/host.sh stop-web            # 停掉监听 :3080 的进程（若有）
+#   scripts/host.sh stop-web            # 停掉监听 :3081 的进程（若有）
+#
+# 端口约定（勿混）：
+#   - 浏览器开发壳默认 :3081（DSH_HOME=~/.dsh-workbuddy，含 mes-bridge）
+#   - 官方 Harness 建议 :3080（默认 DSH_HOME=~/.dsh，勿装 WorkBuddy bridge）
+#   - 桌面一体包默认 :13080（Application Support/.../dsh-home，另一套会话）
+#   - 可用 DSH_WEB_PORT=… / DSH_HOME=… / DSH_PROFILE=… 覆盖
 #
 # 拒绝裸 install|start|dev，防误伤。不改 code_deploy / 不焊业务进 host/。
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOST="$ROOT/host"
-PROFILE="${DSH_PROFILE:-$HOME/.dsh/profiles/web}"
-LINK_REPO="$HOME/.dsh/link/DSH-ZR-WorkBuddy"
-PORT="${DSH_WEB_PORT:-3080}"
+# DSH_HOME 决定会话库；DSH_PROFILE 可为绝对路径，或相对 profiles 下的名字
+DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh-workbuddy}"
+if [ -n "${DSH_PROFILE:-}" ]; then
+  case "$DSH_PROFILE" in
+    /*|~*) PROFILE="$DSH_PROFILE" ;;
+    *) PROFILE="$DSH_HOME_DIR/profiles/$DSH_PROFILE" ;;
+  esac
+else
+  PROFILE="$DSH_HOME_DIR/profiles/web"
+fi
+# 展开 ~
+PROFILE="${PROFILE/#\~/$HOME}"
+LINK_DIR="$DSH_HOME_DIR/link"
+LINK_REPO="$LINK_DIR/DSH-ZR-WorkBuddy"
+PORT="${DSH_WEB_PORT:-3081}"
 DAEMONIZE="$ROOT/scripts/lib/daemonize.py"
 # 公网 IP/域名访问时需加入浏览器信任名单（逗号分隔），例：DSH_TRUSTED_HOSTS=175.178.238.31
 TRUSTED_HOSTS="${DSH_TRUSTED_HOSTS:-}"
@@ -101,7 +119,7 @@ cmd_hint() {
 1. 装依赖:           cd host && pnpm install
 2. 接线 Bridge:      scripts/host.sh wire
 3. 检查接线:         scripts/host.sh verify
-4. 日常一键保活:     scripts/host.sh up          # 引擎 + :3080（守护进程，不被 IDE 关掉）
+4. 日常一键保活:     scripts/host.sh up          # 引擎 + :3081（守护进程，不被 IDE 关掉）
 5. 仅确保引擎:       scripts/host.sh ensure-engine
 6. 仅确保聊天壳:     scripts/host.sh ensure-web
 7. 重启聊天壳:       scripts/host.sh restart-web
@@ -232,7 +250,7 @@ cmd_stop_web() {
   echo "已停止"
 }
 
-# 开发态 :3080 须跟 runtime.yaml 对齐；勿继承桌面 App 注入的 18000（会导致 mes-runtime 连错端口）
+# 开发态 :3081 须跟 runtime.yaml 对齐；勿继承桌面 App 注入的 18000（会导致 mes-runtime 连错端口）
 sync_dev_engine_env() {
   unset WORKBUDDY_DESKTOP DSH_DESKTOP WORKBUDDY_ENGINE_DIR \
     WORKBUDDY_ENGINE_HOST WORKBUDDY_ENGINE_PORT \
@@ -259,7 +277,7 @@ _launch_web_daemon() {
   : >"$log"
 
   # shellcheck disable=SC2207
-  local web_args=(web --no-open)
+  local web_args=(web --no-open --host 127.0.0.1 --port "$PORT")
   if [ -n "$TRUSTED_HOSTS" ]; then
     local IFS=',' h
     for h in $TRUSTED_HOSTS; do
@@ -372,7 +390,7 @@ cmd_up() {
   desk_pid="$(lsof -tiTCP:13080 -sTCP:LISTEN 2>/dev/null || true)"
   if [ -n "$desk_pid" ]; then
     echo "警告: 桌面 App 仍在 :13080 (PID $desk_pid)，会注入 APP_ENGINE_PORT=18000 污染环境。" >&2
-    echo "      开发请完全退出桌面 App，只用 http://127.0.0.1:$PORT 。" >&2
+    echo "      开发请完全退出桌面 App，只用 http://127.0.0.1:$PORT （浏览器壳，勿开桌面 :13080 混看会话）。" >&2
   fi
   # 引擎失败不阻断聊天壳；两边各自 ensure
   if ! cmd_ensure_engine; then
