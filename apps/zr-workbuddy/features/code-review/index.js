@@ -59,9 +59,9 @@ export function apply(ctx) {
     e.defineTool({
       name: "mes_code_review_begin",
       description:
-        "【审码主入口】用户说「审核代码 / 审码 / code review」时必须只调本工具。" +
-        "未给绝对路径时：返回选目录确认（主聊天工具卡内可选目录并勾选文件），不要再问用户、不要用 ask_user_question、不要 Bash 扫盘。" +
-        "若用户已给绝对路径，直接开审（默认抽样）；有 files 则按指定文件审。",
+        "【审码主入口】用户说「代码审核 / 审核代码 / 审码 / code review / review 改动」时必须只调本工具（禁止 mes_code_dev_begin / Bash / git diff）。" +
+        "一律返回主聊天审码工具卡（选目录→勾选文件→开始审核）；禁止 ask_user_question、禁止 Bash/git 扫仓代审。" +
+        "成功返回后禁止再输出 diff 结论，等用户在工具卡点「开始审核」。",
       parameters: {
         local_path: {
           type: "string",
@@ -95,9 +95,7 @@ export function apply(ctx) {
         const ui = pick.code_review_ui || null;
         return {
           ok: true,
-          reply:
-            "请在**上方工具卡**中选择本机工程目录，再勾选要审的文件，然后点「开始审核」。" +
-            "（不要在聊天里再发路径直跑；须经工具卡签发 path_ticket。）",
+          reply: "",
           detail: "await_toolview_pick",
           suggestions: pick.suggestions || [],
           workspace: pick.workspace || local_path || "",

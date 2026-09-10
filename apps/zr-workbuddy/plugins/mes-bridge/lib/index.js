@@ -15,23 +15,60 @@ import * as runtime from "@dsh-external/mes-runtime";
 export const name = "dsh-mes-bridge";
 export const inject = ["tools"];
 
+const WORKBUDDY_ROUTE_TABLE = [
+  "## ZR-WorkBuddy 意图分流（强制 · 先看这张表）",
+  "| 用户意图 | 本轮第一个工具 | 禁止误用 |",
+  "| --- | --- | --- |",
+  "| 改代码 / 改页面 / 改菜单 / 删菜单子项 / 加功能 | `mes_code_dev_begin` | 不是审码、不是 Bash/git |",
+  "| 代码审核 / 审码 / code review / 看看改动 | `mes_code_review_begin` | 不是 `mes_code_dev_begin`、不是 git diff |",
+  "| 提交代码 / git commit / push 本批 | `mes_code_commit_begin` | 不是 `mes_code_review_run`、不是 Bash git |",
+  "| 部署 / 上线 / 预发 / 发布服务器 | `mes_code_deploy_begin` | 不是 SSH/rsync 自部署 |",
+  "| MES 查产量良率工单 | `mes_ask` | 不是写码 |",
+  "| PCB 工艺问答 | `mes_pcb` | 不是 MES 查数 |",
+].join("\n");
+
 const WORKBUDDY_CODE_DEV_PROMPT = [
   "## ZR-WorkBuddy 写码路由（强制）",
-  "当用户要改代码、改页面、改菜单、挪菜单、加功能、做报表页、Cursor 写码、删除菜单子项时：",
+  "当用户要改代码、改页面、改菜单、挪菜单、加功能、做报表页、Cursor 写码、删除菜单子项时（**不是**审码/提交/部署）：",
   "1. **本轮第一个工具调用必须是 `mes_code_dev_begin`，且 message=用户原话（原样，禁止留空）**。",
   "2. **禁止**用 `run_code` / code-mode（会触发 scheduler.prepare 报错 → 本轮运行失败），以及 Bash / Grep / Glob / Read / Write / StrReplace 去扫或改用户工程来「完成写码」。",
   "3. **禁止**先长思考、先查 Vite/日志/HMR；改菜单类诉求同样走 begin → 主聊天工具卡。",
   "4. 工具卡内完成：选目录 → 梳理需求 → 确认后才由 Cursor Local 改盘；未确认禁止开工（确认只走 UI → /api/code-dev/confirm）。",
   "5. `mes_code_dev_begin` 返回后**禁止**再输出任何用户可见文字（含「请在卡片中确认」「请在上方工具卡确认」）——卡已在主聊天展示，回复必须留空。",
   "6. **禁止**在同一轮里再调其它工具（尤其 `run_code` / Write / StrReplace / Bash 改盘）；begin 成功即停，等用户在卡片操作。",
-  "7. 写码不会自动 git commit；提交用 `mes_code_commit_begin`。",
+  "7. 写码不会自动 git commit；提交用 `mes_code_commit_begin`；部署用 `mes_code_deploy_begin`。",
   "示例：「看板管理菜单删除设备看板子项」→ 立刻 `mes_code_dev_begin`，message 填该句原文。",
-  "",
+].join("\n");
+
+const WORKBUDDY_CODE_REVIEW_PROMPT = [
+  "## ZR-WorkBuddy 审码路由（强制）",
+  "当用户说「审核代码 / 审码 / code review / 代码审核 / 看看改动有没有问题 / 帮我 review」时：",
+  "1. **本轮第一个工具调用必须是 `mes_code_review_begin`**（不是 `mes_code_dev_begin`，不是 Bash / Grep / Read / git）。",
+  "2. **禁止**用 Bash 执行 `git diff` / `git status` / `git log` / `git show` / `grep` / `rg` 扫仓代审；审码走引擎 `code-review` 车道 + 主聊天工具卡。",
+  "3. **禁止**用 `mes_code_dev_begin` 处理纯审码诉求（不写码、不改菜单、不删文件）。",
+  "4. 工具卡内：选目录 → 勾选文件 → 点「开始审核」；确认前禁止 `mes_code_review_run`。",
+  "5. `mes_code_review_begin` 返回后回复留空或仅一句「请在上方审码工具卡操作」，禁止复述 diff 结论。",
+  "6. 提交前门禁 findings 走 `mes_code_commit_begin`，**不要**用 `mes_code_review_run` 代替提交门禁。",
+  "示例：「代码审核」→ 立刻 `mes_code_review_begin()`，不要先 ls / git status。",
+].join("\n");
+
+const WORKBUDDY_CODE_COMMIT_PROMPT = [
+  "## ZR-WorkBuddy 提交路由（强制）",
+  "当用户说「提交代码 / 帮我 commit / push / 提交本批 / 提交门禁」时：",
+  "1. **本轮第一个工具调用必须是 `mes_code_commit_begin`**（不是 Bash git、不是 `mes_code_review_run`）。",
+  "2. **禁止** Bash 执行 `git add` / `git commit` / `git push`；提交须经工具卡门禁 → 人确认。",
+  "3. **禁止**用全量审码 `mes_code_review_run` 代替提交门禁 findings 列表。",
+  "4. 工具卡内：选目录 → 勾选文件 → 跑门禁 → 确认后才 commit/push。",
+  "5. `mes_code_commit_begin` 返回后回复留空，禁止口头代用户确认。",
+  "示例：「提交代码」→ 立刻 `mes_code_commit_begin()`。",
+].join("\n");
+
+const WORKBUDDY_CODE_DEPLOY_PROMPT = [
   "## ZR-WorkBuddy 一体部署路由（强制）",
   "当用户要部署到预发/上线、自动化部署、发布到服务器时：",
   "1. **本轮只调用一次 `mes_code_deploy_begin`**，参数全部留空即可（默认 staging）。",
   "2. **禁止**传 env=production/prod；**禁止**再调 prepare/confirm；**禁止**失败后换参数重试出第二张卡。",
-  "3. **禁止**自己 SSH/rsync；出卡后只说一句「请点确认部署」，不要复述原因/单元列表。",
+  "3. **禁止** Bash SSH/rsync/scp 自部署；出卡后回复留空，等用户点确认部署。",
   "示例：「部署上线」→ 立刻 `mes_code_deploy_begin()`。",
 ].join("\n");
 
@@ -62,6 +99,25 @@ function bashLooksLikeDiskWrite(raw) {
   if (/(^|[^=])>{1,2}\s*\S/.test(s) && !/>&\s*\d/.test(s)) return true;
   if (/\b(git\s+(add|commit|push|checkout|reset|clean|rebase|merge)|npm\s+install|pnpm\s+i|yarn\s+add)\b/i.test(s))
     return true;
+  return false;
+}
+
+/** Bash 读盘代审：禁止 git diff/status 等绕过 mes_code_review_begin */
+function bashLooksLikeManualCodeReview(raw) {
+  const s = String(raw || "");
+  if (!s.trim()) return false;
+  if (/\bgit\s+(diff|status|log|show|blame)\b/i.test(s)) return true;
+  if (/\b(rg|grep|find)\b[\s\S]{0,120}\.(vue|tsx?|jsx?|py|go|java)\b/i.test(s)) return true;
+  if (/\bls\b[\s\S]{0,80}(src|router|menu|views)/i.test(s)) return true;
+  return false;
+}
+
+/** Bash 自部署：禁止 ssh/rsync 绕过 mes_code_deploy_begin */
+function bashLooksLikeManualDeploy(raw) {
+  const s = String(raw || "");
+  if (!s.trim()) return false;
+  if (/\b(ssh|rsync|scp|sftp)\b/i.test(s)) return true;
+  if (/\bansible-playbook\b/i.test(s)) return true;
   return false;
 }
 
@@ -192,11 +248,33 @@ export function apply(ctx) {
     const sp = ctx.get && ctx.get("systemPrompt");
     if (sp && typeof sp.section === "function") {
       sp.section({
+        name: "workbuddy:route-table",
+        order: 34,
+        text: WORKBUDDY_ROUTE_TABLE,
+      });
+      sp.section({
         name: "workbuddy:code-dev-route",
         order: 35,
         text: WORKBUDDY_CODE_DEV_PROMPT,
       });
-      console.log("[mes-bridge] 已注册 systemPrompt：workbuddy:code-dev-route");
+      sp.section({
+        name: "workbuddy:code-review-route",
+        order: 36,
+        text: WORKBUDDY_CODE_REVIEW_PROMPT,
+      });
+      sp.section({
+        name: "workbuddy:code-commit-route",
+        order: 37,
+        text: WORKBUDDY_CODE_COMMIT_PROMPT,
+      });
+      sp.section({
+        name: "workbuddy:code-deploy-route",
+        order: 38,
+        text: WORKBUDDY_CODE_DEPLOY_PROMPT,
+      });
+      console.log(
+        "[mes-bridge] 已注册 systemPrompt：route-table + code-dev/review/commit/deploy",
+      );
     } else {
       console.warn("[mes-bridge] 无 systemPrompt 服务：写码路由硬约束未注入");
     }
@@ -237,7 +315,10 @@ export function apply(ctx) {
         const name = String((exec && exec.name) || "");
         const lower = name.toLowerCase();
         if (name === "run_code" || lower === "run_code") {
-          return "禁止使用 run_code。改菜单/写码请只调用 mes_code_dev_begin，在工具卡内确认后开工。";
+          return (
+            "禁止使用 run_code。写码→mes_code_dev_begin；审码→mes_code_review_begin；" +
+            "提交→mes_code_commit_begin；部署→mes_code_deploy_begin。"
+          );
         }
         if (DISK_WRITE_TOOLS.has(name) || DISK_WRITE_TOOLS.has(lower)) {
           return (
@@ -247,11 +328,26 @@ export function apply(ctx) {
           );
         }
         if (lower === "bash" || lower === "shell" || lower === "run_terminal_cmd" || lower === "terminal") {
-          if (bashLooksLikeDiskWrite(toolExecPayload(exec))) {
+          const payload = toolExecPayload(exec);
+          if (bashLooksLikeDiskWrite(payload)) {
             return (
               "禁止用 " +
               name +
               " 改盘（rm/mv/cp/重定向/git 写等）。请走 mes_code_dev_begin 工具卡。"
+            );
+          }
+          if (bashLooksLikeManualCodeReview(payload)) {
+            return (
+              "禁止用 " +
+              name +
+              " 扫仓/git diff 代审。用户要审码请只调 mes_code_review_begin，在审码工具卡内选目录并开始审核。"
+            );
+          }
+          if (bashLooksLikeManualDeploy(payload)) {
+            return (
+              "禁止用 " +
+              name +
+              " 自部署（ssh/rsync/scp）。用户要部署请只调 mes_code_deploy_begin，在部署确认卡内点确认。"
             );
           }
         }

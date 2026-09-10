@@ -36,8 +36,21 @@ load_company_dsh_market_env() {
 }
 
 # 只重写标记块内的行，其它 .npmrc 内容原样保留
+_company_dsh_default_profile() {
+  # 与 host/plugin 默认一致：WorkBuddy 家目录
+  local home="${DSH_HOME:-$HOME/.dsh-workbuddy}"
+  if [ -n "${DSH_PROFILE:-}" ]; then
+    case "$DSH_PROFILE" in
+      /*|~*) printf '%s' "${DSH_PROFILE/#\~/$HOME}" ;;
+      *) printf '%s' "$home/profiles/$DSH_PROFILE" ;;
+    esac
+  else
+    printf '%s' "$home/profiles/web"
+  fi
+}
+
 ensure_zhongruan_npmrc() {
-  local profile="${1:-${DSH_PROFILE:-$HOME/.dsh/profiles/web}}"
+  local profile="${1:-$(_company_dsh_default_profile)}"
   local registry="${ZHONGRUAN_NPM_REGISTRY:-}"
   [ -n "$registry" ] || return 0
   [ -d "$profile" ] || return 0
@@ -72,5 +85,5 @@ apply_company_dsh_market() {
   if [ -n "${DSHM_REGISTRY_URL:-}" ]; then
     echo "公司插件市场目录: $DSHM_REGISTRY_URL"
   fi
-  ensure_zhongruan_npmrc "${DSH_PROFILE:-$HOME/.dsh/profiles/web}"
+  ensure_zhongruan_npmrc "$(_company_dsh_default_profile)"
 }

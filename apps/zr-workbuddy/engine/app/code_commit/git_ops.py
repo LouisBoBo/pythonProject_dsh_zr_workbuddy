@@ -503,6 +503,30 @@ def normalize_push_remote_url(url: str) -> str:
     raise ValueError("请填写 HTTPS（https://…）或 SSH（git@host:path.git）仓库地址")
 
 
+def redact_git_remote_url(url: str) -> str:
+    """对外展示/落库：剥离 HTTPS userinfo，避免 Token 进 Job/UI/localStorage。"""
+    from urllib.parse import urlsplit, urlunsplit
+
+    u = (url or "").strip()
+    if not u:
+        return ""
+    if u.startswith("http://") or u.startswith("https://"):
+        parts = urlsplit(u)
+        if parts.username or parts.password:
+            host = parts.hostname or ""
+            if parts.port:
+                host = f"{host}:{parts.port}"
+            return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
+        return u
+    # ssh://user@host/path — 仅剥 user@，保留 host/path
+    if u.startswith("ssh://") and "@" in u:
+        scheme, rest = u.split("://", 1)
+        if "@" in rest:
+            rest = rest.split("@", 1)[-1]
+            return f"{scheme}://{rest}"
+    return u
+
+
 def inspect_git_repo(
     workspace: Path | str,
     *,
@@ -533,7 +557,7 @@ def inspect_git_repo(
         "current_branch": branch,
         "on_protected": branch.lower() in _PROTECTED,
         "remote_name": rname,
-        "remote_url": (remote_url or "").strip() if has_remote else "",
+        "remote_url": redact_git_remote_url((remote_url or "").strip()) if has_remote else "",
         "has_remote": has_remote,
     }
 
@@ -589,7 +613,7 @@ def _push_work_branch(
             "error": "" if ok else humanize_push_error(raw),
             "raw_error": "" if ok else raw,
             "remote": remote,
-            "remote_url": remote_url,
+            "remote_url": redact_git_remote_url(remote_url),
             "error_kind": "" if ok else classify_push_error(raw),
         }
         if saved_remote is not None:

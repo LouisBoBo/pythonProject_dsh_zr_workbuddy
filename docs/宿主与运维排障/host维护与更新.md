@@ -49,8 +49,18 @@ scripts/host.sh start-web
 ```
 
 **成功：** 浏览器打开 `http://127.0.0.1:3081` 能看到 DSH/Studio 界面。  
-（开发壳默认 **:3081** / `~/.dsh`；桌面一体包是 **:13080** / 另一套会话库，不要混开当同一份记录。）  
+（WorkBuddy 开发壳 **:3081** / `~/.dsh`（工作区 + mes-bridge）；干净官方壳可选 **:3080** / `~/.dsh-workbuddy`；桌面一体包 **:13080**。勿用空的 `~/.dsh-workbuddy` 当主开发入口。）  
 若打不开：看终端有没有报「PATH 无 dsh」——需要本机已安装 `dsh` 命令，或按 `scripts/host.sh start-web --from-host`（要求已经 `cd host && pnpm install`）。
+
+**界面像全新官方壳、没有工作区？** 以前误用空的 `~/.dsh-workbuddy`；WorkBuddy 应与工作区共用 **`~/.dsh`**，在 **`:3081`** 启动。一键纠正：
+
+```bash
+cd /Users/hebo/ai_projects/DSH-ZR-WorkBuddy
+scripts/host.sh fix-ports      # 固定 WorkBuddy → :3081，并停掉易混开的 :3080
+scripts/verify-ports.sh        # 自检：3081 日志须含 [mes-bridge]
+```
+
+浏览器请开 **http://127.0.0.1:3081** → **新会话** → 硬刷新。需要官方 Harness 时再单独：`DSH_HOME=~/.dsh dsh web --port 3080 --no-open`。
 
 ### 步骤 A4：装第三方插件
 

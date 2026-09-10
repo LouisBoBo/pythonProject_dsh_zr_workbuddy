@@ -1,9 +1,15 @@
 #!/bin/bash
-# 重启 dsh web（守护启动后脚本返回；不被 Cursor/IDE 进程组带走）
-# 环境变量可选：DSH_BIN、DSH_WEB_PORT、DSH_CWD、DSH_TRUSTED_HOSTS（逗号分隔）
+# 重启 WorkBuddy 聊天壳（守护启动后脚本返回；不被 Cursor/IDE 进程组带走）
+# 端口约定：3081 + DSH_HOME=~/.dsh（工作区 + mes-bridge）
+# 环境变量可选：DSH_HOME、DSH_BIN、DSH_WEB_PORT、DSH_CWD、DSH_TRUSTED_HOSTS（逗号分隔）
 # 可选：--fg 前台运行（本机终端调试用）
+# 推荐日常入口：scripts/host.sh restart-web
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/workbuddy_web_env.sh
+. "$ROOT/scripts/lib/workbuddy_web_env.sh"
+apply_workbuddy_dsh_home
+sync_dev_engine_env
 PORT="${DSH_WEB_PORT:-3081}"
 FG=0
 for a in "$@"; do
@@ -54,18 +60,20 @@ apply_company_dsh_market
 
 if [ "$FG" = "1" ]; then
   cd "$CWD"
+  echo "DSH_HOME=$DSH_HOME  port=$PORT"
   echo "前台启动 dsh web（$DSH_BIN ${WEB_ARGS[*]}）..."
-  exec "$DSH_BIN" "${WEB_ARGS[@]}"
+  exec env DSH_HOME="$DSH_HOME" "$DSH_BIN" "${WEB_ARGS[@]}"
 fi
 
 mkdir -p "$ROOT/tmp"
-LOG="$ROOT/tmp/host-web.log"
-PIDF="$ROOT/tmp/host-web.pid"
+LOG="$ROOT/tmp/host-web-${PORT}.log"
+PIDF="$ROOT/tmp/host-web-${PORT}.pid"
 : >"$LOG"
+echo "DSH_HOME=$DSH_HOME  port=$PORT"
 echo "守护启动 dsh web（$DSH_BIN ${WEB_ARGS[*]}，脱离 IDE 进程组）→ :$PORT"
 echo "日志: $LOG"
 python3 "$ROOT/scripts/lib/daemonize.py" --cwd "$CWD" --log "$LOG" --pid "$PIDF" -- \
-  "$DSH_BIN" "${WEB_ARGS[@]}"
+  env DSH_HOME="$DSH_HOME" "$DSH_BIN" "${WEB_ARGS[@]}"
 
 for i in $(seq 1 25); do
   sleep 1

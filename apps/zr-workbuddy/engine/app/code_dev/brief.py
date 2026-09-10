@@ -31,9 +31,10 @@ MODULE_HINTS: list[dict[str, Any]] = [
         "keywords": ("报表中心", "工时报表", "员工工时", "日产报表", "在制品报表", "reports/"),
         "paths": (
             "frontend/src/views/reports/",
-            "frontend/src/router/index.js",
+            "frontend/src/api/reports/",
+            "frontend/src/config/",
+            "frontend/src/router/",
             "frontend/src/layouts/AppLayout.vue",
-            "frontend/src/api/reports.js",
             "backend/app/routers/reports.py",
         ),
     },
@@ -555,7 +556,18 @@ def write_scope_from_hints(hints: dict[str, Any], requirement: str = "") -> list
     corpus = (requirement or "").lower()
     menu_related = any(
         k in corpus
-        for k in ("菜单", "路由", "页面", "导航", "tab", "侧边栏", "删除", "移除", "去掉", "清理")
+        for k in (
+            "菜单",
+            "路由",
+            "页面",
+            "导航",
+            "tab",
+            "侧边栏",
+            "删除",
+            "移除",
+            "去掉",
+            "清理",
+        )
     )
     if hints.get("confidence") != "high" and not menu_related:
         return []
@@ -571,11 +583,12 @@ def write_scope_from_hints(hints: dict[str, Any], requirement: str = "") -> list
 
     for p in hints.get("expected_paths") or []:
         _add(p)
-    # 前端壳：新增/删除页面、改菜单几乎总要改路由/菜单/API
+    # 前端壳：新增/删除页面、改菜单几乎总要改路由/菜单注册表/API
     for p in (
         "frontend/src/router/",
         "frontend/src/layouts/",
         "frontend/src/api/",
+        "frontend/src/config/",
         "backend/app/routers/",
     ):
         _add(p)

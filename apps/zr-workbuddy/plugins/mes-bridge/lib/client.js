@@ -324,7 +324,12 @@ window.__ModuleLoader__.load({
         ".wb-cr-units{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;max-height:140px;overflow:auto}" +
         ".wb-cr-unit{display:inline-flex;align-items:center;gap:4px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:999px;padding:3px 9px;font-size:11px;color:#334155}" +
         ".wb-cr-unit .k{color:#94a3b8;font-size:10px}" +
-        ".wb-cr-note{font-size:11px;color:#64748b;margin:0 0 8px;line-height:1.45}";
+        ".wb-cr-note{font-size:11px;color:#64748b;margin:0 0 8px;line-height:1.45}" +
+        ".wb-cr-done-banner{display:flex;align-items:flex-start;gap:10px;border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:13px;line-height:1.45}" +
+        ".wb-cr-done-banner.ok{color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0}" +
+        ".wb-cr-done-banner.warn{color:#92400e;background:#fffbeb;border:1px solid #fcd34d}" +
+        ".wb-cr-done-icon{font-size:16px;line-height:1;font-weight:700;flex-shrink:0}" +
+        ".wb-cr-msg{border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px;font-size:12px;color:#334155;background:#f8fafc;white-space:pre-wrap;margin:0 0 10px}";
       document.head.appendChild(s);
     }
 
@@ -490,56 +495,337 @@ window.__ModuleLoader__.load({
       );
     }
 
+    var CR_UI_REV = "2026-09-10o-cr-session";
+    var CR_PERSIST_VER = 1;
+    var CR_PERSIST_MAX_REPORT = 100000;
+
+    function crBlockCallId(block, callIdProp) {
+      if (callIdProp != null && String(callIdProp).trim()) return String(callIdProp).trim();
+      if (!block) return "";
+      var nested = block.call && typeof block.call === "object" ? block.call : null;
+      return String(
+        block.callId ||
+          block.toolCallId ||
+          (nested && (nested.callId || nested.toolCallId || nested.id)) ||
+          block.id ||
+          "",
+      ).trim();
+    }
+
+    function crBlockSessionId(block, sessionId) {
+      return String(
+        sessionId ||
+          (block &&
+            (block.threadId ||
+              block.thread_id ||
+              block.sessionId ||
+              block.session_id ||
+              block.conversationId ||
+              "")) ||
+          "",
+      ).trim();
+    }
+
+    function crPersistKey(block, sessionId, callIdProp) {
+      var callId = crBlockCallId(block, callIdProp);
+      var sid = crBlockSessionId(block, sessionId);
+      if (callId && sid) return "wb-cr-card:" + sid + ":" + callId;
+      if (callId) return "wb-cr-card:call:" + callId;
+      if (sid) return "wb-cr-card:session:" + sid + ":lone";
+      return "wb-cr-card:anon";
+    }
+
+    function crPersistKeyAliases(block, sessionId, callIdProp) {
+      var callId = crBlockCallId(block, callIdProp);
+      var sid = crBlockSessionId(block, sessionId);
+      var keys = [crPersistKey(block, sessionId, callIdProp)];
+      if (callId) {
+        keys.push("wb-cr-card:call:" + callId, "wb-cr-card:block:" + callId);
+        if (sid) keys.push("wb-cr-card:" + sid + ":" + callId);
+      } else if (sid) {
+        keys.push("wb-cr-card:" + sid, "wb-cr-card:session:" + sid + ":lone");
+      } else {
+        keys.push("wb-cr-card:anon");
+      }
+      var uniq = [];
+      var seen = {};
+      keys.forEach(function (k) {
+        if (!k || seen[k]) return;
+        seen[k] = true;
+        uniq.push(k);
+      });
+      return uniq;
+    }
+
+    function crPersistBelongsToCall(saved, callId) {
+      if (!saved || typeof saved !== "object") return false;
+      var cid = String(callId || "").trim();
+      if (!cid) return false;
+      return String(saved.callId || "").trim() === cid;
+    }
+
+    /** 本 callId 已有 files/running/done 则恢复；新 begin 停选目录。 */
+    function crPickMustStayPick(wb, ui, saved, callId) {
+      var cid = String(callId || "").trim();
+      if (saved && cid && crPersistBelongsToCall(saved, callId)) {
+        var phase = String(saved.phase || "");
+        if (phase === "done" || phase === "running" || phase === "files") return false;
+      }
+      var isPick =
+        (ui && String(ui.kind || "") === "pick") || (wb && wb.t === "cr-pick");
+      if (!isPick && wb && wb.t && String(wb.t).indexOf("cr-") === 0 && wb.t !== "cr-pick") {
+        return false;
+      }
+      if (!isPick && wb && wb.t) return false;
+      if (!saved) return true;
+      if (!cid) return true;
+      return !crPersistBelongsToCall(saved, callId);
+    }
+
+    function crPersistClip(text, maxLen) {
+      var s = String(text || "");
+      if (!s) return "";
+      var n = maxLen || CR_PERSIST_MAX_REPORT;
+      return s.length > n ? s.slice(-n) : s;
+    }
+
+    function crPersistNormalize(o) {
+      if (!o || typeof o !== "object") return null;
+      if (Number(o.v || 0) < 1) return null;
+      return o;
+    }
+
+    function crPersistLoad(key) {
+      try {
+        var raw = localStorage.getItem(key);
+        if (!raw) return null;
+        return crPersistNormalize(JSON.parse(raw));
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function crPersistLoadForCard(block, sessionId, callIdProp) {
+      try {
+        var callId = crBlockCallId(block, callIdProp);
+        var key = crPersistKey(block, sessionId, callIdProp);
+        var aliases = crPersistKeyAliases(block, sessionId, callIdProp);
+        for (var i = 0; i < aliases.length; i++) {
+          var hit = crPersistLoad(aliases[i]);
+          if (
+            hit &&
+            crPersistBelongsToCall(hit, callId) &&
+            (hit.phase === "done" || hit.phase === "running" || hit.phase === "files")
+          ) {
+            return { key: key, saved: hit };
+          }
+        }
+        return { key: key, saved: null };
+      } catch (eLoad) {
+        return { key: crPersistKey(block, sessionId, callIdProp), saved: null };
+      }
+    }
+
+    function crPersistSave(key, data) {
+      try {
+        var prev = null;
+        try {
+          prev = JSON.parse(localStorage.getItem(key) || "null");
+        } catch (ePrev) {}
+        if (
+          prev &&
+          Number(prev.v || 0) >= 1 &&
+          prev.phase === "done" &&
+          data &&
+          data.phase === "dir" &&
+          !data.forceReset
+        ) {
+          return;
+        }
+        var payload = Object.assign({ v: CR_PERSIST_VER, at: Date.now() }, data || {});
+        if (prev && Number(prev.v || 0) >= 1 && (payload.phase === "done" || payload.phase === "running")) {
+          if (!payload.report && prev.report) payload.report = prev.report;
+          if (!payload.log && prev.log) payload.log = prev.log;
+        }
+        payload.report = crPersistClip(payload.report, CR_PERSIST_MAX_REPORT);
+        payload.log = crPersistClip(payload.log, 40000);
+        localStorage.setItem(key, JSON.stringify(payload));
+      } catch (e0) {}
+    }
+
+    function crPersistSaveCard(block, sessionId, callIdProp, data) {
+      var callId = crBlockCallId(block, callIdProp) || (data && data.callId) || "";
+      var aliases = crPersistKeyAliases(block, sessionId, callIdProp);
+      var payload = Object.assign({}, data || {}, {
+        callId: callId,
+        sessionId: crBlockSessionId(block, sessionId) || (data && data.sessionId) || "",
+      });
+      aliases.forEach(function (k) {
+        crPersistSave(k, payload);
+      });
+      if (callId) {
+        var sid = crBlockSessionId(block, sessionId);
+        ["wb-cr-card:anon"]
+          .concat(sid ? ["wb-cr-card:" + sid, "wb-cr-card:session:" + sid + ":lone"] : [])
+          .forEach(function (sharedKey) {
+            try {
+              var old = crPersistLoad(sharedKey);
+              if (old && (old.phase === "done" || old.phase === "running")) {
+                localStorage.removeItem(sharedKey);
+              }
+            } catch (eClr) {}
+          });
+      }
+      return aliases[0];
+    }
+
+    function crPersistClearCard(block, sessionId, callIdProp) {
+      crPersistKeyAliases(block, sessionId, callIdProp).forEach(function (k) {
+        try {
+          localStorage.removeItem(k);
+        } catch (e1) {}
+      });
+    }
+
     function CodeReviewBeginCard(props) {
       ensureCss();
       var block = props.block;
+      var toolCallId = String(props.callId || crBlockCallId(block, "") || "").trim();
       var wb = useMemo(function () {
         return readMeta(block);
       }, [block]);
       var ui = (wb && wb.ui) || {};
       var dshCwd = resolveDshCwd(props);
+      var persistBoot = useMemo(
+        function () {
+          return crPersistLoadForCard(block, props.sessionId, toolCallId);
+        },
+        [block, props.sessionId, toolCallId],
+      );
+      var bootSavedRaw =
+        persistBoot.saved && crPersistBelongsToCall(persistBoot.saved, toolCallId)
+          ? persistBoot.saved
+          : null;
+      var bootSaved =
+        bootSavedRaw && !crPickMustStayPick(wb, ui, bootSavedRaw, toolCallId) ? bootSavedRaw : null;
 
-      var _phase = useState("dir"); // dir | files | running | done
+      var _phase = useState(function () {
+        return (bootSaved && bootSaved.phase) || "dir";
+      }); // dir | files | running | done
       var phase = _phase[0];
       var setPhase = _phase[1];
-      var _ws = useState(initialWorkspace(props, ui));
+      var _ws = useState(function () {
+        return (bootSaved && bootSaved.workspace) || initialWorkspace(props, ui);
+      });
       var workspace = _ws[0];
       var setWorkspace = _ws[1];
-      var _scope = useState(String(ui.scope || ""));
+      var _scope = useState(function () {
+        return (bootSaved && bootSaved.scope) || String(ui.scope || "");
+      });
       var scope = _scope[0];
       var setScope = _scope[1];
-      var _focus = useState(String(ui.focus || ""));
+      var _focus = useState(function () {
+        return (bootSaved && bootSaved.focus) || String(ui.focus || "");
+      });
       var focus = _focus[0];
       var setFocus = _focus[1];
-      var _err = useState("");
+      var _err = useState(function () {
+        return (bootSaved && bootSaved.err) || "";
+      });
       var err = _err[0];
       var setErr = _err[1];
       var _busy = useState(false);
       var busy = _busy[0];
       var setBusy = _busy[1];
-      var _files = useState([]);
+      var _files = useState(function () {
+        return (bootSaved && bootSaved.files) || [];
+      });
       var files = _files[0];
       var setFiles = _files[1];
-      var _sample = useState([]);
+      var _sample = useState(function () {
+        return (bootSaved && bootSaved.sample) || [];
+      });
       var sample = _sample[0];
       var setSample = _sample[1];
-      var _selected = useState({});
+      var _selected = useState(function () {
+        return (bootSaved && bootSaved.selected) || {};
+      });
       var selected = _selected[0];
       var setSelected = _selected[1];
-      var _count = useState(0);
+      var _count = useState(function () {
+        return (bootSaved && bootSaved.count) || 0;
+      });
       var count = _count[0];
       var setCount = _count[1];
-      var _log = useState("");
+      var _log = useState(function () {
+        return (bootSaved && bootSaved.log) || "";
+      });
       var log = _log[0];
       var setLog = _log[1];
-      var _report = useState("");
+      var _report = useState(function () {
+        return (bootSaved && bootSaved.report) || "";
+      });
       var report = _report[0];
       var setReport = _report[1];
-      var _pathTicket = useState("");
+      var _pathTicket = useState(function () {
+        return (bootSaved && bootSaved.pathTicket) || "";
+      });
       var pathTicket = _pathTicket[0];
       var setPathTicket = _pathTicket[1];
 
       var suggestions = Array.isArray(ui.suggestions) ? ui.suggestions : [];
+
+      function crSnapshotPersist(extra) {
+        if (phase === "dir" && !(extra && extra.forceReset)) return;
+        crPersistSaveCard(
+          block,
+          props.sessionId,
+          toolCallId,
+          Object.assign(
+            {
+              phase: phase,
+              callId: toolCallId,
+              sessionId: crBlockSessionId(block, props.sessionId),
+              workspace: workspace,
+              scope: scope,
+              focus: focus,
+              files: files,
+              sample: sample,
+              selected: selected,
+              count: count,
+              log: log,
+              report: report,
+              pathTicket: pathTicket,
+              err: err,
+            },
+            extra || {},
+          ),
+        );
+      }
+
+      function crResetCard() {
+        crPersistClearCard(block, props.sessionId, toolCallId);
+        setPhase("dir");
+        setErr("");
+        setLog("");
+        setReport("");
+        setFiles([]);
+        setSelected({});
+        setPathTicket("");
+      }
+
+      useEffect(
+        function () {
+          if (
+            phase === "files" ||
+            phase === "running" ||
+            phase === "done"
+          ) {
+            crSnapshotPersist();
+          }
+        },
+        [phase, workspace, scope, focus, files, selected, count, log, report, pathTicket, err],
+      );
 
       useEffect(
         function () {
@@ -819,7 +1105,7 @@ window.__ModuleLoader__.load({
             "div",
             { className: "wb-cr-head" },
             h("span", { className: "wb-cr-badge" }, "代码审核"),
-            h("span", { className: "wb-cr-hint" }, phase === "running" ? "进行中（勿重复点击）" : "完成"),
+            h("span", { className: "wb-cr-hint" }, (phase === "running" ? "进行中（勿重复点击）" : "完成") + " · " + CR_UI_REV),
           ),
           h(
             "div",
@@ -841,12 +1127,7 @@ window.__ModuleLoader__.load({
                     {
                       type: "button",
                       className: "wb-cr-btn",
-                      onClick: function () {
-                        setPhase("dir");
-                        setErr("");
-                        setLog("");
-                        setReport("");
-                      },
+                      onClick: crResetCard,
                     },
                     "重新选择",
                   ),
@@ -1002,7 +1283,7 @@ window.__ModuleLoader__.load({
           "div",
           { className: "wb-cr-head" },
           h("span", { className: "wb-cr-badge" }, "代码审核"),
-          h("span", { className: "wb-cr-hint" }, "选择目录 · 下一步勾选文件"),
+          h("span", { className: "wb-cr-hint" }, "选择目录 · 下一步勾选文件 · " + CR_UI_REV),
         ),
         h(
           "div",
@@ -1097,25 +1378,385 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function ccTailName(path) {
+      var s = String(path || "").replace(/\\/g, "/").replace(/\/+$/, "");
+      var slash = s.lastIndexOf("/");
+      return slash >= 0 ? s.slice(slash + 1) : s || "—";
+    }
+
+    function ccRedactRemoteUrl(url) {
+      var u = String(url || "").trim();
+      if (!u) return "";
+      try {
+        if (/^https?:\/\//i.test(u)) {
+          var parsed = new URL(u);
+          if (parsed.username || parsed.password) {
+            parsed.username = "";
+            parsed.password = "";
+            return parsed.toString();
+          }
+        }
+      } catch (_e) {}
+      return u.replace(/^(https?:\/\/)([^/@\s]+)@/i, "$1");
+    }
+
+    function ccSanitizeCommitDetail(detail) {
+      if (!detail || typeof detail !== "object") return detail;
+      var out = Object.assign({}, detail);
+      if (out.push && typeof out.push === "object") {
+        out.push = Object.assign({}, out.push, {
+          remote_url: ccRedactRemoteUrl(out.push.remote_url || ""),
+        });
+      }
+      return out;
+    }
+
+    function ccCommitRemoteLabel(didPush, pushInfo) {
+      if (!didPush) return "仅本地提交（未 push）";
+      if (pushInfo && pushInfo.ok) {
+        var remote = String(pushInfo.remote || "origin");
+        var url = ccRedactRemoteUrl(pushInfo.remote_url || "");
+        return url ? "已推送到 " + remote + " · " + url : "已推送到 " + remote;
+      }
+      return "推送失败";
+    }
+
+    var CC_PERSIST_VER = 1;
+    var CC_UI_REV = "2026-09-10o-cc-contract";
+
+    function ccBlockCallId(block, callIdProp) {
+      if (callIdProp != null && String(callIdProp).trim()) return String(callIdProp).trim();
+      if (!block) return "";
+      var nested = block.call && typeof block.call === "object" ? block.call : null;
+      return String(
+        block.callId ||
+          block.toolCallId ||
+          (nested && (nested.callId || nested.toolCallId || nested.id)) ||
+          block.id ||
+          "",
+      ).trim();
+    }
+
+    function ccBlockSessionId(block, sessionId) {
+      return String(
+        sessionId ||
+          (block &&
+            (block.threadId ||
+              block.thread_id ||
+              block.sessionId ||
+              block.session_id ||
+              block.conversationId ||
+              "")) ||
+          "",
+      ).trim();
+    }
+
+    function ccPersistKey(block, sessionId, callIdProp) {
+      var callId = ccBlockCallId(block, callIdProp);
+      var sid = ccBlockSessionId(block, sessionId);
+      if (callId && sid) return "wb-cc-card:" + sid + ":" + callId;
+      if (callId) return "wb-cc-card:call:" + callId;
+      if (sid) return "wb-cc-card:session:" + sid + ":lone";
+      return "wb-cc-card:anon";
+    }
+
+    function ccPersistKeyAliases(block, sessionId, callIdProp) {
+      var callId = ccBlockCallId(block, callIdProp);
+      var sid = ccBlockSessionId(block, sessionId);
+      var keys = [ccPersistKey(block, sessionId, callIdProp)];
+      if (callId) {
+        keys.push("wb-cc-card:call:" + callId, "wb-cc-card:block:" + callId);
+        if (sid) keys.push("wb-cc-card:" + sid + ":" + callId);
+      } else if (sid) {
+        keys.push("wb-cc-card:" + sid, "wb-cc-card:session:" + sid + ":lone");
+      } else {
+        keys.push("wb-cc-card:anon");
+      }
+      var uniq = [];
+      var seen = {};
+      keys.forEach(function (k) {
+        if (!k || seen[k]) return;
+        seen[k] = true;
+        uniq.push(k);
+      });
+      return uniq;
+    }
+
+    function ccPersistBelongsToCall(saved, callId) {
+      if (!saved || typeof saved !== "object") return false;
+      var cid = String(callId || "").trim();
+      if (!cid) return false;
+      var savedCid = String(saved.callId || "").trim();
+      if (!savedCid) return false;
+      return savedCid === cid;
+    }
+
+    /**
+     * 工具 meta 永远是 cc-pick，不能据此判定「必须回选目录」。
+     * 仅当：无本 callId 绑定进度，且当前确是 pick 卡 → 才停在 HITL。
+     */
+    function ccPickMustStayPick(wb, ui, saved, callId) {
+      var cid = String(callId || "").trim();
+      if (saved && cid && ccPersistBelongsToCall(saved, callId)) {
+        var phase = String(saved.phase || "");
+        if (
+          phase === "done" ||
+          phase === "confirm" ||
+          phase === "blocked" ||
+          phase === "files" ||
+          phase === "gating" ||
+          saved.jobId
+        ) {
+          return false;
+        }
+      }
+      var isPick =
+        (ui && String(ui.kind || "") === "pick") ||
+        (wb && wb.t === "cc-pick");
+      if (!isPick && wb && wb.t && String(wb.t).indexOf("cc-") === 0 && wb.t !== "cc-pick") {
+        return false;
+      }
+      if (!isPick && wb && wb.t) return false;
+      if (!saved) return true;
+      if (!cid) return true;
+      return !ccPersistBelongsToCall(saved, callId);
+    }
+
+    function ccPersistScanByCallId(callId) {
+      var cid = String(callId || "").trim();
+      if (!cid) return null;
+      var best = null;
+      try {
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (!k || k.indexOf("wb-cc-card:") !== 0) continue;
+          var hitKey =
+            k === "wb-cc-card:call:" + cid ||
+            k === "wb-cc-card:block:" + cid ||
+            k.slice(-cid.length - 1) === ":" + cid;
+          var o = null;
+          try {
+            o = ccPersistNormalize(JSON.parse(localStorage.getItem(k) || "null"));
+          } catch (e1) {
+            continue;
+          }
+          if (!o) continue;
+          if (!hitKey && String(o.callId || "") !== cid) continue;
+          if (
+            !(
+              o.phase === "done" ||
+              o.phase === "confirm" ||
+              o.phase === "blocked" ||
+              o.phase === "files" ||
+              o.phase === "gating" ||
+              o.jobId
+            )
+          ) {
+            continue;
+          }
+          if (!best || Number(o.at || 0) > Number(best.at || 0)) best = o;
+        }
+      } catch (e2) {}
+      return best;
+    }
+
+    function ccPersistNormalize(o) {
+      if (!o || typeof o !== "object") return null;
+      if (Number(o.v || 0) < 1) return null;
+      return o;
+    }
+
+    function ccPersistLoad(key) {
+      try {
+        var raw = localStorage.getItem(key);
+        if (!raw) return null;
+        return ccPersistNormalize(JSON.parse(raw));
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function ccPersistLoadForCard(block, sessionId, callIdProp) {
+      try {
+        var callId = ccBlockCallId(block, callIdProp);
+        var key = ccPersistKey(block, sessionId, callIdProp);
+        var aliases = ccPersistKeyAliases(block, sessionId, callIdProp);
+        for (var i = 0; i < aliases.length; i++) {
+          var hit = ccPersistLoad(aliases[i]);
+          if (
+            hit &&
+            ccPersistBelongsToCall(hit, callId) &&
+            (hit.phase === "done" ||
+              hit.phase === "confirm" ||
+              hit.phase === "blocked" ||
+              hit.phase === "files" ||
+              hit.phase === "gating" ||
+              hit.jobId)
+          ) {
+            return { key: key, saved: hit, migrateFrom: aliases[i] !== key ? aliases[i] : "" };
+          }
+        }
+        var scanned = ccPersistScanByCallId(callId);
+        if (scanned && ccPersistBelongsToCall(scanned, callId)) {
+          return { key: key, saved: scanned, migrateFrom: "" };
+        }
+        return { key: key, saved: null };
+      } catch (eLoad) {
+        return { key: ccPersistKey(block, sessionId, callIdProp), saved: null };
+      }
+    }
+
+    function ccPersistSave(key, data) {
+      try {
+        var prev = null;
+        try {
+          prev = JSON.parse(localStorage.getItem(key) || "null");
+        } catch (ePrev) {}
+        if (
+          prev &&
+          Number(prev.v || 0) >= 1 &&
+          prev.phase === "done" &&
+          data &&
+          data.phase === "dir" &&
+          !data.forceReset
+        ) {
+          return;
+        }
+        var payload = Object.assign({ v: CC_PERSIST_VER, at: Date.now() }, data || {});
+        if (prev && Number(prev.v || 0) >= 1 && (payload.phase === "done" || prev.phase === "done")) {
+          if (!payload.commitDetail && prev.commitDetail) payload.commitDetail = prev.commitDetail;
+          if (!payload.result && prev.result) payload.result = prev.result;
+          if (!payload.jobId && prev.jobId) payload.jobId = prev.jobId;
+        }
+        if (payload.commitDetail) {
+          payload.commitDetail = ccSanitizeCommitDetail(payload.commitDetail);
+        }
+        if (payload.lastPush && typeof payload.lastPush === "object") {
+          payload.lastPush = Object.assign({}, payload.lastPush, {
+            remote_url: ccRedactRemoteUrl(payload.lastPush.remote_url || ""),
+          });
+        }
+        localStorage.setItem(key, JSON.stringify(payload));
+        if (payload.jobId && payload.phase === "done") {
+          try {
+            localStorage.setItem(
+              "wb-cc-job:" + String(payload.jobId),
+              JSON.stringify({
+                v: CC_PERSIST_VER,
+                at: Date.now(),
+                jobId: payload.jobId,
+                callId: payload.callId || "",
+                commitDetail: payload.commitDetail || null,
+                result: payload.result || "",
+                lastPush: payload.lastPush,
+              }),
+            );
+          } catch (eJob) {}
+        }
+      } catch (e0) {}
+    }
+
+    function ccPersistSaveCard(block, sessionId, callIdProp, data) {
+      var callId = ccBlockCallId(block, callIdProp) || (data && data.callId) || "";
+      var aliases = ccPersistKeyAliases(block, sessionId, callIdProp);
+      var payload = Object.assign({}, data || {}, {
+        callId: callId,
+        sessionId: ccBlockSessionId(block, sessionId) || (data && data.sessionId) || "",
+      });
+      aliases.forEach(function (k) {
+        ccPersistSave(k, payload);
+      });
+      if (callId) {
+        var sid = ccBlockSessionId(block, sessionId);
+        ["wb-cc-card:anon"]
+          .concat(sid ? ["wb-cc-card:" + sid, "wb-cc-card:session:" + sid + ":lone"] : [])
+          .forEach(function (sharedKey) {
+            try {
+              var old = ccPersistLoad(sharedKey);
+              if (old && (old.phase === "done" || old.jobId)) {
+                localStorage.removeItem(sharedKey);
+              }
+            } catch (eClr) {}
+          });
+      }
+      return aliases[0];
+    }
+
+    function ccPersistClearCard(block, sessionId, callIdProp) {
+      ccPersistKeyAliases(block, sessionId, callIdProp).forEach(function (k) {
+        try {
+          localStorage.removeItem(k);
+        } catch (e1) {}
+      });
+    }
+
+    function ccDetailFromEngineJob(job) {
+      if (!job || typeof job !== "object") return null;
+      var cr = job.commit_result || {};
+      var pushInfo = cr.push || {};
+      var st = String(job.status || "");
+      var ok = st === "done" && !!cr.commit;
+      var pushRetry =
+        st === "done" &&
+        !!cr.commit &&
+        job.push !== false &&
+        pushInfo &&
+        !pushInfo.ok;
+      return {
+        ok: ok && !pushRetry,
+        job_id: job.id,
+        workspace: job.workspace,
+        message: job.message || cr.message || "",
+        files: job.files || cr.files || [],
+        commit_result: cr,
+        push_retry_needed: pushRetry,
+        status: st,
+      };
+    }
+
     function CodeCommitBeginCard(props) {
       ensureCss();
       var block = props.block;
+      var toolCallId = String(props.callId || ccBlockCallId(block, "") || "").trim();
       var wb = useMemo(function () {
         return readMeta(block);
       }, [block]);
       var ui = (wb && wb.ui) || {};
       var dshCwd = resolveDshCwd(props);
+      var persistBoot = useMemo(
+        function () {
+          return ccPersistLoadForCard(block, props.sessionId, toolCallId);
+        },
+        [block, props.sessionId, toolCallId],
+      );
+      var persistKey = persistBoot.key;
+      var bootSavedRaw =
+        persistBoot.saved && ccPersistBelongsToCall(persistBoot.saved, toolCallId)
+          ? persistBoot.saved
+          : null;
+      var bootSaved = null;
+      if (bootSavedRaw && !ccPickMustStayPick(wb, ui, bootSavedRaw, toolCallId)) {
+        bootSaved = bootSavedRaw;
+      }
 
-      var _phase = useState("dir"); // dir | files | gating | blocked | confirm | done
+      var _phase = useState(function () {
+        return (bootSaved && bootSaved.phase) || "dir";
+      }); // dir | files | gating | blocked | confirm | done
       var phase = _phase[0];
       var setPhase = _phase[1];
-      var _ws = useState(initialWorkspace(props, ui));
+      var _ws = useState(function () {
+        return (bootSaved && bootSaved.workspace) || initialWorkspace(props, ui);
+      });
       var workspace = _ws[0];
       var setWorkspace = _ws[1];
-      var _branch = useState(String(ui.work_branch || ""));
+      var _branch = useState(function () {
+        return (bootSaved && bootSaved.branch) || String(ui.work_branch || "");
+      });
       var branch = _branch[0];
       var setBranch = _branch[1];
-      var _branchHint = useState(String(ui.branch_hint || ""));
+      var _branchHint = useState(function () {
+        return (bootSaved && bootSaved.branchHint) || String(ui.branch_hint || "");
+      });
       var branchHint = _branchHint[0];
       var setBranchHint = _branchHint[1];
       var _err = useState("");
@@ -1124,36 +1765,198 @@ window.__ModuleLoader__.load({
       var _busy = useState(false);
       var busy = _busy[0];
       var setBusy = _busy[1];
-      var _files = useState([]);
+      var _files = useState(function () {
+        return (bootSaved && bootSaved.files) || [];
+      });
       var files = _files[0];
       var setFiles = _files[1];
-      var _selected = useState({});
+      var _selected = useState(function () {
+        return (bootSaved && bootSaved.selected) || {};
+      });
       var selected = _selected[0];
       var setSelected = _selected[1];
-      var _draft = useState("");
+      var _draft = useState(function () {
+        return (bootSaved && bootSaved.draft) || "";
+      });
       var draft = _draft[0];
       var setDraft = _draft[1];
-      var _push = useState(ui.default_push !== false);
+      var _push = useState(function () {
+        return bootSaved && bootSaved.push != null ? !!bootSaved.push : ui.default_push !== false;
+      });
       var push = _push[0];
       var setPush = _push[1];
-      var _jobId = useState("");
+      var _jobId = useState(function () {
+        return (bootSaved && bootSaved.jobId) || "";
+      });
       var jobId = _jobId[0];
       var setJobId = _jobId[1];
-      var _findings = useState([]);
+      var _findings = useState(function () {
+        return (bootSaved && bootSaved.findings) || [];
+      });
       var findings = _findings[0];
       var setFindings = _findings[1];
-      var _summary = useState("");
+      var _summary = useState(function () {
+        return (bootSaved && bootSaved.summary) || "";
+      });
       var summary = _summary[0];
       var setSummary = _summary[1];
-      var _result = useState("");
+      var _result = useState(function () {
+        return (bootSaved && bootSaved.result) || "";
+      });
       var result = _result[0];
       var setResult = _result[1];
+      var _commitDetail = useState(function () {
+        return (bootSaved && bootSaved.commitDetail) || null;
+      });
+      var commitDetail = _commitDetail[0];
+      var setCommitDetail = _commitDetail[1];
+      var _lastPush = useState(function () {
+        return bootSaved && bootSaved.lastPush != null ? !!bootSaved.lastPush : true;
+      });
+      var lastPush = _lastPush[0];
+      var setLastPush = _lastPush[1];
+      var restoreOnceRef = useRef(false);
 
       var suggestions = Array.isArray(ui.suggestions) ? ui.suggestions : [];
+
+      function ccSnapshotPersist(extra) {
+        if (phase === "dir" && !(extra && extra.forceReset)) return;
+        var cidSave = ccResolveCallId();
+        ccPersistSaveCard(
+          block,
+          props.sessionId,
+          cidSave,
+          Object.assign(
+            {
+              phase: phase,
+              callId: cidSave,
+              sessionId: ccBlockSessionId(block, props.sessionId),
+              workspace: workspace,
+              branch: branch,
+              branchHint: branchHint,
+              files: files,
+              selected: selected,
+              draft: draft,
+              push: push,
+              jobId: jobId,
+              findings: findings,
+              summary: summary,
+              result: result,
+              commitDetail: commitDetail,
+              lastPush: lastPush,
+            },
+            extra || {},
+          ),
+        );
+      }
+
+      function ccResetCard() {
+        ccPersistClearCard(block, props.sessionId, toolCallId);
+        try {
+          var jidClr = String(jobId || (commitDetail && commitDetail.job_id) || "").trim();
+          if (jidClr) localStorage.removeItem("wb-cc-job:" + jidClr);
+        } catch (eClr) {}
+        setPhase("dir");
+        setErr("");
+        setResult("");
+        setSummary("");
+        setFindings([]);
+        setCommitDetail(null);
+        setJobId("");
+        setFiles([]);
+        setSelected({});
+      }
+
+      function ccResolveCallId() {
+        return String(props.callId || ccBlockCallId(block, toolCallId) || toolCallId || "").trim();
+      }
+
+      useEffect(
+        function () {
+          if (
+            phase === "files" ||
+            phase === "confirm" ||
+            phase === "blocked" ||
+            phase === "done" ||
+            phase === "gating"
+          ) {
+            ccSnapshotPersist();
+          }
+        },
+        [
+          phase,
+          workspace,
+          branch,
+          files,
+          selected,
+          draft,
+          push,
+          jobId,
+          findings,
+          summary,
+          result,
+          commitDetail,
+          lastPush,
+        ],
+      );
+
+      useEffect(
+        function () {
+          if (restoreOnceRef.current) return;
+          restoreOnceRef.current = true;
+          var cid = ccResolveCallId();
+          if (!cid) return;
+          if (ccPickMustStayPick(wb, ui, bootSavedRaw, cid)) {
+            var sidClr = ccBlockSessionId(block, props.sessionId);
+            ["wb-cc-card:anon"]
+              .concat(
+                sidClr ? ["wb-cc-card:" + sidClr, "wb-cc-card:session:" + sidClr + ":lone"] : [],
+              )
+              .forEach(function (sharedKey) {
+                try {
+                  localStorage.removeItem(sharedKey);
+                } catch (eRm) {}
+              });
+            return;
+          }
+          var saved = bootSaved;
+          if (!saved || saved.phase !== "done" || !saved.jobId) return;
+          if (saved.commitDetail) return;
+          try {
+            var snapRaw = localStorage.getItem("wb-cc-job:" + String(saved.jobId));
+            if (snapRaw) {
+              var snap = JSON.parse(snapRaw);
+              if (snap && snap.commitDetail) {
+                setCommitDetail(snap.commitDetail);
+                if (snap.result) setResult(String(snap.result));
+                if (snap.lastPush != null) setLastPush(!!snap.lastPush);
+                return;
+              }
+            }
+          } catch (eSnap) {}
+          fetch(engineBase() + "/api/code-commit/jobs/" + encodeURIComponent(String(saved.jobId)))
+            .then(function (r) {
+              return r.json();
+            })
+            .then(function (jd) {
+              if (!jd || !jd.ok || !jd.job) return;
+              var rebuilt = ccDetailFromEngineJob(jd.job);
+              if (!rebuilt) return;
+              setCommitDetail(rebuilt);
+              ccPersistSaveCard(block, props.sessionId, toolCallId, Object.assign({}, saved, {
+                commitDetail: rebuilt,
+                phase: "done",
+              }));
+            })
+            .catch(function () {});
+        },
+        [persistKey, toolCallId],
+      );
 
       // 目录预填（DSH 工作区 / 上次路径）时自动识别当前分支；须在任何 early return 之前挂 effect。
       useEffect(
         function () {
+          if (phase === "done") return;
           var ws = String(workspace || "").trim();
           if (dshCwd && !ws) {
             setWorkspace(dshCwd);
@@ -1478,17 +2281,40 @@ window.__ModuleLoader__.load({
           .then(function (pack) {
             var d = pack.d || {};
             setBusy(false);
+            setLastPush(!!doPush);
+            setCommitDetail(d);
             setPhase("done");
+            var resultText = "";
             if (d.ok) {
-              setResult(d.reply || "提交成功" + (doPush ? "并已推送" : "（仅本地）"));
+              resultText = d.reply || "提交成功" + (doPush ? "并已推送" : "（仅本地）");
+              setResult(resultText);
               setErr("");
             } else if (d.push_retry_needed) {
-              setResult(d.reply || "本地已 commit，推送失败，可稍后重试推送");
+              resultText = d.reply || "本地已 commit，推送失败，可稍后重试推送";
+              setResult(resultText);
               setErr(d.detail || d.reply || "push 失败");
             } else {
               setResult("");
               setErr(d.detail || d.reply || "确认失败");
             }
+            ccPersistSaveCard(block, props.sessionId, ccResolveCallId(), {
+              phase: "done",
+              callId: ccResolveCallId(),
+              sessionId: ccBlockSessionId(block, props.sessionId),
+              workspace: workspace,
+              branch: branch,
+              branchHint: branchHint,
+              files: files,
+              selected: selected,
+              draft: draft,
+              push: push,
+              jobId: jid,
+              findings: findings,
+              summary: summary,
+              result: resultText,
+              commitDetail: d,
+              lastPush: !!doPush,
+            });
           })
           .catch(function (e) {
             setBusy(false);
@@ -1515,31 +2341,179 @@ window.__ModuleLoader__.load({
         );
       }
 
+      function doPushRetry() {
+        var jid = String((commitDetail && commitDetail.job_id) || jobId || "").trim();
+        if (!jid) {
+          setErr("缺少 job_id，无法重试推送");
+          return;
+        }
+        setBusy(true);
+        setErr("");
+        fetch(engineBase() + "/api/code-commit/push-retry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_id: jid }),
+        })
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (d) {
+            setBusy(false);
+            setCommitDetail(d);
+            var resultText = "";
+            if (d && d.ok) {
+              resultText = d.reply || "推送成功";
+              setResult(resultText);
+              setErr("");
+              setLastPush(true);
+            } else {
+              resultText = (d && d.reply) || "推送仍失败";
+              setResult(resultText);
+              setErr((d && (d.detail || d.hint || d.reply)) || "推送失败");
+            }
+            ccPersistSaveCard(block, props.sessionId, toolCallId, {
+              phase: "done",
+              callId: toolCallId,
+              jobId: jid,
+              commitDetail: d,
+              result: resultText,
+              lastPush: !!(d && d.ok),
+              workspace: workspace,
+              branch: branch,
+              files: files,
+              selected: selected,
+              draft: draft,
+            });
+          })
+          .catch(function (e) {
+            setBusy(false);
+            setErr("重试推送失败：" + (e && e.message ? e.message : e));
+          });
+      }
+
       if (phase === "done") {
+        var detail = commitDetail || {};
+        var cr = detail.commit_result || {};
+        var pushInfo = cr.push || {};
+        var didPush = lastPush;
+        var pushRetry = !!(detail.push_retry_needed || (cr.commit && pushInfo && !pushInfo.ok && didPush));
+        var okCommit = !!(detail.ok || cr.ok || cr.commit);
+        var fileList = Array.isArray(detail.files) && detail.files.length
+          ? detail.files
+          : Array.isArray(cr.files) && cr.files.length
+            ? cr.files
+            : selectedList();
+        var msgText = String(detail.message || cr.message || draft || "").trim();
+        var wsPath = String(detail.workspace || workspace || "").trim();
+        var branchName = String(cr.branch || branch || "").trim();
+        var commitSha = String(cr.commit || "").trim();
+        var title = pushRetry
+          ? "本地已提交，推送未完成"
+          : didPush && pushInfo && pushInfo.ok
+            ? "已提交并推送到远程"
+            : okCommit
+              ? didPush
+                ? "已提交"
+                : "已本地提交（未推送）"
+              : "提交结束";
+        var bannerClass = pushRetry ? "wb-cr-done-banner warn" : okCommit ? "wb-cr-done-banner ok" : "wb-cr-done-banner warn";
+        var remoteLine = ccCommitRemoteLabel(didPush, pushInfo);
+        var skippedNote = cr.skipped ? String(cr.message || "本批无新变更或已跳过 commit") : "";
+        var kvKids = [
+          h("dt", null, "项目"),
+          h("dd", { title: wsPath }, ccTailName(wsPath)),
+        ];
+        if (wsPath) {
+          kvKids.push(h("dt", null, "路径"), h("dd", { title: wsPath }, wsPath));
+        }
+        kvKids.push(
+          h("dt", null, "分支"),
+          h("dd", null, branchName || "—"),
+          h("dt", null, "Commit"),
+          h("dd", null, commitSha || "—"),
+          h("dt", null, "推送"),
+          h("dd", null, remoteLine),
+        );
+        if (pushInfo && pushInfo.remote_url && didPush && pushInfo.ok) {
+          kvKids.push(h("dt", null, "远程"), h("dd", null, String(pushInfo.remote_url)));
+        }
+        if (jobId || detail.job_id) {
+          kvKids.push(h("dt", null, "任务"), h("dd", null, String(detail.job_id || jobId)));
+        }
+        if (msgText) {
+          kvKids.push(h("dt", null, "说明"), h("dd", null, msgText));
+        }
+        kvKids.push(
+          h("dt", null, "文件"),
+          h("dd", null, fileList.length ? fileList.length + " 个" : "—"),
+        );
         return h(
           "div",
           { className: "wb-cr" },
-          head("完成"),
+          head(
+            (pushRetry ? "推送待重试" : okCommit ? "完成" : "结束") +
+              " · " +
+              CC_UI_REV,
+          ),
           h(
             "div",
             { className: "wb-cr-body" },
-            result ? h("pre", { className: "wb-cr-progress" }, result) : null,
-            err ? h("p", { className: "wb-cr-err" }, err) : null,
+            h(
+              "div",
+              { className: bannerClass },
+              h("span", { className: "wb-cr-done-icon" }, pushRetry ? "!" : okCommit ? "✓" : "·"),
+              h(
+                "div",
+                null,
+                h("strong", null, title),
+                result && result !== title ? h("p", { className: "wb-cr-note", style: { margin: "4px 0 0" } }, result) : null,
+              ),
+            ),
+            h("dl", { className: "wb-cr-kv" }, kvKids),
+            fileList.length
+              ? h(
+                  "div",
+                  { className: "wb-cr-files" },
+                  h("div", { className: "wb-cr-label" }, "本批提交文件"),
+                  fileList.slice(0, 40).map(function (f, i) {
+                    return h("div", { key: i, className: "wb-cr-file" }, h("span", null, String(f)));
+                  }),
+                  fileList.length > 40
+                    ? h("p", { className: "wb-cr-note" }, "…另有 " + (fileList.length - 40) + " 个文件")
+                    : null,
+                )
+              : null,
+            skippedNote ? h("p", { className: "wb-cr-warn" }, skippedNote) : null,
+            pushRetry && (pushInfo.error || pushInfo.raw_error)
+              ? h(
+                  "p",
+                  { className: "wb-cr-err" },
+                  String(pushInfo.error || pushInfo.raw_error || "").slice(0, 320),
+                )
+              : null,
+            err && !pushRetry ? h("p", { className: "wb-cr-err" }, err) : null,
+            pushRetry && err ? h("p", { className: "wb-cr-warn" }, err) : null,
             h(
               "div",
               { className: "wb-cr-actions" },
+              pushRetry
+                ? h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "wb-cr-btn primary",
+                      disabled: busy,
+                      onClick: doPushRetry,
+                    },
+                    busy ? "推送中…" : "重试推送",
+                  )
+                : null,
               h(
                 "button",
                 {
                   type: "button",
                   className: "wb-cr-btn",
-                  onClick: function () {
-                    setPhase("dir");
-                    setErr("");
-                    setResult("");
-                    setSummary("");
-                    setFindings([]);
-                  },
+                  onClick: ccResetCard,
                 },
                 "重新选择",
               ),
@@ -1778,7 +2752,7 @@ window.__ModuleLoader__.load({
       return h(
         "div",
         { className: "wb-cr" },
-        head("选择目录 · 下一步勾选文件"),
+        head("选择目录 · 下一步勾选文件 · " + CC_UI_REV),
         h(
           "div",
           { className: "wb-cr-body" },
@@ -1882,9 +2856,71 @@ window.__ModuleLoader__.load({
       "sync-del": "sync",
     };
     /** 持久化版本：升主版本时须兼容读取旧版，禁止 prune 直接删光导致刷新回表单。 */
-    var CD_PERSIST_VER = 3;
+    var CD_PERSIST_VER = 4;
     var CD_PERSIST_MIN_VER = 2;
-    var CD_UI_REV = "2026-09-10j-hitl";
+    var CD_UI_REV = "2026-09-10q-review-fix";
+    var CD_PERSIST_MAX_STREAM = 100000;
+    var CD_PERSIST_MAX_DELIVERY = 80000;
+    var CD_PERSIST_MAX_THINK = 24000;
+
+    function cdPersistClip(text, maxLen) {
+      var s = String(text || "");
+      if (!s) return "";
+      var n = maxLen || CD_PERSIST_MAX_STREAM;
+      return s.length > n ? s.slice(-n) : s;
+    }
+
+    /** 完成态禁止用空正文覆盖已有过程/终稿（刷新丢字主因）。 */
+    function cdPersistMergeBody(prev, payload) {
+      if (!payload || typeof payload !== "object") return payload;
+      if (!prev || typeof prev !== "object") return payload;
+      var phase = String(payload.phase || "");
+      if (phase !== "done" && phase !== "running") return payload;
+      ["streamText", "deliveryText", "thinkingText", "result"].forEach(function (field) {
+        if (!payload[field] && prev[field]) payload[field] = prev[field];
+      });
+      if ((!payload.steps || !payload.steps.length) && prev.steps && prev.steps.length) {
+        payload.steps = prev.steps;
+      }
+      return payload;
+    }
+
+    function cdPersistLoadJobSnapshot(jobId) {
+      var jid = String(jobId || "").trim();
+      if (!jid) return null;
+      try {
+        var raw = localStorage.getItem("wb-cd-job:" + jid);
+        if (!raw) return null;
+        var o = cdPersistNormalize(JSON.parse(raw));
+        if (!o || String(o.jobId || "") !== jid) return null;
+        return o;
+      } catch (eJ) {
+        return null;
+      }
+    }
+
+    /** 卡级持久化缺正文时，从 job 快照补全（刷新恢复）。 */
+    function cdPersistEnrichCardSaved(saved) {
+      if (!saved || typeof saved !== "object") return saved;
+      var jid = String(saved.jobId || "").trim();
+      if (!jid) return saved;
+      var snap = cdPersistLoadJobSnapshot(jid);
+      if (!snap) return saved;
+      // 有过程正文时也要补缺终稿/步骤等（避免刷新后「有过程无结论」）
+      return Object.assign({}, saved, {
+        streamText: saved.streamText || snap.streamText || "",
+        deliveryText: saved.deliveryText || snap.deliveryText || "",
+        thinkingText: saved.thinkingText || snap.thinkingText || "",
+        thinkingMs: saved.thinkingMs != null ? saved.thinkingMs : snap.thinkingMs,
+        result: saved.result || snap.result || "",
+        steps: saved.steps && saved.steps.length ? saved.steps : snap.steps,
+        synced: saved.synced && saved.synced.length ? saved.synced : snap.synced,
+        deferred: saved.deferred && saved.deferred.length ? saved.deferred : snap.deferred,
+        deleted: saved.deleted && saved.deleted.length ? saved.deleted : snap.deleted,
+        runtimeHint: saved.runtimeHint || snap.runtimeHint || "",
+        aliveHint: saved.aliveHint || snap.aliveHint || "",
+      });
+    }
     var CD_ICON_COPY =
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
     var CD_ICON_DOWNLOAD =
@@ -1994,32 +3030,34 @@ window.__ModuleLoader__.load({
 
     /**
      * 新开 mes_code_dev_begin（pick）必须停在 HITL。
-     * 返回 true = 丢弃 done/running 持久化，强制表单。
-     * 仅当本 callId 已绑定 jobId（用户点过确认后刷新）才允许恢复完成态。
+     * 返回 true = 丢弃进度、强制表单。
+     * 契约：本 callId 已落盘 done/running/options/propose（或已绑 jobId）→ 允许恢复；
+     * 不以 meta 仍为 cd-pick 为由回表单。
      */
     function cdPickMustStayHitl(wb, ui, saved, callId) {
+      var cid = String(callId || "").trim();
+      if (saved && cid && cdPersistBelongsToCall(saved, callId)) {
+        var phase = String(saved.phase || "");
+        if (
+          phase === "done" ||
+          phase === "running" ||
+          phase === "options" ||
+          phase === "propose" ||
+          saved.jobId
+        ) {
+          return false;
+        }
+      }
       var isPick =
         (ui && String(ui.kind || "") === "pick") ||
         (wb && (wb.t === "cd-pick" || wb.t === "cd-none"));
-      // meta 尚未到位时也按 pick 保守处理：禁止直接出完成态
       if (!isPick && wb && wb.t && String(wb.t).indexOf("cd-") === 0 && wb.t !== "cd-pick") {
         return false;
       }
       if (!isPick && wb && wb.t) return false;
       if (!saved) return true;
-      var phase = String(saved.phase || "");
-      if (phase === "done" || phase === "running" || saved.jobId) {
-        return !(
-          cdPersistBelongsToCall(saved, callId) &&
-          String(callId || "").trim() &&
-          String(saved.jobId || "").trim()
-        );
-      }
-      // options/propose：也必须同 callId
-      if (phase === "options" || phase === "propose") {
-        return !cdPersistBelongsToCall(saved, callId);
-      }
-      return false;
+      if (!cid) return true;
+      return !cdPersistBelongsToCall(saved, callId);
     }
 
     function cdPersistNormalize(o) {
@@ -2141,15 +3179,7 @@ window.__ModuleLoader__.load({
             }
             var at = Number(o.at || 0);
             if (at && now - at > maxAge) localStorage.removeItem(k);
-            else if (k.indexOf("wb-cd-card:") === 0 && o.phase === "done" && at && now - at > 10 * 60 * 1000) {
-              if (o.streamText || o.thinkingText) {
-                delete o.streamText;
-                delete o.thinkingText;
-                o.at = now;
-                o.v = CD_PERSIST_VER;
-                localStorage.setItem(k, JSON.stringify(o));
-              }
-            }
+            // 完成态保留正文供刷新；仅按 maxAge 整键淘汰，不再 10 分钟删 streamText
           } catch (e2) {
             try {
               localStorage.removeItem(k);
@@ -2178,10 +3208,15 @@ window.__ModuleLoader__.load({
         } catch (eGuard) {}
 
         var payload = Object.assign({ v: CD_PERSIST_VER, at: Date.now() }, data || {});
-        if (payload.phase === "done") {
-          delete payload.streamText;
-          delete payload.thinkingText;
-        }
+        try {
+          var prevBody = JSON.parse(localStorage.getItem(key) || "null");
+          if (prevBody && Number(prevBody.v || 0) >= CD_PERSIST_MIN_VER) {
+            payload = cdPersistMergeBody(prevBody, payload);
+          }
+        } catch (ePrev) {}
+        payload.streamText = cdPersistClip(payload.streamText, CD_PERSIST_MAX_STREAM);
+        payload.deliveryText = cdPersistClip(payload.deliveryText, CD_PERSIST_MAX_DELIVERY);
+        payload.thinkingText = cdPersistClip(payload.thinkingText, CD_PERSIST_MAX_THINK);
         localStorage.setItem(key, JSON.stringify(payload));
         if (payload.jobId) {
           try {
@@ -2194,25 +3229,40 @@ window.__ModuleLoader__.load({
                 phase: payload.phase,
                 jobId: payload.jobId,
                 callId: payload.callId || "",
+                sessionId: payload.sessionId || "",
                 workspace: payload.workspace || "",
+                streamText: payload.streamText || "",
+                deliveryText: payload.deliveryText || "",
+                thinkingText: payload.thinkingText || "",
+                thinkingMs: payload.thinkingMs,
+                result: payload.result || "",
+                steps: payload.steps || [],
+                synced: payload.synced || [],
+                deferred: payload.deferred || [],
+                deleted: payload.deleted || [],
+                runtimeHint: payload.runtimeHint || "",
+                aliveHint: payload.aliveHint || "",
+                elapsed: payload.elapsed,
               }),
             );
           } catch (eJob) {}
         }
         cdPersistPrune();
       } catch (e0) {
+        // 配额不足：进一步截断正文，禁止用空 body 覆盖已有 done（契约冻结）
         try {
           cdPersistPrune();
-          localStorage.setItem(
-            key,
-            JSON.stringify(
-              Object.assign({ v: CD_PERSIST_VER, at: Date.now() }, data || {}, {
-                streamText: undefined,
-                deliveryText: undefined,
-                thinkingText: undefined,
-              }),
-            ),
-          );
+          var slim = Object.assign({ v: CD_PERSIST_VER, at: Date.now() }, data || {});
+          slim.streamText = cdPersistClip(slim.streamText, 20000);
+          slim.deliveryText = cdPersistClip(slim.deliveryText, 12000);
+          slim.thinkingText = cdPersistClip(slim.thinkingText, 4000);
+          try {
+            var prevSlim = JSON.parse(localStorage.getItem(key) || "null");
+            if (prevSlim && Number(prevSlim.v || 0) >= CD_PERSIST_MIN_VER) {
+              slim = cdPersistMergeBody(prevSlim, slim);
+            }
+          } catch (eM) {}
+          localStorage.setItem(key, JSON.stringify(slim));
         } catch (e1) {}
       }
     }
@@ -4271,7 +5321,7 @@ window.__ModuleLoader__.load({
     function CodeDevBeginCard(props) {
       ensureCss();
       var block = props.block;
-      var toolCallId = String(props.callId || "").trim();
+      var toolCallId = String(props.callId || cdBlockCallId(block, "") || "").trim();
       var wb = useMemo(function () {
         return readMeta(block);
       }, [block]);
@@ -4284,10 +5334,10 @@ window.__ModuleLoader__.load({
         [block, props.sessionId, toolCallId],
       );
       var persistKey = persistBoot.key;
-      // 只恢复本 callId；pick 上的 done/running 仅允许「本卡已确认过」的 job 刷新恢复
+      // 只恢复本 callId；meta 仍为 pick 时，本卡已落盘进度仍恢复（四车道会话契约）
       var bootSavedRaw =
         persistBoot.saved && cdPersistBelongsToCall(persistBoot.saved, toolCallId)
-          ? persistBoot.saved
+          ? cdPersistEnrichCardSaved(persistBoot.saved)
           : null;
       var bootSaved = null;
       if (bootSavedRaw) {
@@ -4805,25 +5855,41 @@ window.__ModuleLoader__.load({
         var finished = false;
         var startedAt = Date.now() - (resume ? Math.max(0, Number(elapsed) || 0) * 1000 : 0);
         var lastFlush = 0;
+        /** 引擎 job.live_text 已是过程通道，禁止再走终稿路由（会把过程正文剥空）。 */
+        function applyJobProcessText(raw, keepPrev) {
+          var prev = String(keepPrev || streamAcc || "");
+          var t = cdStripExplorationFromProcess(
+            cdStripBoilerplate(String(raw || "")),
+          );
+          if (t) {
+            streamAcc = t;
+          } else if (prev) {
+            streamAcc = prev;
+          } else {
+            streamAcc = String(raw || "");
+          }
+          flushStream(true);
+        }
         function applyStreamPayload(raw) {
           var t = String(raw || "");
+          var prev = String(streamAcc || "");
           // 过程正文：有「说明方案」才拆终稿；否则整段当正文，避免流式过程被路由吃掉
           if (/说明方案|一句话结论/.test(t)) {
             var routed = cdRouteStreamChannels(t);
-            streamAcc = routed.process || cdStripAllCodeText(t);
+            streamAcc = routed.process || cdStripAllCodeText(t) || prev;
             if (routed.delivery) {
               deliveryAcc = routed.delivery;
               setDeliveryText(deliveryAcc);
             }
           } else {
-            streamAcc = cdStripAllCodeText(t) || t;
+            streamAcc = cdStripAllCodeText(t) || t || prev;
           }
           flushStream(true);
         }
         function applyJobSnapshot(job) {
           if (!job || typeof job !== "object") return;
           if (job.live_text != null) {
-            applyStreamPayload(String(job.live_text || ""));
+            applyJobProcessText(job.live_text, streamAcc);
           }
           if (job.delivery_text != null && String(job.delivery_text || "").trim()) {
             deliveryAcc = String(job.delivery_text || "");
@@ -4899,8 +5965,7 @@ window.__ModuleLoader__.load({
             if (ev.job.thinking_text) setThinkingText(cdDedupeThinkText(String(ev.job.thinking_text)));
             if (ev.job.thinking_duration_ms != null) setThinkingMs(ev.job.thinking_duration_ms);
             if (ev.job.live_text) {
-              // 终态仍走 applyStreamPayload：有终稿标记才拆；禁止把过程正文剥空
-              applyStreamPayload(String(ev.job.live_text || ""));
+              applyJobProcessText(ev.job.live_text, streamAcc);
             }
             if (ev.job.delivery_text) {
               deliveryAcc = String(ev.job.delivery_text);
@@ -5060,8 +6125,7 @@ window.__ModuleLoader__.load({
                         var job = (jd && jd.job) || jd || {};
                         var st = job.status || "";
                         if (job.live_text) {
-                          streamAcc = String(job.live_text);
-                          flushStream(true);
+                          applyJobProcessText(job.live_text, streamAcc);
                         }
                         if (job.delivery_text) {
                           deliveryAcc = String(job.delivery_text);
@@ -5123,7 +6187,9 @@ window.__ModuleLoader__.load({
           restoreOnceRef.current = true;
           var pack = cdPersistLoadForCard(block, props.sessionId, toolCallId);
           var savedRaw =
-            pack.saved && cdPersistBelongsToCall(pack.saved, toolCallId) ? pack.saved : null;
+            pack.saved && cdPersistBelongsToCall(pack.saved, toolCallId)
+              ? cdPersistEnrichCardSaved(pack.saved)
+              : null;
           var forceHitl = cdPickMustStayHitl(wb, ui, savedRaw, toolCallId);
           var saved = null;
           if (savedRaw && !forceHitl) saved = savedRaw;
@@ -5135,8 +6201,8 @@ window.__ModuleLoader__.load({
             saved = savedRaw;
           }
 
-          // pick 新卡：清共享键污染，停在 HITL，绝不 hydrate 完成 Job
-          if (forceHitl || (ui && ui.kind === "pick") || (wb && wb.t === "cd-pick") || !toolCallId) {
+          // 仅「真正的新 pick」停 HITL；本 callId 已有进度时继续 hydrate（契约）
+          if (forceHitl || !toolCallId) {
             var sidClr = cdBlockSessionId(block, props.sessionId);
             ["wb-cd-card:anon"]
               .concat(
@@ -5147,25 +6213,36 @@ window.__ModuleLoader__.load({
                   localStorage.removeItem(sharedKey);
                 } catch (eRm) {}
               });
-            if (forceHitl || !toolCallId) {
-              if (phase === "done" || phase === "running") {
-                setPhase(
-                  saved && (saved.phase === "options" || saved.phase === "propose")
-                    ? saved.phase
-                    : "form",
-                );
-                setJobId("");
-                setResult("");
-                setDeliveryText("");
-                setStreamText("");
-                setSteps(cdInitSteps());
-                setAliveHint("准备启动…");
-              }
-              if (saved && (saved.phase === "options" || saved.phase === "propose")) {
-                cdPersistSaveCard(block, props.sessionId, toolCallId, saved);
-              }
-              return;
+            if (phase === "done" || phase === "running") {
+              setPhase(
+                saved && (saved.phase === "options" || saved.phase === "propose")
+                  ? saved.phase
+                  : "form",
+              );
+              setJobId("");
+              setResult("");
+              setDeliveryText("");
+              setStreamText("");
+              setSteps(cdInitSteps());
+              setAliveHint("准备启动…");
             }
+            if (saved && (saved.phase === "options" || saved.phase === "propose")) {
+              cdPersistSaveCard(block, props.sessionId, toolCallId, saved);
+            }
+            return;
+          }
+          // pick meta 仍可能出现在已开工卡上：只清共享键污染，不打断恢复
+          if ((ui && ui.kind === "pick") || (wb && wb.t === "cd-pick")) {
+            var sidPick = cdBlockSessionId(block, props.sessionId);
+            ["wb-cd-card:anon"]
+              .concat(
+                sidPick ? ["wb-cd-card:" + sidPick, "wb-cd-card:session:" + sidPick + ":lone"] : [],
+              )
+              .forEach(function (sharedKey) {
+                try {
+                  localStorage.removeItem(sharedKey);
+                } catch (eRm2) {}
+              });
           }
 
           var jid =
@@ -5190,8 +6267,11 @@ window.__ModuleLoader__.load({
                 if (!jd || !jd.ok) return;
                 var job = jd.job || {};
                 var jobCall = String(job.ui_call_id || "").trim();
+                var savedBond =
+                  saved && String(saved.jobId || "") === String(foundId);
                 if (toolCallId && jobCall && jobCall !== toolCallId) return;
-                if (toolCallId && !jobCall) return;
+                // 无 ui_call_id 时：仅允许已持久化绑定的 job 恢复（防误挂历史 job）
+                if (toolCallId && !jobCall && !savedBond) return;
                 setJobId(foundId);
                 hydrateFromJob(job, jd);
                 cdPersistSaveCard(block, props.sessionId, toolCallId, {
@@ -5228,6 +6308,37 @@ window.__ModuleLoader__.load({
 
           if (jid) {
             hydrateJobId(jid);
+            return;
+          }
+
+          // 完成态但 localStorage 已剥正文：用 job 快照先填一版，再等引擎对齐
+          if (
+            saved &&
+            saved.jobId &&
+            (saved.phase === "done" || saved.phase === "running") &&
+            !saved.streamText &&
+            !saved.deliveryText
+          ) {
+            var snapOnly = cdPersistLoadJobSnapshot(saved.jobId);
+            if (snapOnly) {
+              hydrateFromJob(
+                {
+                  workspace: snapOnly.workspace,
+                  live_text: snapOnly.streamText,
+                  delivery_text: snapOnly.deliveryText,
+                  thinking_text: snapOnly.thinkingText,
+                  thinking_duration_ms: snapOnly.thinkingMs,
+                  synced_files: snapOnly.synced,
+                  deferred_files: snapOnly.deferred,
+                  deleted_files: snapOnly.deleted,
+                  runtime_hint: snapOnly.runtimeHint,
+                  status:
+                    snapOnly.phase === "running" ? "running" : "succeeded",
+                },
+                { reply: snapOnly.result },
+              );
+            }
+            hydrateJobId(String(saved.jobId));
             return;
           }
 
@@ -5594,11 +6705,26 @@ window.__ModuleLoader__.load({
           );
         }
         if (deferred && deferred.length) {
+          var deferWiring = deferred.some(function (f) {
+            var s = String(f || "").replace(/\\/g, "/");
+            return (
+              s.indexOf("frontend/src/config/") >= 0 ||
+              s.indexOf("frontend/src/router/") >= 0 ||
+              s.indexOf("frontend/src/layouts/") >= 0 ||
+              /reportFeatures|reportIcons|menu/i.test(s)
+            );
+          });
           bodyKids.push(
             h(
               "div",
               { className: "wb-cr-warn", style: { marginTop: 8 } },
-              "未同步 " + deferred.length + " 个文件：\n" + deferred.slice(0, 12).join("\n"),
+              (deferWiring
+                ? "⚠ 菜单/路由配置未同步到本机，浏览器可能看不到新菜单（勿信「已上菜单」交付文案）。请重新开工或扩大写范围。\n"
+                : "") +
+                "未同步 " +
+                deferred.length +
+                " 个文件：\n" +
+                deferred.slice(0, 12).join("\n"),
             ),
           );
         }
@@ -6001,15 +7127,143 @@ window.__ModuleLoader__.load({
       ));
     }
 
+    var CDP_UI_REV = "2026-09-10o-cdp-session";
+    var CDP_PERSIST_VER = 1;
+
+    function cdpBlockCallId(block, callIdProp) {
+      if (callIdProp != null && String(callIdProp).trim()) return String(callIdProp).trim();
+      if (!block) return "";
+      var nested = block.call && typeof block.call === "object" ? block.call : null;
+      return String(
+        block.callId ||
+          block.toolCallId ||
+          (nested && (nested.callId || nested.toolCallId || nested.id)) ||
+          block.id ||
+          "",
+      ).trim();
+    }
+
+    function cdpBlockSessionId(block, sessionId) {
+      return String(
+        sessionId ||
+          (block &&
+            (block.threadId ||
+              block.thread_id ||
+              block.sessionId ||
+              block.session_id ||
+              block.conversationId ||
+              "")) ||
+          "",
+      ).trim();
+    }
+
+    function cdpPersistKey(block, sessionId, callIdProp) {
+      var callId = cdpBlockCallId(block, callIdProp);
+      var sid = cdpBlockSessionId(block, sessionId);
+      if (callId && sid) return "wb-cdp-card:" + sid + ":" + callId;
+      if (callId) return "wb-cdp-card:call:" + callId;
+      if (sid) return "wb-cdp-card:session:" + sid + ":lone";
+      return "wb-cdp-card:anon";
+    }
+
+    function cdpPersistKeyAliases(block, sessionId, callIdProp) {
+      var callId = cdpBlockCallId(block, callIdProp);
+      var sid = cdpBlockSessionId(block, sessionId);
+      var keys = [cdpPersistKey(block, sessionId, callIdProp)];
+      if (callId) {
+        keys.push("wb-cdp-card:call:" + callId, "wb-cdp-card:block:" + callId);
+        if (sid) keys.push("wb-cdp-card:" + sid + ":" + callId);
+      } else if (sid) {
+        keys.push("wb-cdp-card:" + sid, "wb-cdp-card:session:" + sid + ":lone");
+      } else {
+        keys.push("wb-cdp-card:anon");
+      }
+      var uniq = [];
+      var seen = {};
+      keys.forEach(function (k) {
+        if (!k || seen[k]) return;
+        seen[k] = true;
+        uniq.push(k);
+      });
+      return uniq;
+    }
+
+    function cdpPersistBelongsToCall(saved, callId) {
+      if (!saved || typeof saved !== "object") return false;
+      var cid = String(callId || "").trim();
+      if (!cid) return false;
+      return String(saved.callId || "").trim() === cid;
+    }
+
+    function cdpPersistNormalize(o) {
+      if (!o || typeof o !== "object") return null;
+      if (Number(o.v || 0) < 1) return null;
+      return o;
+    }
+
+    function cdpPersistLoad(key) {
+      try {
+        var raw = localStorage.getItem(key);
+        if (!raw) return null;
+        return cdpPersistNormalize(JSON.parse(raw));
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function cdpPersistLoadForCard(block, sessionId, callIdProp) {
+      try {
+        var callId = cdpBlockCallId(block, callIdProp);
+        var key = cdpPersistKey(block, sessionId, callIdProp);
+        var aliases = cdpPersistKeyAliases(block, sessionId, callIdProp);
+        for (var i = 0; i < aliases.length; i++) {
+          var hit = cdpPersistLoad(aliases[i]);
+          if (hit && cdpPersistBelongsToCall(hit, callId) && (hit.done || hit.phase === "done")) {
+            return { key: key, saved: hit };
+          }
+        }
+        return { key: key, saved: null };
+      } catch (eLoad) {
+        return { key: cdpPersistKey(block, sessionId, callIdProp), saved: null };
+      }
+    }
+
+    function cdpPersistSaveCard(block, sessionId, callIdProp, data) {
+      var callId = cdpBlockCallId(block, callIdProp) || (data && data.callId) || "";
+      if (!callId) return "";
+      var aliases = cdpPersistKeyAliases(block, sessionId, callIdProp);
+      var payload = Object.assign({ v: CDP_PERSIST_VER, at: Date.now() }, data || {}, {
+        callId: callId,
+        sessionId: cdpBlockSessionId(block, sessionId) || (data && data.sessionId) || "",
+      });
+      aliases.forEach(function (k) {
+        try {
+          localStorage.setItem(k, JSON.stringify(payload));
+        } catch (e0) {}
+      });
+      return aliases[0];
+    }
+
     /** 一体部署确认卡：单卡一步确认（精简 meta，避免工具卡丢 units） */
     function CodeDeployConfirmCard(props) {
       ensureCss();
       var block = props.block;
+      var toolCallId = String(props.callId || cdpBlockCallId(block, "") || "").trim();
       var wb = useMemo(function () {
         return readMeta(block);
       }, [block]);
       var ui = (wb && wb.ui) || {};
       var kind = String(ui.kind || (wb && String(wb.t || "").replace(/^cdp-/, "")) || "confirm");
+      var persistBoot = useMemo(
+        function () {
+          return cdpPersistLoadForCard(block, props.sessionId, toolCallId);
+        },
+        [block, props.sessionId, toolCallId],
+      );
+      var bootSaved =
+        persistBoot.saved && cdpPersistBelongsToCall(persistBoot.saved, toolCallId)
+          ? persistBoot.saved
+          : null;
 
       var _busy = useState(false);
       var busy = _busy[0];
@@ -6017,12 +7271,28 @@ window.__ModuleLoader__.load({
       var _err = useState("");
       var err = _err[0];
       var setErr = _err[1];
-      var _done = useState(kind === "success");
+      var _done = useState(function () {
+        if (bootSaved && (bootSaved.done || bootSaved.phase === "done")) return true;
+        return kind === "success";
+      });
       var done = _done[0];
       var setDone = _done[1];
-      var _success = useState(kind === "success" ? ui : null);
+      var _success = useState(function () {
+        if (bootSaved && bootSaved.success) return bootSaved.success;
+        return kind === "success" ? ui : null;
+      });
       var success = _success[0];
       var setSuccess = _success[1];
+
+      function cdpSnapshot(doneFlag, successObj) {
+        if (!toolCallId) return;
+        cdpPersistSaveCard(block, props.sessionId, toolCallId, {
+          phase: "done",
+          done: !!doneFlag,
+          success: successObj || null,
+          jobId: (ui && ui.job_id) || (successObj && successObj.job_id) || "",
+        });
+      }
 
       function resolveIds(src) {
         var u = src || {};
@@ -6051,8 +7321,8 @@ window.__ModuleLoader__.load({
       var entry = ui.entry_url || ui.access_url || ui.health_url || "";
       var canGo = ui.can_deploy !== false && !!ui.job_id && (ids.length > 0 || unitCount > 0);
 
-      // 准备失败时不要画空确认卡（——:— / 0 单元）
-      if (kind === "confirm" && !ui.job_id) {
+      // 准备失败时不要画空确认卡（——:— / 0 单元）；已完成态优先恢复
+      if (!done && kind === "confirm" && !ui.job_id) {
         return h(
           "div",
           { className: "wb-cr" },
@@ -6069,6 +7339,7 @@ window.__ModuleLoader__.load({
         if (!ui.job_id) {
           setDone(true);
           setSuccess({ cancelled: true });
+          cdpSnapshot(true, { cancelled: true });
           return;
         }
         setBusy(true);
@@ -6086,6 +7357,7 @@ window.__ModuleLoader__.load({
           .then(function () {
             setDone(true);
             setSuccess({ cancelled: true });
+            cdpSnapshot(true, { cancelled: true });
             setBusy(false);
           })
           .catch(function (e) {
@@ -6129,15 +7401,18 @@ window.__ModuleLoader__.load({
               return;
             }
             var succ = d.deploy_success || d.code_deploy_ui || {};
-            setSuccess({
+            var successObj = {
               title: succ.title || (mode === "full" ? "全量部署完成" : "增量部署完成"),
               entry_url: succ.entry_url || succ.access_url || succ.health_url || entry,
               remote: succ.remote || "",
               env: succ.env || ui.env || "",
               units: succ.units || ids,
               actions: succ.actions || [],
-            });
+              job_id: ui.job_id,
+            };
+            setSuccess(successObj);
             setDone(true);
+            cdpSnapshot(true, successObj);
             setBusy(false);
           })
           .catch(function (e) {
@@ -6151,14 +7426,24 @@ window.__ModuleLoader__.load({
           return h(
             "div",
             { className: "wb-cr" },
-            h("div", { className: "wb-cr-head" }, h("span", { className: "wb-cr-badge" }, "已取消")),
+            h(
+              "div",
+              { className: "wb-cr-head" },
+              h("span", { className: "wb-cr-badge" }, "已取消"),
+              h("span", { className: "wb-cr-hint" }, CDP_UI_REV),
+            ),
             h("div", { className: "wb-cr-body" }, h("p", { className: "wb-cr-sum" }, "未执行同步")),
           );
         }
         return h(
           "div",
           { className: "wb-cr" },
-          h("div", { className: "wb-cr-head" }, h("span", { className: "wb-cr-badge" }, "部署完成")),
+          h(
+            "div",
+            { className: "wb-cr-head" },
+            h("span", { className: "wb-cr-badge" }, "部署完成"),
+            h("span", { className: "wb-cr-hint" }, CDP_UI_REV),
+          ),
           h(
             "div",
             { className: "wb-cr-body" },
@@ -7280,6 +8565,11 @@ window.__ModuleLoader__.load({
       console.log(
         "[dsh-mes-bridge] settings.section=WorkBuddy + toolview review/commit/code_dev/deploy",
       );
+      try {
+        if (document && document.title && document.title.indexOf("WorkBuddy") < 0) {
+          document.title = "WorkBuddy · " + document.title;
+        }
+      } catch (_eTitle) {}
     }
 
     module.exports = { inject: ["slots"], apply: apply };

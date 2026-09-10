@@ -230,8 +230,23 @@ def _job_summary(job: dict[str, Any]) -> str:
             lines.append(f"…共 {len(synced)} 个")
     if deferred:
         lines.append(f"范围外未同步 {len(deferred)} 个")
+        defer_s = [str(x).replace("\\", "/") for x in deferred]
+        wiring_miss = any(
+            ("/config/" in p)
+            or ("/router/" in p)
+            or ("/layouts/" in p)
+            or ("reportFeatures" in p)
+            or ("reportIcons" in p)
+            for p in defer_s
+        )
+        prefix = (
+            "⚠ 含菜单/路由配置未同步：浏览器可能看不到新菜单，勿只信交付「已上菜单」。"
+            if wiring_miss
+            else "⚠️ 未同步文件可能导致页面报错（如 Vite Failed to resolve import）。"
+        )
         lines.append(
-            "⚠️ 未同步文件可能导致页面报错（如 Vite Failed to resolve import）。未同步："
+            prefix
+            + "未同步："
             + "、".join(str(x) for x in deferred[:8])
             + ("…" if len(deferred) > 8 else "")
             + "。请缩小需求或重新写码并确认同步完成。"

@@ -320,6 +320,149 @@ class CodeDevTests(unittest.TestCase):
         )
         self.assertIn("README.md", outside)
 
+    def test_partition_forces_report_config_not_deferred(self):
+        """日产等报表：narrow scope 只勾 views/api 时，reportFeatures 不得进 deferred。
+
+        历史故障：交付写「已上菜单」，config 未同步 → 浏览器侧栏仍无入口。
+        """
+        from app.code_dev.path_scope import is_ui_shell_wiring, partition_by_scope
+
+        self.assertTrue(
+            is_ui_shell_wiring("frontend/src/config/reportFeatures.js")
+        )
+        self.assertTrue(is_ui_shell_wiring("frontend/src/config/reportIcons.js"))
+        changed = [
+            "frontend/src/views/reports/DailyOutputReportView.vue",
+            "frontend/src/api/reports/dailyOutput.js",
+            "frontend/src/config/reportFeatures.js",
+            "frontend/src/config/reportIcons.js",
+            "README.md",
+        ]
+        # 模拟用户/推断只勾了页面与 api，漏掉 config
+        scope = [
+            "frontend/src/views/reports/",
+            "frontend/src/api/reports/",
+        ]
+        inside, outside = partition_by_scope(changed, scope)
+        self.assertIn("frontend/src/config/reportFeatures.js", inside)
+        self.assertIn("frontend/src/config/reportIcons.js", inside)
+        self.assertIn("frontend/src/views/reports/DailyOutputReportView.vue", inside)
+        self.assertIn("README.md", outside)
+        self.assertNotIn("frontend/src/config/reportFeatures.js", outside)
+
+    def test_write_scope_includes_config_for_menu_ops(self):
+        from app.code_dev.brief import write_scope_from_hints
+
+        scope = write_scope_from_hints(
+            {"confidence": "medium", "expected_paths": []},
+            "报表中心新增日产报表菜单",
+        )
+        self.assertTrue(any(s.startswith("frontend/src/config") for s in scope), scope)
+        self.assertTrue(any(s.startswith("frontend/src/router") for s in scope), scope)
+
+    def test_menu_verify_fails_when_catalog_menu_false(self):
+        """视图已同步但 catalog.menu=false → 必须失败，禁止假成功。"""
+        import tempfile
+
+        from app.code_dev.menu_verify import (
+            deferred_wiring_blockers,
+            verify_add_menu_on_target,
+        )
+
+        self.assertEqual(
+            deferred_wiring_blockers(
+                ["frontend/src/config/reportFeatures.js", "README.md"]
+            ),
+            ["frontend/src/config/reportFeatures.js"],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = root / "frontend" / "src" / "config"
+            cfg.mkdir(parents=True)
+            (cfg / "reportFeatures.js").write_text(
+                "export const REPORT_CATALOG = [\n"
+                "  { id: 'daily-output', viewFile: 'DailyOutputReportView.vue', "
+                "menu: false, enabled: true },\n"
+                "]\n",
+                encoding="utf-8",
+            )
+            bad = verify_add_menu_on_target(
+                root,
+                "报表中心新增日产报表菜单",
+                synced_files=[
+                    "frontend/src/views/reports/DailyOutputReportView.vue",
+                    "frontend/src/api/reports/dailyOutput.js",
+                ],
+                deferred_files=[],
+            )
+            self.assertFalse(bad.get("ok"), bad)
+            self.assertIn("menu:false", bad.get("detail") or "")
+
+            # 修复类诉求不得因 menu:false 误杀
+            fix_ok = verify_add_menu_on_target(
+                root,
+                "修复日产报表导出逻辑",
+                synced_files=[
+                    "frontend/src/views/reports/DailyOutputReportView.vue",
+                ],
+                deferred_files=[],
+            )
+            self.assertTrue(fix_ok.get("ok"), fix_ok)
+
+            (cfg / "reportFeatures.js").write_text(
+                "export const REPORT_CATALOG = [\n"
+                "  { id: 'daily-output', viewFile: 'DailyOutputReportView.vue', "
+                "menu: true, enabled: true },\n"
+                "]\n",
+                encoding="utf-8",
+            )
+            good = verify_add_menu_on_target(
+                root,
+                "报表中心新增日产报表",
+                synced_files=[
+                    "frontend/src/views/reports/DailyOutputReportView.vue",
+                ],
+                deferred_files=[],
+            )
+            self.assertTrue(good.get("ok"), good)
+
+            deferred_fail = verify_add_menu_on_target(
+                root,
+                "报表中心新增日产报表",
+                synced_files=[
+                    "frontend/src/views/reports/DailyOutputReportView.vue",
+                ],
+                deferred_files=["frontend/src/config/reportFeatures.js"],
+            )
+            self.assertFalse(deferred_fail.get("ok"), deferred_fail)
+
+    def test_partition_does_not_promote_unrelated_views(self):
+        """只改报表页时，不得把仓库模块 outside 视图强行同步。"""
+        from app.code_dev.path_scope import partition_by_scope
+
+        changed = [
+            "frontend/src/views/reports/DailyOutputReportView.vue",
+            "frontend/src/config/reportFeatures.js",
+            "frontend/src/views/warehouse/MaterialOutboundView.vue",
+        ]
+        scope = ["frontend/src/views/reports/"]
+        inside, outside = partition_by_scope(changed, scope)
+        self.assertIn("frontend/src/config/reportFeatures.js", inside)
+        self.assertIn("frontend/src/views/reports/DailyOutputReportView.vue", inside)
+        self.assertIn(
+            "frontend/src/views/warehouse/MaterialOutboundView.vue",
+            outside,
+        )
+
+    def test_redact_git_remote_url_strips_userinfo(self):
+        from app.code_commit.git_ops import redact_git_remote_url
+
+        raw = "https://oauth2:ghp_secretTOKEN@github.com/org/repo.git"
+        out = redact_git_remote_url(raw)
+        self.assertNotIn("ghp_secretTOKEN", out)
+        self.assertNotIn("oauth2", out)
+        self.assertIn("github.com/org/repo.git", out)
+
     def test_partition_import_closure_from_sandbox(self):
         from app.code_dev.path_scope import partition_by_scope
 

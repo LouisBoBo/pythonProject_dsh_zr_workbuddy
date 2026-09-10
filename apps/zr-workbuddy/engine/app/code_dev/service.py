@@ -984,7 +984,14 @@ def run_job(
             sandbox_root=sandbox_path,
         )
         # P0：范围外文件不同步（记入 deferred），不进入 awaiting_scope（无 SPA 卡）
-        # 若触及路由/布局，同批 views 已由 partition 强制提升，避免 Vite 缺文件
+        # 若触及路由/布局/config，同批 views 已由 partition 强制提升，避免「写完看不见」
+        from .path_scope import is_ui_shell_wiring
+
+        leftover_wiring = [r for r in outside if is_ui_shell_wiring(r)]
+        if leftover_wiring:
+            inside = list(dict.fromkeys([*inside, *leftover_wiring]))
+            outside = [r for r in outside if r not in set(leftover_wiring)]
+
         changed_set = set(changed)
         deleted_set = set(deleted)
         if not changed_set and not deleted_set:
@@ -1096,6 +1103,28 @@ def run_job(
             )
             runtime_hint = frontend_runtime_hint(synced, deleted_ok)
             runtime_hint = _append_remote_deploy_hint(runtime_hint, synced)
+
+        # 硬门禁：接线/config 不得留在 deferred；新增菜单/报表须本机 catalog 可见
+        from .menu_verify import deferred_wiring_blockers, verify_add_menu_on_target
+
+        wiring_left = deferred_wiring_blockers(outside)
+        if wiring_left:
+            raise RuntimeError(
+                "菜单/路由配置未同步到本机，禁止报成功："
+                + "、".join(wiring_left[:8])
+                + "。请重新开工（write_scope 须含 frontend/src/config/ 与 router）。"
+            )
+        if not is_delete_intent(requirement) and (inside_copy or inside_del or outside):
+            mv = verify_add_menu_on_target(
+                target,
+                requirement,
+                synced_files=synced,
+                deferred_files=outside,
+            )
+            if not mv.get("ok"):
+                raise RuntimeError(f"菜单验尸失败：{mv.get('detail')}")
+            if mv.get("detail"):
+                target_verify_detail = str(mv.get("detail") or "")
 
         delete_err = validate_delete_completion(
             requirement,

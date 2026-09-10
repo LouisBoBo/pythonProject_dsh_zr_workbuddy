@@ -251,12 +251,18 @@ scripts/plugin.sh --app zr-workbuddy features   # 确认状态
 13. **坏 feature 拖累邻居（已修）**  
     → bridge 已按单 feature try/catch；失败会标 `live=error`，同轮继续加载其它功能。
 
-14. **出图查询报 cannot get property "attachments" without inject**  
-    → feature 调了 `attachChart` 但 `inject` 只有 `["tools"]`。  
-    改为 `["tools", "attachments"]`；且代码里用 `ctx.get("attachments")`，不要写 `ctx.attachments`。  
-    无图查询不会触发，容易误判为「功能正常」。
+14. **出图查询报 cannot get property "attachments" without inject** 
+ → feature 调了 `attachChart` 但 `inject` 只有 `["tools"]`。 
+ 改为 `["tools", "attachments"]`；且代码里用 `ctx.get("attachments")`，不要写 `ctx.attachments`。 
+ 无图查询不会触发，容易误判为「功能正常」。
 
-15. **cordis.patch 里用 npm 全名当 id 的 `disabled: true`**  
+14b. **写码交付说「已上菜单」但浏览器没有**  
+ → 多为 `frontend/src/config/reportFeatures.js`（或同类 catalog）被 write_scope 打进 deferred。  
+ 引擎已把 `frontend/src/config/` 视为 UI wiring **强制同步**；同步后若 catalog 仍 `menu:false` 或接线仍 deferred → **任务失败（禁止假成功）**。  
+ 改 path_scope / menu_verify / brief 后须 `engine.sh … restart`。  
+ 验收看本机 Vite（如 `:5175`），不是引擎 `:8000` / 远端未部署环境。
+
+15. **cordis.patch 里用 npm 全名当 id 的 `disabled: true`**
     → insert 的 id 是短名 `dsh-mes-bridge`，全名匹配不到 → 启动 not-found 警告，看起来像被禁用。删掉该类垃圾行。
 
 16. **引擎 host 改成非回环 / 自造鉴权 token**  
@@ -295,6 +301,7 @@ scripts/plugin.sh --app zr-workbuddy install bridge --restart
 ## 7. 文档
 
 - **知识库总目（分类）**：`docs/README.md`  
+- **四车道会话契约（写码/审码/提交/部署隔离与冻结）**：`docs/架构与选型/四车道会话契约.md` —— 改任一车道 UI/持久化前必读  
 - 大白话用法：`docs/产品与口径/目录结构与用法说明.md`  
 - 删除菜单车道：`docs/功能实现/P0-1-删除菜单车道.md`  
 - prepare 排障：`docs/宿主与运维排障/dsh-tools双实例与prepare报错.md`  

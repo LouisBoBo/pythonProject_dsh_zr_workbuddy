@@ -58,10 +58,9 @@ export function apply(ctx) {
     e.defineTool({
       name: "mes_code_commit_begin",
       description:
-        "【提交主入口】用户说「提交代码 / 帮我提交 / 提交门禁」时必须只调本工具。" +
-        "未给绝对路径时：返回选目录确认（主聊天工具卡内可选目录、勾选文件、门禁与确认推送），" +
-        "不要再问用户、不要用 ask_user_question、不要 Bash 扫盘。" +
-        "若用户已给绝对路径，可直接跑门禁（仍建议让用户在卡里确认）。",
+        "【提交主入口】用户说「提交代码 / commit / push / 提交门禁」时必须只调本工具（禁止 Bash git、禁止 mes_code_review_run）。" +
+        "一律返回主聊天提交工具卡（选目录→勾选文件→门禁→确认 commit/push）；禁止 ask_user_question、禁止 Bash 代提交。" +
+        "成功返回后回复留空，等用户在工具卡确认。",
       parameters: {
         workspace: {
           type: "string",
@@ -82,9 +81,7 @@ export function apply(ctx) {
           const ui = pick.code_commit_ui || null;
           return {
             ok: true,
-            reply:
-              "请在**上方工具卡**中选择本机 Git 工程目录，勾选要提交的文件，" +
-              "跑门禁通过后再确认才会 commit/push（可推远程）。",
+            reply: "",
             detail: "await_toolview_pick",
             suggestions: pick.suggestions || [],
             workspace: pick.workspace || "",
@@ -102,10 +99,7 @@ export function apply(ctx) {
         if (ui && workspace) ui.workspace = workspace;
         return {
           ok: true,
-          reply:
-            "已带入目录 `" +
-            workspace +
-            "`。请在上方工具卡勾选文件并完成门禁与确认。",
+          reply: "",
           detail: "await_toolview_pick",
           workspace,
           code_commit_ui: ui,

@@ -74,7 +74,12 @@ def path_in_scope(rel: str, scope: list[str] | None) -> bool:
 
 
 def is_ui_shell_wiring(rel: str) -> bool:
-    """菜单/路由/API/schema 等接线文件：不同步则「写完了但刷新看不到」。"""
+    """菜单/路由/API/schema 等接线文件：不同步则「写完了但刷新看不到」。
+
+    含 ``frontend/src/config/``（如 reportFeatures.js）：本仓报表侧栏是否显示
+    只看 catalog 的 menu 开关；只同步 views/api 而 deferred 掉 config，会反复出现
+    「交付说已上菜单、浏览器却没有」。
+    """
     rel_n = normalize_rel(rel)
     if not rel_n:
         return False
@@ -83,6 +88,24 @@ def is_ui_shell_wiring(rel: str) -> bool:
     if rel_n.startswith("frontend/src/layouts/"):
         return True
     if rel_n.startswith("frontend/src/api/"):
+        return True
+    if rel_n.startswith("frontend/src/config/"):
+        return True
+    # 少数工程把菜单注册表放在 constants / composables
+    name_l = rel_n.rsplit("/", 1)[-1].lower()
+    if any(
+        rel_n.startswith(p)
+        for p in (
+            "frontend/src/constants/",
+            "frontend/src/composables/",
+            "frontend/src/utils/",
+        )
+    ) and (
+        "feature" in name_l
+        or name_l.endswith("menu.js")
+        or name_l.endswith("menu.ts")
+        or ("nav" in name_l and ("menu" in name_l or "route" in name_l))
+    ):
         return True
     if rel_n.startswith("backend/app/routers/"):
         return True
@@ -209,10 +232,24 @@ def promote_shell_companions(
     shell_touched = any(is_ui_shell_wiring(r) for r in all_changed) or any(
         is_ui_shell_wiring(r) for r in in_set
     )
+    # 仅改了业务页、未改路由时：只把同批 config（菜单开关）拉进同步。
+    # 禁止「任意 view 触发 → 把 outside 里其它模块 views 一并同步」（越权写盘）。
+    page_touched = any(is_ui_page_asset(r) for r in all_changed) or any(
+        is_ui_page_asset(r) for r in in_set
+    )
     if shell_touched:
         keep_out: list[str] = []
         for rel in out_set:
             if is_ui_page_asset(rel) or is_backend_feature_asset(rel) or is_ui_shell_wiring(rel):
+                if rel not in in_set:
+                    in_set.append(rel)
+            else:
+                keep_out.append(rel)
+        out_set = keep_out
+    elif page_touched and out_set:
+        keep_out = []
+        for rel in out_set:
+            if rel.startswith("frontend/src/config/"):
                 if rel not in in_set:
                     in_set.append(rel)
             else:

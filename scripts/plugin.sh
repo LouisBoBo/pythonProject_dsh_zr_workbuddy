@@ -16,12 +16,27 @@ set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/resolve_app.sh
 . "$ROOT/scripts/lib/resolve_app.sh"
-PROFILE="${DSH_PROFILE:-$HOME/.dsh/profiles/web}"
-LINK_DIR="$HOME/.dsh/link"
+# shellcheck source=lib/workbuddy_web_env.sh
+. "$ROOT/scripts/lib/workbuddy_web_env.sh"
+prepend_workbuddy_node_path
+# 与 host.sh 一致：WorkBuddy 接线写入 ~/.dsh（用户工作区所在会话库）
+apply_workbuddy_dsh_home
+DSH_HOME_DIR="$DSH_HOME"
+export DSH_HOME="$DSH_HOME_DIR"
+if [ -n "${DSH_PROFILE:-}" ]; then
+  case "$DSH_PROFILE" in
+    /*|~*) PROFILE="$DSH_PROFILE" ;;
+    *) PROFILE="$DSH_HOME_DIR/profiles/$DSH_PROFILE" ;;
+  esac
+else
+  PROFILE="$DSH_HOME_DIR/profiles/web"
+fi
+PROFILE="${PROFILE/#\~/$HOME}"
+LINK_DIR="$DSH_HOME_DIR/link"
 # 仓库产品名即 link 名（勿再使用 dsh-ai-apps）
 LINK_NAME="DSH-ZR-WorkBuddy"
 LINK_REPO="$LINK_DIR/$LINK_NAME"
-BAK_ROOT="$HOME/.dsh/profiles/web.bak"
+BAK_ROOT="$DSH_HOME_DIR/profiles/web.bak"
 APP=""
 DO_RESTART=0
 ARGS=()
@@ -157,11 +172,11 @@ PY
 
 maybe_restart() {
   if [ "$DO_RESTART" = "1" ]; then
-    echo "正在重启 DSH…"
-    "$ROOT/scripts/restart-dsh.sh"
+    echo "正在重启 WorkBuddy 聊天壳（:3081 / DSH_HOME=~/.dsh）…"
+    "$ROOT/scripts/host.sh" restart-web
   else
     echo
-    echo "（仅 bridge 变更需要重启）生效: scripts/host.sh restart-web 或 scripts/restart-dsh.sh / 加 --restart"
+    echo "（仅 bridge 变更需要重启）生效: scripts/host.sh restart-web / 加 --restart"
   fi
 }
 
@@ -201,11 +216,21 @@ patch = os.path.join(profile, "cordis.patch.yml")
 src = open(patch, encoding="utf-8").read()
 if f"id: {pid}" in src:
     print("patch 已有", pid); raise SystemExit(0)
-block = (f"\n# --- {pid}（apps bridge） ---\n- insert:\n"
+block = (f"# --- {pid}（apps bridge） ---\n- insert:\n"
          f"    - id: {pid}\n      name: '{name}'\n")
-marker = "# --- dsh-skin managed"
-src = src.replace(marker, block + marker) if marker in src else src + block
-open(patch, "w", encoding="utf-8").write(src)
+# 空数组占位 [] 不能与后续 - insert 并存，否则 YAML 解析失败
+import re as _re
+src_stripped = src.rstrip() + "\n"
+if _re.search(r"(?m)^\[\]\s*$", src_stripped):
+    # 保留注释头，用 insert 列表替换空数组
+    src_stripped = _re.sub(r"(?m)^\[\]\s*$", block.rstrip(), src_stripped)
+else:
+    marker = "# --- dsh-skin managed"
+    if marker in src_stripped:
+        src_stripped = src_stripped.replace(marker, block + marker)
+    else:
+        src_stripped = src_stripped.rstrip() + "\n\n" + block
+open(patch, "w", encoding="utf-8").write(src_stripped if src_stripped.endswith("\n") else src_stripped + "\n")
 print("patch insert:", pid)
 # 清理误导项：disabled + id 写成 npm 全名（与 insert 短 id 对不上）
 import re
@@ -451,6 +476,9 @@ PY
       install_one "$id"
     done
     sync_panel_defaults
+    if [ -f "$PROFILE/cordis.patch.yml" ]; then
+      python3 "$ROOT/scripts/lib/ensure_web_port_patch.py" "$PROFILE" 3081
+    fi
     cd "$PROFILE" && pnpm install
     # pnpm 可能把市场插件的 dsh-tools 又装成独立副本，必须装后再对齐
     if [ -x "$ROOT/scripts/check-vendor.sh" ]; then

@@ -10,20 +10,31 @@
 #   scripts/host.sh up                  # ensure-engine + ensure-web（推荐日常入口）
 #   scripts/host.sh start-web [--from-host]  # 强制启动（已在跑则报错）
 #   scripts/host.sh restart-web         # stop-web + start-web（守护式）
+#   scripts/host.sh fix-ports           # 纠正端口错位 + 自检
+#   scripts/host.sh verify-ports        # 仅检查 :3081 WorkBuddy / :3080 官方
 #   scripts/host.sh stop-web            # 停掉监听 :3081 的进程（若有）
 #
 # 端口约定（勿混）：
-#   - 浏览器开发壳默认 :3081（DSH_HOME=~/.dsh-workbuddy，含 mes-bridge）
-#   - 官方 Harness 建议 :3080（默认 DSH_HOME=~/.dsh，勿装 WorkBuddy bridge）
+#   - WorkBuddy 开发壳 :3081（DSH_HOME=~/.dsh，profile 含 mes-bridge，工作区在此）
+#   - 干净官方 Harness 可选 :3080（DSH_HOME=~/.dsh-workbuddy，无 bridge）
 #   - 桌面一体包默认 :13080（Application Support/.../dsh-home，另一套会话）
 #   - 可用 DSH_WEB_PORT=… / DSH_HOME=… / DSH_PROFILE=… 覆盖
 #
 # 拒绝裸 install|start|dev，防误伤。不改 code_deploy / 不焊业务进 host/。
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/workbuddy_web_env.sh
+. "$ROOT/scripts/lib/workbuddy_web_env.sh"
+prepend_workbuddy_node_path
+# shellcheck source=lib/web_port_verify.sh
+. "$ROOT/scripts/lib/web_port_verify.sh"
 HOST="$ROOT/host"
+WORKBUDDY_WEB_PORT="${WORKBUDDY_WEB_PORT:-3081}"
+OFFICIAL_WEB_PORT="${OFFICIAL_WEB_PORT:-3080}"
 # DSH_HOME 决定会话库；DSH_PROFILE 可为绝对路径，或相对 profiles 下的名字
-DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh-workbuddy}"
+# 与会话/工作区共用 ~/.dsh；勿再用空的 ~/.dsh-workbuddy 当主开发壳
+DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh}"
+export DSH_HOME="$DSH_HOME_DIR"
 if [ -n "${DSH_PROFILE:-}" ]; then
   case "$DSH_PROFILE" in
     /*|~*) PROFILE="$DSH_PROFILE" ;;
@@ -78,13 +89,7 @@ resolve_dsh_bin() {
 
 # dsh 脚本为 #!/usr/bin/env node；须把同目录 node 置于 PATH 前，避免误用 /usr/local 的 Node 20
 prepend_dsh_node_path() {
-  local dsh_bin="$1"
-  local node_bin
-  [ -n "$dsh_bin" ] || return 0
-  node_bin="$(dirname "$dsh_bin")"
-  if [ -x "$node_bin/node" ]; then
-    export PATH="$node_bin${PATH:+:$PATH}"
-  fi
+  prepend_workbuddy_node_path
 }
 
 cmd_status() {
@@ -104,13 +109,15 @@ PY
   fi
   echo "说明文档: host/WORKBUDDY.md 、 host/UPSTREAM.md"
   echo "业务目录: apps/zr-workbuddy/"
-  local pid
-  pid="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
-  if [ -n "$pid" ]; then
-    echo "宿主 web: :$PORT 监听中 (PID $pid)"
+  echo "DSH_HOME: $DSH_HOME_DIR（工作区 $(dsh_home_workspace_count "$DSH_HOME_DIR") 个）"
+  local wb_pid
+  wb_pid="$(web_port_listen_pid "$WORKBUDDY_WEB_PORT")"
+  if [ -n "$wb_pid" ]; then
+    echo "WorkBuddy web: :$WORKBUDDY_WEB_PORT 监听中 (PID $wb_pid)"
   else
-    echo "宿主 web: :$PORT 未监听"
+    echo "WorkBuddy web: :$WORKBUDDY_WEB_PORT 未监听 → scripts/host.sh fix-ports"
   fi
+  echo "开发请开: http://127.0.0.1:$WORKBUDDY_WEB_PORT"
 }
 
 cmd_hint() {
@@ -210,7 +217,7 @@ cmd_wire() {
   fi
   if [ "$do_restart" -eq 1 ]; then
     echo "执行: plugin.sh --app zr-workbuddy install bridge --restart"
-    echo "提示: --restart 走 scripts/restart-dsh.sh（守护启动，脚本会返回）。" >&2
+    echo "提示: --restart 走 scripts/host.sh restart-web（DSH_HOME=~/.dsh-workbuddy，:3081）。" >&2
     echo "      若要用本仓 host CLI，请改用: wire（无 restart）+ restart-web --from-host" >&2
     "$ROOT/scripts/plugin.sh" --app zr-workbuddy install bridge --restart
   else
@@ -230,50 +237,33 @@ cmd_ensure_engine() {
 }
 
 cmd_stop_web() {
-  local PID
-  PID="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
-  if [ -z "$PID" ]; then
-    echo ":$PORT 无监听进程"
-    rm -f "$ROOT/tmp/host-web.pid"
-    return 0
-  fi
-  echo "停止 :$PORT (PID $PID)..."
-  # 尽量带进程组；失败再杀单进程
-  kill -- -"$PID" 2>/dev/null || kill "$PID" || true
-  sleep 1
-  PID="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
-  if [ -n "$PID" ]; then
-    echo "仍在运行，发送 SIGKILL..." >&2
-    kill -9 -- -"$PID" 2>/dev/null || kill -9 "$PID" || true
-  fi
-  rm -f "$ROOT/tmp/host-web.pid"
-  echo "已停止"
+  stop_web_port "$PORT"
+  rm -f "$ROOT/tmp/host-web-${PORT}.pid" "$ROOT/tmp/host-web.pid"
+  echo "已停止 :$PORT"
 }
 
-# 开发态 :3081 须跟 runtime.yaml 对齐；勿继承桌面 App 注入的 18000（会导致 mes-runtime 连错端口）
-sync_dev_engine_env() {
-  unset WORKBUDDY_DESKTOP DSH_DESKTOP WORKBUDDY_ENGINE_DIR \
-    WORKBUDDY_ENGINE_HOST WORKBUDDY_ENGINE_PORT \
-    APP_ENGINE_HOST APP_ENGINE_PORT APP_ENGINE_PYTHON || true
-  local rt
-  rt="$(python3 "$ROOT/scripts/lib/read_runtime.py" "$ROOT/apps/zr-workbuddy/engine" 2>/dev/null || true)"
-  if [ -n "$rt" ]; then
-    export APP_ENGINE_HOST="$(printf '%s' "$rt" | python3 -c 'import json,sys;print(json.load(sys.stdin)["host"])')"
-    export APP_ENGINE_PORT="$(printf '%s' "$rt" | python3 -c 'import json,sys;print(json.load(sys.stdin)["port"])')"
-    export APP_ENGINE_PYTHON="$(printf '%s' "$rt" | python3 -c 'import json,sys;print(json.load(sys.stdin)["python"])')"
+ensure_workbuddy_webserver_patch() {
+  if [ ! -f "$PROFILE/cordis.patch.yml" ]; then
+    echo "跳过 webserver patch：缺少 $PROFILE/cordis.patch.yml" >&2
+    return 0
   fi
+  python3 "$ROOT/scripts/lib/ensure_web_port_patch.py" "$PROFILE" "$WORKBUDDY_WEB_PORT"
 }
 
 _launch_web_daemon() {
   local from_host="$1"
   sync_dev_engine_env
+  # 强制会话库落到本脚本解析出的家目录（daemon 子进程也继承）
+  export DSH_HOME="$DSH_HOME_DIR"
+  echo "DSH_HOME=$DSH_HOME  PROFILE=$PROFILE  port=$PORT"
   # 公司插件市场：仅注入 DSHM_REGISTRY_URL + @zhongruan npmrc（可被环境变量覆盖）
   # shellcheck source=lib/company_dsh_market.sh
   . "$ROOT/scripts/lib/company_dsh_market.sh"
   apply_company_dsh_market
   mkdir -p "$ROOT/tmp"
-  local log="$ROOT/tmp/host-web.log"
-  local pidf="$ROOT/tmp/host-web.pid"
+  local log pidf
+  log="$(web_port_log_file "$ROOT" "$PORT")"
+  pidf="$ROOT/tmp/host-web-${PORT}.pid"
   : >"$log"
 
   # shellcheck disable=SC2207
@@ -328,8 +318,8 @@ _wait_web() {
       return 0
     fi
   done
-  echo "25s 内未听到 :$PORT，请查看日志: $ROOT/tmp/host-web.log" >&2
-  tail -40 "$ROOT/tmp/host-web.log" >&2 || true
+  echo "25s 内未听到 :$PORT，请查看日志: $(web_port_log_file "$ROOT" "$PORT")" >&2
+  tail -40 "$(web_port_log_file "$ROOT" "$PORT")" 2>/dev/null || true
   return 1
 }
 
@@ -379,9 +369,51 @@ cmd_restart_web() {
   if [ -x "$ROOT/scripts/check-vendor.sh" ]; then
     "$ROOT/scripts/check-vendor.sh" --fix || true
   fi
+  ensure_workbuddy_webserver_patch
   cmd_stop_web || true
   sleep 1
   cmd_start_web "$@"
+  verify_workbuddy_ports "$ROOT" || true
+}
+
+cmd_fix_ports() {
+  echo "=== WorkBuddy :$WORKBUDDY_WEB_PORT（DSH_HOME=$DSH_HOME_DIR，含工作区 + mes-bridge）==="
+  stop_web_port "$WORKBUDDY_WEB_PORT" || true
+  stop_web_port "$OFFICIAL_WEB_PORT" || true
+  sleep 1
+
+  echo "接线 mes-bridge → $PROFILE"
+  "$ROOT/scripts/plugin.sh" --app zr-workbuddy install bridge
+  ensure_workbuddy_webserver_patch
+
+  sync_dev_engine_env
+  export DSH_HOME="$DSH_HOME_DIR"
+  export DSH_WEB_PORT="$WORKBUDDY_WEB_PORT"
+  PORT="$WORKBUDDY_WEB_PORT"
+
+  if ! cmd_ensure_engine; then
+    echo "警告: 引擎 ensure 未成功，继续拉起聊天壳…" >&2
+  fi
+  _launch_web_daemon 0
+  _wait_web || true
+  local i wb_log
+  wb_log="$(web_port_log_file "$ROOT" "$WORKBUDDY_WEB_PORT")"
+  for i in $(seq 1 45); do
+    if web_port_has_mes_bridge "$wb_log"; then
+      break
+    fi
+    sleep 1
+  done
+
+  if DSH_HOME="$DSH_HOME_DIR" python3 "$ROOT/scripts/lib/verify_workbuddy_web.py"; then
+    echo "打开 WorkBuddy: http://127.0.0.1:$WORKBUDDY_WEB_PORT"
+  else
+    return 1
+  fi
+}
+
+cmd_verify_ports() {
+  verify_workbuddy_ports "$ROOT"
 }
 
 cmd_up() {
@@ -398,6 +430,7 @@ cmd_up() {
   fi
   cmd_ensure_web
   cmd_verify || true
+  verify_workbuddy_ports "$ROOT" || true
   echo "打开: http://127.0.0.1:$PORT"
 }
 
@@ -412,13 +445,15 @@ case "$CMD" in
   up) cmd_up ;;
   start-web) cmd_start_web "$@" ;;
   restart-web) cmd_restart_web "$@" ;;
+  fix-ports) cmd_fix_ports ;;
+  verify-ports) cmd_verify_ports ;;
   stop-web) cmd_stop_web ;;
   install|start|dev)
     echo "已拒绝自动执行「$CMD」。请用: up | ensure-web | ensure-engine | wire | hint" >&2
     exit 2
     ;;
   *)
-    echo "用法: scripts/host.sh status|where|hint|verify|wire [--restart]|up|ensure-engine|ensure-web|start-web [--from-host]|restart-web|stop-web" >&2
+    echo "用法: scripts/host.sh status|where|hint|verify|wire [--restart]|up|ensure-engine|ensure-web|start-web [--from-host]|restart-web|fix-ports|verify-ports|stop-web" >&2
     exit 1
     ;;
 esac
