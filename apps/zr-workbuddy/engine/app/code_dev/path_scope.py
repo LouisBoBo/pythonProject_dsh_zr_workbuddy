@@ -83,11 +83,7 @@ def is_ui_shell_wiring(rel: str) -> bool:
     rel_n = normalize_rel(rel)
     if not rel_n:
         return False
-    if rel_n.startswith("frontend/src/router/"):
-        return True
-    if rel_n.startswith("frontend/src/layouts/"):
-        return True
-    if rel_n.startswith("frontend/src/api/"):
+    if is_ui_route_shell_wiring(rel_n):
         return True
     if rel_n.startswith("frontend/src/config/"):
         return True
@@ -106,6 +102,23 @@ def is_ui_shell_wiring(rel: str) -> bool:
         or name_l.endswith("menu.ts")
         or ("nav" in name_l and ("menu" in name_l or "route" in name_l))
     ):
+        return True
+    return False
+
+
+def is_ui_route_shell_wiring(rel: str) -> bool:
+    """路由/布局/API/后端路由：改动时需提升同批 views，避免 Vite 缺 import。
+
+    不含 ``frontend/src/config/``——仅改 catalog 不得把无关模块 views 一并同步。
+    """
+    rel_n = normalize_rel(rel)
+    if not rel_n:
+        return False
+    if rel_n.startswith("frontend/src/router/"):
+        return True
+    if rel_n.startswith("frontend/src/layouts/"):
+        return True
+    if rel_n.startswith("frontend/src/api/"):
         return True
     if rel_n.startswith("backend/app/routers/"):
         return True
@@ -229,15 +242,16 @@ def promote_shell_companions(
         if normalize_rel(r)
     }
 
-    shell_touched = any(is_ui_shell_wiring(r) for r in all_changed) or any(
-        is_ui_shell_wiring(r) for r in in_set
+    # 仅路由/布局/API 变更才提升同批 views；纯 config 变更不得拖无关模块
+    route_shell_touched = any(is_ui_route_shell_wiring(r) for r in all_changed) or any(
+        is_ui_route_shell_wiring(r) for r in in_set
     )
     # 仅改了业务页、未改路由时：只把同批 config（菜单开关）拉进同步。
     # 禁止「任意 view 触发 → 把 outside 里其它模块 views 一并同步」（越权写盘）。
     page_touched = any(is_ui_page_asset(r) for r in all_changed) or any(
         is_ui_page_asset(r) for r in in_set
     )
-    if shell_touched:
+    if route_shell_touched:
         keep_out: list[str] = []
         for rel in out_set:
             if is_ui_page_asset(rel) or is_backend_feature_asset(rel) or is_ui_shell_wiring(rel):
