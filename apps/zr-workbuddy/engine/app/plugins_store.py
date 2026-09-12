@@ -216,6 +216,15 @@ def enable(feature_id: str) -> Dict[str, Any]:
     if fid not in ids:
         return {"ok": False, "detail": f"未知 feature: {fid}"}
 
+    mutex = None
+    if fid == "code-dev":
+        try:
+            from .coding_mutex import set_dsh_cursor_enabled
+
+            mutex = set_dsh_cursor_enabled(False)
+        except Exception as e:  # noqa: BLE001
+            mutex = {"ok": False, "detail": str(e)[:240]}
+
     def _do() -> Dict[str, Any]:
         st = _read_unlocked()
         if fid not in st["enabled"]:
@@ -226,7 +235,12 @@ def enable(feature_id: str) -> Dict[str, Any]:
     out = _with_lock(_do)
     if not out.get("ok"):
         return out
-    return {**out, **snapshot()}
+    snap = snapshot()
+    if mutex is not None:
+        snap["coding_mutex"] = mutex
+        if mutex.get("ok") and mutex.get("updated"):
+            snap["detail"] = f"已启用 {fid}；已互斥停用 DSH Cursor 写码插件（宿主需重启后卸工具）"
+    return {**out, **snap}
 
 
 def disable(feature_id: str) -> Dict[str, Any]:
@@ -264,6 +278,11 @@ def _main(argv: List[str]) -> int:
         return 0
     if op == "snapshot":
         print(json.dumps(snapshot(), ensure_ascii=False))
+        return 0
+    if op == "coding-mutex":
+        from .coding_mutex import reconcile
+
+        print(json.dumps(reconcile(), ensure_ascii=False))
         return 0
     print(json.dumps({"ok": False, "detail": f"未知操作: {op}"}, ensure_ascii=False))
     return 2

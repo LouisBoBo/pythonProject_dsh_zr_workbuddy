@@ -1202,7 +1202,8 @@ def api_plugins_list():
     "/api/plugins/enable",
     tags=["功能热插拔"],
     summary="启用功能插件",
-    description="写入 plugins.json；mes-bridge 约 1.5s 内 ctx.plugin 加载，无需重启 DSH。",
+    description="写入 plugins.json；mes-bridge 约 1.5s 内 ctx.plugin 加载，无需重启 DSH。"
+    "启用 code-dev 时会互斥停用 DSH「Cursor 写码」插件（profile disabledBundles）。",
 )
 def api_plugins_enable(body: PluginBody):
     from . import plugins_store

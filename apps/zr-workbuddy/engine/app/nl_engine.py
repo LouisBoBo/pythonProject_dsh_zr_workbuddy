@@ -562,7 +562,11 @@ async def llm_chat(text: str, llm_cfg: dict, context: str) -> dict | None:
             "不要说不支持代码修改。"
         )
     else:
-        code_boundary = "本机写码功能当前未启用；若用户要开发界面，kind=chat 并说明可到配置中心开启写码车道。"
+        code_boundary = (
+            "本机写码功能当前未启用；若用户要开发界面，kind=chat，"
+            "说明可打开功能插件 code-dev，或使用已安装的 DSH「Cursor 写码」插件；"
+            "两条写码通道互斥，不要两个同时开。"
+        )
 
     if plugins_store.is_enabled(CODE_DEPLOY_FEATURE):
         deploy_boundary = (

@@ -15,30 +15,112 @@ import * as runtime from "@dsh-external/mes-runtime";
 export const name = "dsh-mes-bridge";
 export const inject = ["tools"];
 
-const WORKBUDDY_ROUTE_TABLE = [
-  "## ZR-WorkBuddy 意图分流（强制 · 先看这张表）",
-  "| 用户意图 | 本轮第一个工具 | 禁止误用 |",
-  "| --- | --- | --- |",
-  "| 改代码 / 改页面 / 改菜单 / 删菜单子项 / 加功能 | `mes_code_dev_begin` | 不是审码、不是 Bash/git |",
-  "| 代码审核 / 审码 / code review / 看看改动 | `mes_code_review_begin` | 不是 `mes_code_dev_begin`、不是 git diff |",
-  "| 提交代码 / git commit / push 本批 | `mes_code_commit_begin` | 不是 `mes_code_review_run`、不是 Bash git |",
-  "| 部署 / 上线 / 预发 / 发布服务器 | `mes_code_deploy_begin` | 不是 SSH/rsync 自部署 |",
-  "| MES 查产量良率工单 | `mes_ask` | 不是写码 |",
-  "| PCB 工艺问答 | `mes_pcb` | 不是 MES 查数 |",
-].join("\n");
+const DSH_CURSOR_PKG = "@zhongruan/dsh-cursor-coding";
+const DSH_CURSOR_BEGIN = "zr_cursor_begin";
+const WB_CODE_DEV = "code-dev";
+const WB_BEGIN = "mes_code_dev_begin";
 
-const WORKBUDDY_CODE_DEV_PROMPT = [
-  "## ZR-WorkBuddy 写码路由（强制）",
-  "当用户要改代码、改页面、改菜单、挪菜单、加功能、做报表页、Cursor 写码、删除菜单子项时（**不是**审码/提交/部署）：",
-  "1. **本轮第一个工具调用必须是 `mes_code_dev_begin`，且 message=用户原话（原样，禁止留空）**。",
-  "2. **禁止**用 `run_code` / code-mode（会触发 scheduler.prepare 报错 → 本轮运行失败），以及 Bash / Grep / Glob / Read / Write / StrReplace 去扫或改用户工程来「完成写码」。",
-  "3. **禁止**先长思考、先查 Vite/日志/HMR；改菜单类诉求同样走 begin → 主聊天工具卡。",
-  "4. 工具卡内完成：选目录 → 梳理需求 → 确认后才由 Cursor Local 改盘；未确认禁止开工（确认只走 UI → /api/code-dev/confirm）。",
-  "5. `mes_code_dev_begin` 返回后**禁止**再输出任何用户可见文字（含「请在卡片中确认」「请在上方工具卡确认」）——卡已在主聊天展示，回复必须留空。",
-  "6. **禁止**在同一轮里再调其它工具（尤其 `run_code` / Write / StrReplace / Bash 改盘）；begin 成功即停，等用户在卡片操作。",
-  "7. 写码不会自动 git commit；提交用 `mes_code_commit_begin`；部署用 `mes_code_deploy_begin`。",
-  "示例：「看板管理菜单删除设备看板子项」→ 立刻 `mes_code_dev_begin`，message 填该句原文。",
-].join("\n");
+function dshHomeDirs() {
+  const out = [];
+  if (process.env.DSH_HOME) out.push(String(process.env.DSH_HOME));
+  const home = process.env.HOME || "";
+  if (home) {
+    out.push(path.join(home, ".dsh"));
+    out.push(path.join(home, ".dsh-workbuddy"));
+  }
+  return [...new Set(out)];
+}
+
+function isDshCursorBundleOn() {
+  for (const home of dshHomeDirs()) {
+    const p = path.join(home, "profiles", "web", "package.json");
+    try {
+      const data = JSON.parse(fs.readFileSync(p, "utf8"));
+      const bundles = (((data.dsh || {}).profile || {}).bundles || []).map(String);
+      if (bundles.includes(DSH_CURSOR_PKG)) return true;
+    } catch {
+      /* 读不到该 profile 则跳过 */
+    }
+  }
+  return false;
+}
+
+function toolNameSet(ctx) {
+  try {
+    const schemas =
+      ctx && ctx.tools && typeof ctx.tools.schemas === "function" ? ctx.tools.schemas() : [];
+    return new Set((schemas || []).map((s) => s && s.name).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+function codingBegin(ctx) {
+  // 与 coding_mutex.coding_begin 一致：WorkBuddy 开着优先生效；都关才看 DSH 残留工具。
+  const wbOn = readEnabled().includes(WB_CODE_DEV);
+  if (wbOn) return WB_BEGIN;
+  if (isDshCursorBundleOn() || toolNameSet(ctx).has(DSH_CURSOR_BEGIN)) return DSH_CURSOR_BEGIN;
+  return "";
+}
+
+function buildRouteTable(begin) {
+  const writeTool = begin || "（无：请只开一条写码通道）";
+  const otherWrite = begin === WB_BEGIN ? DSH_CURSOR_BEGIN : WB_BEGIN;
+  return [
+    "## ZR-WorkBuddy 意图分流（强制 · 先看这张表）",
+    "| 用户意图 | 本轮第一个工具 | 禁止误用 |",
+    "| --- | --- | --- |",
+    "| 改代码 / 改页面 / 改菜单 / 删菜单子项 / 加功能 | `" +
+      writeTool +
+      "` | 不是 `" +
+      otherWrite +
+      "`、不是审码、不是 Bash/git |",
+    "| 代码审核 / 审码 / code review / 看看改动 | `mes_code_review_begin` | 不是写码 begin、不是 git diff |",
+    "| 提交代码 / git commit / push 本批 | `mes_code_commit_begin` | 不是 `mes_code_review_run`、不是 Bash git |",
+    "| 部署 / 上线 / 预发 / 发布服务器 | `mes_code_deploy_begin` | 不是 SSH/rsync 自部署 |",
+    "| MES 查产量良率工单 | `mes_ask` | 不是写码 |",
+    "| PCB 工艺问答 | `mes_pcb` | 不是 MES 查数 |",
+  ].join("\n");
+}
+
+function buildCodeDevPrompt(begin) {
+  if (!begin) {
+    return [
+      "## 本机写码路由",
+      "当前没有已启用的写码入口。用户要写码时禁止 Bash/Write 改盘，禁止编造工具。",
+      "请打开其中一条（互斥，开一个会关另一个）：",
+      "- WorkBuddy 功能插件「本机 Cursor 写码」（code-dev）→ `" + WB_BEGIN + "`",
+      "- 或 DSH 设置 → Cursor 写码 → `" + DSH_CURSOR_BEGIN + "`",
+    ].join("\n");
+  }
+  const other = begin === WB_BEGIN ? DSH_CURSOR_BEGIN : WB_BEGIN;
+  const lines = [
+    "## ZR-WorkBuddy 写码路由（强制）",
+    "当用户要改代码、改页面、改菜单、挪菜单、加功能、做报表页、Cursor 写码、删除菜单子项时（**不是**审码/提交/部署）：",
+    "1. **本轮第一个工具调用必须是 `" +
+      begin +
+      "`，且 message=用户原话（原样，禁止留空）**。",
+    "2. **禁止**调用 `" + other + "`（两条写码通道互斥，不要两张确认卡叠在一起）。",
+    "3. **禁止**用 `run_code` / code-mode，以及 Bash / Grep / Glob / Read / Write / StrReplace 去扫或改用户工程来「完成写码」。",
+    "4. **禁止**先长思考、先查 Vite/日志/HMR。",
+  ];
+  if (begin === WB_BEGIN) {
+    lines.push(
+      "5. 工具卡内完成：选目录 → 梳理需求 → 确认后才由 Cursor Local 改盘；未确认禁止开工（确认只走 UI → /api/code-dev/confirm）。",
+      "6. `" +
+        begin +
+        "` 返回后**禁止**再输出任何用户可见文字——卡已在主聊天展示，回复必须留空。",
+      "7. **禁止**在同一轮里再调其它工具；begin 成功即停，等用户在卡片操作。",
+      "8. 写码不会自动 git commit；提交用 `mes_code_commit_begin`；部署用 `mes_code_deploy_begin`。",
+    );
+  } else {
+    lines.push(
+      "5. 后续确认/进度按该工具自身返回执行，不要在 WorkBuddy 侧另造流程。",
+      "6. 写码不会自动 git commit；提交用 `mes_code_commit_begin`；部署用 `mes_code_deploy_begin`。",
+    );
+  }
+  return lines.join("\n");
+}
 
 const WORKBUDDY_CODE_REVIEW_PROMPT = [
   "## ZR-WorkBuddy 审码路由（强制）",
@@ -243,20 +325,33 @@ export function apply(ctx) {
   };
   ctx.provide("mesEngine", mesEngine);
 
+  let promptApi = null;
+  let lastPromptKey = "";
+  function refreshCodingPrompt() {
+    if (!promptApi) return;
+    const begin = codingBegin(ctx);
+    const key =
+      begin + "|" + (readEnabled().includes(WB_CODE_DEV) ? "1" : "0") + "|" + (isDshCursorBundleOn() ? "1" : "0");
+    if (key === lastPromptKey) return;
+    lastPromptKey = key;
+    promptApi.section({
+      name: "workbuddy:route-table",
+      order: 34,
+      text: buildRouteTable(begin),
+    });
+    promptApi.section({
+      name: "workbuddy:code-dev-route",
+      order: 35,
+      text: buildCodeDevPrompt(begin),
+    });
+  }
+
   // 写入系统提示：不依赖工作区是否加载 .dsh/skills（用户工程目录常无本仓 Skill）
   try {
     const sp = ctx.get && ctx.get("systemPrompt");
     if (sp && typeof sp.section === "function") {
-      sp.section({
-        name: "workbuddy:route-table",
-        order: 34,
-        text: WORKBUDDY_ROUTE_TABLE,
-      });
-      sp.section({
-        name: "workbuddy:code-dev-route",
-        order: 35,
-        text: WORKBUDDY_CODE_DEV_PROMPT,
-      });
+      promptApi = sp;
+      refreshCodingPrompt();
       sp.section({
         name: "workbuddy:code-review-route",
         order: 36,
@@ -314,9 +409,26 @@ export function apply(ctx) {
       ctx.tools.guard((exec) => {
         const name = String((exec && exec.name) || "");
         const lower = name.toLowerCase();
+        const begin = codingBegin(ctx) || "当前已启用的写码 begin 工具";
+        if (name === DSH_CURSOR_BEGIN || name.indexOf("zr_cursor_") === 0) {
+          if (readEnabled().includes(WB_CODE_DEV)) {
+            return (
+              "WorkBuddy 写码车道已启用，与 DSH Cursor 写码互斥。请用 " + WB_BEGIN + "。"
+            );
+          }
+        }
+        if (name === WB_BEGIN || name.indexOf("mes_code_dev_") === 0) {
+          if (!readEnabled().includes(WB_CODE_DEV) && isDshCursorBundleOn()) {
+            return (
+              "DSH Cursor 写码已启用，与 WorkBuddy code-dev 互斥。请用 " + DSH_CURSOR_BEGIN + "。"
+            );
+          }
+        }
         if (name === "run_code" || lower === "run_code") {
           return (
-            "禁止使用 run_code。写码→mes_code_dev_begin；审码→mes_code_review_begin；" +
+            "禁止使用 run_code。写码→" +
+            begin +
+            "；审码→mes_code_review_begin；" +
             "提交→mes_code_commit_begin；部署→mes_code_deploy_begin。"
           );
         }
@@ -324,7 +436,9 @@ export function apply(ctx) {
           return (
             "禁止直接 " +
             name +
-            " 改用户工程。写码/删菜单必须走 mes_code_dev_begin → 确认卡 → Cursor 沙箱。"
+            " 改用户工程。写码/删菜单必须走 " +
+            begin +
+            "。"
           );
         }
         if (lower === "bash" || lower === "shell" || lower === "run_terminal_cmd" || lower === "terminal") {
@@ -333,7 +447,9 @@ export function apply(ctx) {
             return (
               "禁止用 " +
               name +
-              " 改盘（rm/mv/cp/重定向/git 写等）。请走 mes_code_dev_begin 工具卡。"
+              " 改盘（rm/mv/cp/重定向/git 写等）。请走 " +
+              begin +
+              "。"
             );
           }
           if (bashLooksLikeManualCodeReview(payload)) {
@@ -460,6 +576,16 @@ export function apply(ctx) {
     try {
       do {
         syncDirty = false;
+        try {
+          const mx = pluginsStore("coding-mutex");
+          if (mx && mx.mutex === "disabled-code-dev") {
+            console.log(
+              "[mes-bridge] 写码互斥：DSH Cursor 写码已启用，已自动停用 WorkBuddy code-dev",
+            );
+          }
+        } catch (e) {
+          console.warn("[mes-bridge] coding-mutex 失败", e && e.message ? e.message : e);
+        }
         const available = new Set(listFeatureIds());
         const target = readEnabled().filter((id) => available.has(id));
         const key = [...target].sort().join(",") + "|" + [...loadErrors.keys()].sort().join(",");
@@ -504,6 +630,7 @@ export function apply(ctx) {
             failed.length ? `; 失败: ${failed.join(", ")}` : "",
           );
         }
+        refreshCodingPrompt();
       } while (syncDirty);
     } catch (e) {
       console.warn("[mes-bridge] sync 外层失败:", e);
