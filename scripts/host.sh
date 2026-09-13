@@ -1,5 +1,5 @@
 #!/bin/bash
-# 宿主（host/）辅助：P1 状态检查 + P2 接线/启停（显式子命令，默认不乱启）
+# 聊天壳接线 / 启停（显式子命令，默认不乱启）。本仓不放 DSH 源码，一律走 PATH 上的 dsh。
 #
 #   scripts/host.sh status|where|hint
 #   scripts/host.sh verify              # 检查 link / profile Bridge / 引擎探活
@@ -8,7 +8,7 @@
 #   scripts/host.sh ensure-engine       # 仅 ensure 业务引擎
 #   scripts/host.sh ensure-web          # :3081 未监听则后台拉起（脱离 IDE 进程组）
 #   scripts/host.sh up                  # ensure-engine + ensure-web（推荐日常入口）
-#   scripts/host.sh start-web [--from-host]  # 强制启动（已在跑则报错）
+#   scripts/host.sh start-web           # 强制启动（已在跑则报错）
 #   scripts/host.sh restart-web         # stop-web + start-web（守护式）
 #   scripts/host.sh fix-ports           # 纠正端口错位 + 自检
 #   scripts/host.sh verify-ports        # 仅检查 :3081 WorkBuddy / :3080 官方
@@ -20,7 +20,7 @@
 #   - 桌面一体包默认 :13080（Application Support/.../dsh-home，另一套会话）
 #   - 可用 DSH_WEB_PORT=… / DSH_HOME=… / DSH_PROFILE=… 覆盖
 #
-# 拒绝裸 install|start|dev，防误伤。不改 code_deploy / 不焊业务进 host/。
+# 拒绝裸 install|start|dev，防误伤。不改 code_deploy / 不焊业务进 DSH。
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/workbuddy_web_env.sh
@@ -28,7 +28,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 prepend_workbuddy_node_path
 # shellcheck source=lib/web_port_verify.sh
 . "$ROOT/scripts/lib/web_port_verify.sh"
-HOST="$ROOT/host"
 WORKBUDDY_WEB_PORT="${WORKBUDDY_WEB_PORT:-3081}"
 OFFICIAL_WEB_PORT="${OFFICIAL_WEB_PORT:-3080}"
 # DSH_HOME 决定会话库；DSH_PROFILE 可为绝对路径，或相对 profiles 下的名字
@@ -54,25 +53,6 @@ TRUSTED_HOSTS="${DSH_TRUSTED_HOSTS:-}"
 CMD="${1:-status}"
 shift || true
 
-if [ ! -d "$HOST" ] || [ ! -f "$HOST/package.json" ]; then
-  echo "未找到 host/ 工程，请先按 docs/架构与选型/宿主二次开发-同仓host与部署方案.md 导入源码。" >&2
-  exit 1
-fi
-
-# host_dsh kept for future --from-host helpers; start-web 默认走 PATH dsh
-host_dsh() {
-  if [ -d "$HOST/node_modules" ] && [ -f "$HOST/apps/cli/src/bin.ts" ]; then
-    (cd "$HOST" && pnpm run dsh -- "$@")
-    return
-  fi
-  if command -v dsh >/dev/null 2>&1; then
-    dsh "$@"
-    return
-  fi
-  echo "找不到 host CLI 且 PATH 无 dsh。请先: cd host && pnpm install" >&2
-  exit 1
-}
-
 resolve_dsh_bin() {
   local dsh_bin
   dsh_bin="$(command -v dsh || true)"
@@ -93,21 +73,17 @@ prepend_dsh_node_path() {
 }
 
 cmd_status() {
-  echo "host 目录: $HOST"
-  python3 - <<'PY' "$HOST/package.json"
-import json,sys
-d=json.load(open(sys.argv[1],encoding="utf-8"))
-print("name:", d.get("name"))
-print("version:", d.get("version"))
-print("packageManager:", d.get("packageManager"))
-print("engines.node:", (d.get("engines") or {}).get("node"))
-PY
-  if [ -d "$HOST/node_modules" ]; then
-    echo "依赖: 已存在 host/node_modules"
+  echo "本仓不放 DSH 源码。聊天壳 = PATH 上的 dsh（npm @deepseek-ai/dsh）。"
+  local dsh_bin
+  dsh_bin="$(resolve_dsh_bin)"
+  if [ -n "$dsh_bin" ]; then
+    echo "dsh: $dsh_bin"
+    prepend_dsh_node_path "$dsh_bin"
+    "$dsh_bin" --version 2>/dev/null || true
   else
-    echo "依赖: 尚未 pnpm install"
+    echo "dsh: 未找到。请: npm i -g @deepseek-ai/dsh"
   fi
-  echo "说明文档: host/WORKBUDDY.md 、 host/UPSTREAM.md"
+  echo "说明: docs/架构与选型/宿主二次开发-同仓host与部署方案.md"
   echo "业务目录: apps/zr-workbuddy/"
   echo "DSH_HOME: $DSH_HOME_DIR（工作区 $(dsh_home_workspace_count "$DSH_HOME_DIR") 个）"
   local wb_pid
@@ -122,8 +98,8 @@ PY
 
 cmd_hint() {
   cat <<EOF
-【宿主操作提示】
-1. 装依赖:           cd host && pnpm install
+【聊天壳操作提示】
+1. 本机 CLI:         npm i -g @deepseek-ai/dsh
 2. 接线 Bridge:      scripts/host.sh wire
 3. 检查接线:         scripts/host.sh verify
 4. 日常一键保活:     scripts/host.sh up          # 引擎 + :3081（守护进程，不被 IDE 关掉）
@@ -132,7 +108,7 @@ cmd_hint() {
 7. 重启聊天壳:       scripts/host.sh restart-web
 8. 停 Web 宿主:      scripts/host.sh stop-web
 9. 生态插件: 宿主跑起来后用插件中心 / \`dsh plugin add\`——勿往引擎功能页硬塞整仓 zip
-10. 版本注意: 本仓 host/ 为 0.1.0-rc.8；若本机全局 dsh 更高，日常用 PATH dsh（start-web 默认）
+10. 本仓禁止再导入 DSH Studio 源码树。桌面包内嵌 CLI 见 desktop/runtime/host（打包时 npm 安装，不进 git）
 EOF
 }
 
@@ -209,16 +185,12 @@ cmd_wire() {
   done
   if [ ! -f "$PROFILE/package.json" ]; then
     echo "本机尚无 $PROFILE/package.json。" >&2
-    echo "请先按 DeepSeek Harness / host README 初始化 profiles/web，再重跑 wire。" >&2
+    echo "请先按 DeepSeek Harness 文档初始化 profiles/web，再重跑 wire。" >&2
     exit 1
-  fi
-  if [ ! -d "$HOST/node_modules" ]; then
-    echo "警告: host/node_modules 不存在；接线仍可写 profile，但 start-web 需先 pnpm install。" >&2
   fi
   if [ "$do_restart" -eq 1 ]; then
     echo "执行: plugin.sh --app zr-workbuddy install bridge --restart"
-    echo "提示: --restart 走 scripts/host.sh restart-web（DSH_HOME=~/.dsh-workbuddy，:3081）。" >&2
-    echo "      若要用本仓 host CLI，请改用: wire（无 restart）+ restart-web --from-host" >&2
+    echo "提示: --restart 走 scripts/host.sh restart-web（:$WORKBUDDY_WEB_PORT）。" >&2
     "$ROOT/scripts/plugin.sh" --app zr-workbuddy install bridge --restart
   else
     echo "执行: plugin.sh --app zr-workbuddy install bridge（不重启宿主）"
@@ -251,7 +223,6 @@ ensure_workbuddy_webserver_patch() {
 }
 
 _launch_web_daemon() {
-  local from_host="$1"
   sync_dev_engine_env
   # 强制会话库落到本脚本解析出的家目录（daemon 子进程也继承）
   export DSH_HOME="$DSH_HOME_DIR"
@@ -276,35 +247,18 @@ _launch_web_daemon() {
     done
   fi
 
-  if [ "$from_host" = "1" ]; then
-    if [ ! -d "$HOST/node_modules" ]; then
-      echo "缺少 host/node_modules。请先: cd host && pnpm install" >&2
-      exit 1
-    fi
-    echo "警告: --from-host 使用 host/ 源码 CLI（常落后于全局 dsh）。" >&2
-    echo "启动本仓 host CLI（守护）: dsh ${web_args[*]} （:$PORT）"
-    echo "日志: $log"
-    local quoted=""
-    local a
-    for a in "${web_args[@]}"; do
-      quoted="$quoted $(printf '%q' "$a")"
-    done
-    python3 "$DAEMONIZE" --cwd "$HOST" --log "$log" --pid "$pidf" -- \
-      bash -lc "exec pnpm run dsh --$quoted"
-  else
-    local dsh_bin
-    dsh_bin="$(resolve_dsh_bin)"
-    if [ -z "$dsh_bin" ]; then
-      echo "PATH 无 dsh。可装全局 CLI，或: scripts/host.sh start-web --from-host" >&2
-      exit 1
-    fi
-    prepend_dsh_node_path "$dsh_bin"
-    echo "启动全局 dsh（守护、脱离 IDE 进程组）: $dsh_bin ${web_args[*]} （:$PORT）"
-    echo "日志: $log"
-    # cwd=HOME：与 restart-dsh.sh 一致，credentials/profile 可解析
-    python3 "$DAEMONIZE" --cwd "$HOME" --log "$log" --pid "$pidf" -- \
-      "$dsh_bin" "${web_args[@]}"
+  local dsh_bin
+  dsh_bin="$(resolve_dsh_bin)"
+  if [ -z "$dsh_bin" ]; then
+    echo "PATH 无 dsh。请先: npm i -g @deepseek-ai/dsh" >&2
+    exit 1
   fi
+  prepend_dsh_node_path "$dsh_bin"
+  echo "启动全局 dsh（守护、脱离 IDE 进程组）: $dsh_bin ${web_args[*]} （:$PORT）"
+  echo "日志: $log"
+  # cwd=HOME：与 restart-dsh.sh 一致，credentials/profile 可解析
+  python3 "$DAEMONIZE" --cwd "$HOME" --log "$log" --pid "$pidf" -- \
+    "$dsh_bin" "${web_args[@]}"
 }
 
 _wait_web() {
@@ -324,9 +278,13 @@ _wait_web() {
 }
 
 cmd_start_web() {
-  local from_host=0
   for a in "$@"; do
-    case "$a" in --from-host) from_host=1 ;; esac
+    case "$a" in
+      --from-host)
+        echo "已废弃 --from-host：本仓不再包含 DSH 源码。请用全局 dsh（npm i -g @deepseek-ai/dsh）。" >&2
+        exit 2
+        ;;
+    esac
   done
 
   if [ ! -f "$PROFILE/package.json" ]; then
@@ -340,7 +298,7 @@ cmd_start_web() {
     exit 2
   fi
 
-  _launch_web_daemon "$from_host"
+  _launch_web_daemon
   _wait_web
 }
 
@@ -360,7 +318,7 @@ cmd_ensure_web() {
     echo "端口占用但 HTTP 异常（$code），重启聊天壳…" >&2
     cmd_stop_web || true
   fi
-  _launch_web_daemon 0
+  _launch_web_daemon
   _wait_web
 }
 
@@ -394,7 +352,7 @@ cmd_fix_ports() {
   if ! cmd_ensure_engine; then
     echo "警告: 引擎 ensure 未成功，继续拉起聊天壳…" >&2
   fi
-  _launch_web_daemon 0
+  _launch_web_daemon
   _wait_web || true
   local i wb_log
   wb_log="$(web_port_log_file "$ROOT" "$WORKBUDDY_WEB_PORT")"
@@ -435,7 +393,7 @@ cmd_up() {
 }
 
 case "$CMD" in
-  where) echo "$HOST" ;;
+  where) resolve_dsh_bin; echo ;;
   status) cmd_status ;;
   hint) cmd_hint ;;
   verify) cmd_verify ;;
@@ -453,7 +411,7 @@ case "$CMD" in
     exit 2
     ;;
   *)
-    echo "用法: scripts/host.sh status|where|hint|verify|wire [--restart]|up|ensure-engine|ensure-web|start-web [--from-host]|restart-web|fix-ports|verify-ports|stop-web" >&2
+    echo "用法: scripts/host.sh status|where|hint|verify|wire [--restart]|up|ensure-engine|ensure-web|start-web|restart-web|fix-ports|verify-ports|stop-web" >&2
     exit 1
     ;;
 esac

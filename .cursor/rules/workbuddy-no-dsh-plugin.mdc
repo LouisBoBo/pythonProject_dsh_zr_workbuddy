@@ -13,7 +13,8 @@ alwaysApply: true
 - 任何 DSH 生态 / 公司插件源码，例如 `@zhongruan/dsh-cursor-coding`、`dsh-pcb-helper`、`dsh-pcb-8d`、`dsh-weather` 以及同套仓其它包。
 - 仓外典型根目录：`/Users/hebo/Desktop/中软项目/pythonProject_dsh_plugin/`（整树，含其下所有插件）。
 - `~/.dsh/**/node_modules/`、profile 已装 Bundle、插件市场下来的包。
-- 为「修好某 DSH 插件」去改 `host/` 内核，或把插件逻辑焊进 `mes-bridge` / `features/`。
+- 为「修好某 DSH 插件」去改 Studio / DSH 内核，或把插件逻辑焊进 `mes-bridge` / `features/`。
+- 把 DeepSeek Harness Studio 源码树再拷回本仓 `host/`。
 
 ## 允许改（仅本仓 WorkBuddy）
 

@@ -19,7 +19,7 @@
 > - 企业级安全底线：`.cursor/rules/workbuddy-security-enterprise.mdc`  
 > 加固方案全文：`docs/安全/企业级安全加固方案.md`。
 
-本仓库**两条插件通道分开**：自有/契约包进 `features/`；**DSH 生态第三方必须走 Studio 插件中心**（引擎 zip 装不了，见 `docs/产品与口径/最简产品形态.md`）。业务验收仍认引擎网页；生态插件验收认插件中心「运行中」。`host/` 提供可接线的 Studio，日常当运行时钉版本，不把业务焊进内核。
+本仓库**两条插件通道分开**：自有/契约包进 `features/`；**DSH 生态第三方必须走 Studio 插件中心**（引擎 zip 装不了，见 `docs/产品与口径/最简产品形态.md`）。业务验收仍认引擎网页；生态插件验收认插件中心「运行中」。聊天壳用本机/桌面包里的 **`dsh` 发行版**（`npm @deepseek-ai/dsh`），**本仓不放 DSH 源码**，不焊业务进 Studio。
 
 | # | 标准（铁律） | 含义 |
 |---|---|---|
@@ -27,14 +27,14 @@
 | 2 | **业务不绑宿主** | 业务收尾不以「必须打开 Harness/聊天」为成败条件；无远端 profile 时跳过宿主重启属正常。`auto_restart_bridge`：**非一体**默认 false；**`unified_product=true`（一体部署）**时默认同拉远端聊天壳（仍可显式 false 只同步 bridge 文件）。业务验收仍认引擎探活/入口 |
 | 3 | **业务验收看引擎** | 成败只认引擎网页 / 探活 / `engine.sh … ensure\|restart`；bridge 文件同步≠业务成败 |
 | 4 | **WorkBuddy 第三方 → features** | 校验 → enable → 可按单元部署；**不**把任意生态 zip 硬塞进引擎功能页 |
-| 5 | **生态第三方 → Studio 插件中心** | 市场里的 Cordis/Skill/MCP 包：宿主跑起来后用插件中心安装（写入 Profile 并重启 Host）。**禁止**拿这类包走 `install-feature`。`host/` 钉版本作运行时；禁止把业务焊进 Studio 内核 |
+| 5 | **生态第三方 → Studio 插件中心** | 市场里的 Cordis/Skill/MCP 包：宿主跑起来后用插件中心安装（写入 Profile 并重启 Host）。**禁止**拿这类包走 `install-feature`。运行时钉 `dsh` 发行版；禁止把业务焊进 Studio 内核；禁止再把 Studio 源码树倒进本仓 |
 
 **边界（勿混）：**
 
-- 「聊天里 Cordis 热挂 Agent 工具」发生在 **宿主进程**（`host/` 接线并启动后）——**不是**员工引擎网页验收项。  
+- 「聊天里 Cordis 热挂 Agent 工具」发生在 **宿主进程**（`dsh web` 接线并启动后）——**不是**员工引擎网页验收项。  
 - 删掉 Bridge = 退出 DSH 宿主架构；与「要用 DSH 架构」冲突，故**不得删**。  
-- **禁止**把业务焊进 `host/` 内核；**禁止**把完整宿主倒进根目录 `vendor/`。  
-- `scripts/host.sh` 仅状态/提示；**不**自动 `pnpm install` / 启动（防误伤）。P2 接线、P3 远端部署须另开确认。
+- **禁止**把业务焊进 Studio / DSH 内核；**禁止**把完整宿主倒进根目录 `vendor/` 或再建 `host/` 源码树。  
+- `scripts/host.sh` 接线和启停聊天壳（走 PATH 上的 `dsh`）；**禁止**擅自全量装 DSH 源码依赖。P2 接线、P3 远端部署须另开确认。
 
 **安全（与铁律并行，不另起架构）：** 写码/提交/部署的人确认须最终可被引擎验证（HITL nonce）；引擎默认只绑回环；审码主路径须路径票据。细节与 P0～P2 见 `docs/安全/企业级安全加固方案.md`。
 
@@ -46,9 +46,9 @@
 
 | 放哪 | 是什么 |
 |---|---|
-| `scripts/` | 脚手架、bridge 接线、引擎启停；`host.sh` 仅宿主状态提示 |
-| `vendor/`（仓根） | 业务侧小依赖钉选——**不是** `host/vendor/` |
-| `host/` | 完整宿主源码（二次开发 / 生态插件）；与业务分轨发版 |
+| `scripts/` | 脚手架、bridge 接线、引擎启停；`host.sh` 接 PATH 上的 `dsh` |
+| `vendor/`（仓根） | 业务侧小依赖钉选——**不是** DSH Studio 源码 |
+| `desktop/` | 一体安装包；打包时把 `@deepseek-ai/dsh` 装进 `desktop/runtime/host`（gitignore，不是源码树） |
 
 - **禁止**硬编码：业务 URL、LLM Key、面板文案、具体业务工具名  
 - 稳定接线：`~/.dsh/link/DSH-ZR-WorkBuddy` → 本仓库；profile 用相对  

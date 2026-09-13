@@ -4,7 +4,7 @@
 
 1. **热插拔（自有能力）**：`features/` 启停约 1s  
 2. **按单元增量部署**：改哪发哪（人确认后 rsync）  
-3. **第三方生态插件**：Harness Studio 插件中心安装进 Profile（这就是要 `host/` 的原因）  
+3. **第三方生态插件**：Harness Studio 插件中心安装进 Profile（要跑起来的 `dsh`，本仓不放 Studio 源码）  
 
 业务验收看 **引擎网页 / API**；生态插件验收看 **Studio 插件中心「运行中」**。
 

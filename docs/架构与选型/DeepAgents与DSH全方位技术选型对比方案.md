@@ -53,7 +53,7 @@
 DSH / Cordis 在本仓的角色是：
 
 1. **插件容器**（唯一常驻包 `plugins/mes-bridge` + `features/` 热插拔）  
-2. **可选聊天壳**（同仓 `host/`，常见 `:3080`）  
+2. **可选聊天壳**（发行版 `dsh`，开发常见 `:3081`）  
 3. **工程范式**（新能力只进 `features/`、禁止再堆业务正式 Cordis 包）
 
 算数、HITL、MES 查数、写码 Job、审码、提交、部署都在 **Python 引擎**。`AGENTS.md` 与三大核心目标方案已写死：业务验收看引擎网页，不看 Harness 是否打开。
@@ -139,7 +139,7 @@ Vue 3 / Electron
 | 算数真相 | `apps/zr-workbuddy/engine/app/cli_ops.py` |
 | 启停真相 | `engine/data/plugins.json` + `plugins_store.py` |
 | 写码 | `engine/app/code_dev/cursor_agent.py`（Cursor Local，**不是** DSH coding agent） |
-| 上游宿主 | 同仓 `host/`（DeepSeek Harness Studio 0.1.0-rc.8） |
+| 上游宿主 | 发行版 `@deepseek-ai/dsh`（本仓不放 Studio 源码） |
 
 样板（`features/mes-ask/index.js`）：禁止 `import` npm；`eng.defineTool` + `eng.runEngine(["ask", question])` + `attachChart`。
 
@@ -240,9 +240,9 @@ DSH（DeepSeek Harness）
 | 项 | Deep Agents 仓 | DSH 仓（本仓） |
 |----|----------------|----------------|
 | 业务核心 LOC | agent ~28k + api ~8.8k + web ~25k ≈ **62k** | engine ~23k + features ~1.4k + plugins ~4.8k ≈ **31k** |
-| 旁路 / 其它 | local_dev ~12k + cursor_dev ~4.8k + automations ~4.2k | 同仓 `host/` 上游约 **1.47M**（非业务，但是仓内负担） |
+| 旁路 / 其它 | local_dev ~12k + cursor_dev ~4.8k + automations ~4.2k | 业务仓不含 Studio 源码（发行版 `dsh` 在 PATH / 桌面包） |
 | 主语言 | Python Agent + Vue | Python 引擎 + JS feature/bridge + 可选 TS Host |
-| 关键依赖 | deepagents 0.7.7、langgraph 1.2、cursor-sdk 1.0.28 | fastapi + cursor-sdk + vendor `@deepseek-ai/*` + host rc.8 |
+| 关键依赖 | deepagents 0.7.7、langgraph 1.2、cursor-sdk 1.0.28 | fastapi + cursor-sdk + vendor `@deepseek-ai/*` + 发行版 dsh |
 | 测试 | GitHub Actions `make ci`；约 62 个 `test_*.py` | `scripts/test.sh`；约 10 个测试模块；**无业务仓 CI** |
 | 桌面 | Electron 33，嵌 Python runtime + web dist | Electron 33，再嵌 Host（更重、版本更脆） |
 | 默认端口 | Web 5180 / API 8765 / 探活沙箱 8001 | 引擎 8000（`runtime.yaml`）/ 可选 Host 3080 |
@@ -441,7 +441,7 @@ G1 **只保证「工具注册」热插拔**。
 
 本仓三大核心目标（热插拔 / 增量部署 / 第三方）与「企业 MES 助手要深」同时存在，因此默认走 **D**。
 
-选项 C 为什么否：收益几乎只剩「写码手感 / 插件哲学」，而写码已经旁路给 Cursor；A/B/C 类 MES 能力、图表协议、嵌入、JWT、厂区资料包全部要重做。本仓自己已经拒绝了这条路（业务不焊进 `host/`）。
+选项 C 为什么否：收益几乎只剩「写码手感 / 插件哲学」，而写码已经旁路给 Cursor；A/B/C 类 MES 能力、图表协议、嵌入、JWT、厂区资料包全部要重做。本仓自己已经拒绝了这条路（业务不焊进 Studio）。
 
 ---
 
@@ -491,7 +491,7 @@ simplified 自己的插件设计稿承认了单体痛点，却还没开工。本
 | **D2 双注册** | 每个工具：feature 注册到 Cordis（给 Host 用）+ 注册到 Python Agent（给员工页用）；算数只留 engine | disable feature 后两面工具都消失 | 在 Node 里复制一份分析逻辑 |
 | **D3 迁 MES 深度** | 按需迁实体目录、图表协议、探活、playbook；能热关的做成 feature | 能力矩阵差距缩小 | 一次搬完 40 个工具 |
 | **D4 发布不变** | 继续 G2 单元 rsync；feature 变更不重启引擎；engine 变更才重启引擎 | 改一个 feature 只发该单元 | 把 Host 重启当业务成败 |
-| **D5 可选 Host** | Host 保持二次开发 / 生态插件；永不作为员工验收 | 无远端 profile 时跳过宿主重启属正常 | 业务焊进 `host/` |
+| **D5 可选 Host** | Host 用发行版 `dsh` 装生态插件；永不作为员工验收 | 无远端 profile 时跳过宿主重启属正常 | 业务焊进 Studio / 本仓再塞源码树 |
 
 ### 11.3 与现有 P0/P1 的关系
 

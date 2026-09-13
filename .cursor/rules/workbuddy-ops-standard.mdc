@@ -5,7 +5,7 @@ alwaysApply: true
 
 # WorkBuddy 五条铁律（不可推翻）
 
-权威细则：`AGENTS.md` §0、`docs/架构与选型/三大核心目标落地方案.md`、`host/WORKBUDDY.md`。  
+权威细则：`AGENTS.md` §0、`docs/架构与选型/三大核心目标落地方案.md`。  
 安全加固：`docs/安全/企业级安全加固方案.md` + `.cursor/rules/workbuddy-security-enterprise.mdc`。
 
 ## 铁律
@@ -27,8 +27,8 @@ alwaysApply: true
    **禁止**任意生态 zip 硬塞进引擎功能页。
 
 5. **生态 Cordis/Skill 走宿主**  
-   源码在 `host/`，与业务分轨。宿主跑起来后用插件中心/官方命令装。  
-   `scripts/host.sh` 仅状态提示；**禁止**擅自全量 `pnpm install`/启动宿主，除非用户明确要求。
+   聊天壳用本机/桌面包的 `dsh` 发行版，**本仓不放 DSH 源码**。宿主跑起来后用插件中心/官方命令装。  
+   `scripts/host.sh` 接线和启停（走 PATH `dsh`）；**禁止**把 Studio 源码树倒进本仓，除非用户明确要求另开独立仓。
 
 ## 分层（实施禁止推翻）
 
@@ -37,11 +37,11 @@ alwaysApply: true
 | 唯一常驻包 | `plugins/mes-bridge` | 禁止第二个业务 bridge |
 | 业务能力 | `features/*` | 禁止 npm import；经 `mesEngine` |
 | 算数 | `engine/` | 密钥只在 `config.yaml`；只绑 `127.0.0.1` |
-| 宿主 | `host/` | 禁止焊业务进内核；禁止倒进根 `vendor/` |
+| 宿主 | 本机 `dsh` / 桌面包 `desktop/runtime/host` | 禁止焊业务进 Studio；禁止倒进根 `vendor/` 或再建源码树 |
 
 ## 禁止说成 / 可以说
 
 - ❌「必须重启 DSH 业务才生效」→ ✅ 日常改 feature 热插拔  
 - ❌「删掉 Bridge 也一样」→ ✅ 删 Bridge = 退出 DSH 架构  
 - ❌「引擎页能装任意上游包」→ ✅ 生态走宿主；features 要 manifest+index  
-- ✅「架构在 Bridge+features；验收看引擎；生态在 host 装」
+- ✅「架构在 Bridge+features；验收看引擎；生态在 Studio 插件中心装」
