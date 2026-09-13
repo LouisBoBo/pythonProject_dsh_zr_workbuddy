@@ -3,7 +3,6 @@
     "mes-config",
     "mes-pcb",
     "mes-ask",
-    "code-dev",
     "code-review",
     "code-commit",
     "code-deploy"

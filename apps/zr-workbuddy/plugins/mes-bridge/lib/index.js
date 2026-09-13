@@ -97,9 +97,9 @@ function buildCodeDevPrompt(begin) {
   const lines = [
     "## ZR-WorkBuddy 写码路由（强制）",
     "当用户要改代码、改页面、改菜单、挪菜单、加功能、做报表页、Cursor 写码、删除菜单子项时（**不是**审码/提交/部署）：",
-    "1. **本轮第一个工具调用必须是 `" +
+    "1. **写码入口是 `" +
       begin +
-      "`，且 message=用户原话（原样，禁止留空）**。",
+      "`**（message=用户原话，禁止留空）。入口级新增/删除时按其工具说明执行，不要在 WorkBuddy 侧另造流程。",
     "2. **禁止**调用 `" + other + "`（两条写码通道互斥，不要两张确认卡叠在一起）。",
     "3. **禁止**用 `run_code` / code-mode，以及 Bash / Grep / Glob / Read / Write / StrReplace 去扫或改用户工程来「完成写码」。",
     "4. **禁止**先长思考、先查 Vite/日志/HMR。",
@@ -115,8 +115,11 @@ function buildCodeDevPrompt(begin) {
     );
   } else {
     lines.push(
-      "5. 后续确认/进度按该工具自身返回执行，不要在 WorkBuddy 侧另造流程。",
-      "6. 写码不会自动 git commit；提交用 `mes_code_commit_begin`；部署用 `mes_code_deploy_begin`。",
+      "5. 写码流程由 `" +
+        begin +
+        "` 自己的工具说明与返回决定（入口级新增/删除可能先出选择题，再出确认卡）。",
+      "6. **禁止编造确认卡**：只有主聊天出现写码工具卡才算已发出；工具空返回 / 仍在出题 ≠ 已确认。此时按该工具返回执行（或再调 begin），不要对用户说「已发出确认卡」。",
+      "7. 写码不会自动 git commit；提交用 `mes_code_commit_begin`；部署用 `mes_code_deploy_begin`。",
     );
   }
   return lines.join("\n");

@@ -14,6 +14,7 @@ const net = require('net')
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
+const persistUserFeatures = require('./lib/persist-user-features')
 
 const ENGINE_PORT_START = Number(process.env.WORKBUDDY_DESKTOP_ENGINE_PORT || 18000)
 const DSH_PORT_START = Number(process.env.WORKBUDDY_DESKTOP_DSH_PORT || 13080)
@@ -32,6 +33,8 @@ let mainWindow = null
 let shuttingDown = false
 /** @type {string} */
 let persistedEngineDir = ''
+/** @type {string} */
+let persistedAppRoot = ''
 
 ipcMain.handle('workbuddy:pick-folder', async (event, prompt) => {
   const srcUrl = String((event.sender && event.sender.getURL && event.sender.getURL()) || '')
@@ -87,6 +90,15 @@ function marketRuntimeRoot() {
 
 function persistRoot() {
   return path.join(app.getPath('userData'), 'persist')
+}
+
+function safePersistFeatures(fn, label, args) {
+  try {
+    return fn(args) || []
+  } catch (err) {
+    console.error('[desktop]', label, err && err.message ? err.message : err)
+    return []
+  }
 }
 
 function stashEngineUserState(engineDir) {
@@ -168,6 +180,13 @@ function ensureWritableAppCopy() {
   }
   const eng = path.join(dstApp, 'apps', 'zr-workbuddy', 'engine')
   if (fs.existsSync(eng)) stashEngineUserState(eng)
+  if (fs.existsSync(dstApp)) {
+    safePersistFeatures(persistUserFeatures.stashUserFeatures, 'stash user features', {
+      liveAppRoot: dstApp,
+      bundleAppRoot: srcApp,
+      persistDir: persistRoot(),
+    })
+  }
   if (needRefresh) {
     fs.mkdirSync(path.dirname(dstApp), { recursive: true })
     if (fs.existsSync(dstApp)) {
@@ -177,12 +196,18 @@ function ensureWritableAppCopy() {
     fs.writeFileSync(marker, want, 'utf8')
   }
   restoreEngineUserState(eng)
+  safePersistFeatures(persistUserFeatures.restoreUserFeatures, 'restore user features', {
+    liveAppRoot: dstApp,
+    bundleAppRoot: srcApp,
+    persistDir: persistRoot(),
+  })
   const cfg = path.join(eng, 'config', 'config.yaml')
   const example = path.join(eng, 'config', 'config.example.yaml')
   if (!fs.existsSync(cfg) && fs.existsSync(example)) {
     fs.copyFileSync(example, cfg)
   }
   persistedEngineDir = eng
+  persistedAppRoot = dstApp
   return { appRoot: dstApp, engineDir: eng }
 }
 
@@ -1156,16 +1181,27 @@ app.whenReady().then(() => {
   })
 })
 
+function stashDesktopUserState() {
+  if (persistedEngineDir) stashEngineUserState(persistedEngineDir)
+  if (persistedAppRoot) {
+    safePersistFeatures(persistUserFeatures.stashUserFeatures, 'stash user features on quit', {
+      liveAppRoot: persistedAppRoot,
+      bundleAppRoot: path.join(runtimeRoot(), 'app'),
+      persistDir: persistRoot(),
+    })
+  }
+}
+
 app.on('window-all-closed', () => {
   shuttingDown = true
-  if (persistedEngineDir) stashEngineUserState(persistedEngineDir)
+  stashDesktopUserState()
   killChildren()
   if (process.platform !== 'darwin') app.quit()
 })
 
 app.on('before-quit', () => {
   shuttingDown = true
-  if (persistedEngineDir) stashEngineUserState(persistedEngineDir)
+  stashDesktopUserState()
   killChildren()
 })
 

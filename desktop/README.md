@@ -44,6 +44,7 @@ WorkBuddy 的 Key / MES / SSH / 工作区写在本机：
 `~/Library/Application Support/zr-workbuddy-desktop/persist/`
 
 升级安装包会刷新内嵌代码，但会把这份配置拷回去。  
+**用户后来在引擎「功能插件」页装上的 WorkBuddy 功能**（安装包里没有的 `features/<id>`）也会进 `persist/user-features/`，升级后自动填回。出厂打进安装包的功能以新包为准。  
 **不要删** `~/Library/Application Support/zr-workbuddy-desktop/`，否则等于清数据重装。
 
 ## 说明

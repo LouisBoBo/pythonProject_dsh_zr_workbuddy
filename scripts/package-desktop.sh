@@ -313,6 +313,8 @@ export CSC_IDENTITY_AUTO_DISCOVERY="${CSC_IDENTITY_AUTO_DISCOVERY:-false}"
 # 打包前语法检查，避免再把坏 main.js 打进 asar
 node --check "$ROOT/desktop/main.js" || { err "desktop/main.js 语法错误"; exit 1; }
 node --check "$ROOT/desktop/preload.js" || { err "desktop/preload.js 语法错误"; exit 1; }
+node --check "$ROOT/desktop/lib/persist-user-features.js" || { err "persist-user-features.js 语法错误"; exit 1; }
+node "$ROOT/desktop/tests/test_persist_user_features.js" || { err "persist-user-features 单测失败"; exit 1; }
 
 (cd "$ROOT/desktop" && npm install)
 (

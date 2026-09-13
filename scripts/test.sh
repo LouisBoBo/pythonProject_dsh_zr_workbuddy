@@ -71,4 +71,9 @@ if [ -f "$ENG/engine_cli.py" ] && [ -n "$TEST_PYTHON" ]; then
   echo
 fi
 
+if [ -f "$ROOT/desktop/tests/test_persist_user_features.js" ]; then
+  echo "== desktop persist user features =="
+  node "$ROOT/desktop/tests/test_persist_user_features.js"
+fi
+
 echo "✅ test.sh 完成 ($APP)"

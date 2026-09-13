@@ -1,0 +1,26 @@
+---
+description: 强约束——只改本仓 WorkBuddy；任何 DSH 插件都不改，有问题只提出来
+alwaysApply: true
+---
+
+# 分仓改码（不可推翻）
+
+本仓 Agent **只许改 DSH-ZR-WorkBuddy（WorkBuddy）**。  
+**所有 DSH 插件**（不限 Cursor 写码）一律不改；发现问题只指出路径与现象，由用户去对应插件项目改。
+
+## 禁止改
+
+- 任何 DSH 生态 / 公司插件源码，例如 `@zhongruan/dsh-cursor-coding`、`dsh-pcb-helper`、`dsh-pcb-8d`、`dsh-weather` 以及同套仓其它包。
+- 仓外典型根目录：`/Users/hebo/Desktop/中软项目/pythonProject_dsh_plugin/`（整树，含其下所有插件）。
+- `~/.dsh/**/node_modules/`、profile 已装 Bundle、插件市场下来的包。
+- 为「修好某 DSH 插件」去改 `host/` 内核，或把插件逻辑焊进 `mes-bridge` / `features/`。
+
+## 允许改（仅本仓 WorkBuddy）
+
+- `apps/zr-workbuddy/`（含唯一总管 `plugins/mes-bridge` 与 `features/`）、`engine/`、`scripts/`、`docs/`、本仓 `.cursor/rules/`。
+- `mes-bridge` 是 WorkBuddy 业务总管，**不是**上面说的 DSH 插件。
+
+## 发现 DSH 插件问题时
+
+- 用文字说明：哪个包、哪个文件/行为、期望与现状。
+- **禁止**自行打开插件仓改文件、build、提交、重启以落地修复。
