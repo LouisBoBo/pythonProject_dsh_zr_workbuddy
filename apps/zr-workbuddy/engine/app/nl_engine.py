@@ -382,6 +382,22 @@ async def _llm_call(
             "Pragma": "no-cache",
         }
 
+    def _record_usage(raw: dict, used_model: str, *, ok: bool) -> None:
+        try:
+            from .usage import append_event, current_job_id, current_lane, from_openai_usage
+
+            append_event(
+                source="llm",
+                lane=current_lane("chat"),
+                provider=provider,
+                model=used_model or model or "",
+                tokens=from_openai_usage(raw.get("usage") if isinstance(raw, dict) else None),
+                ok=ok,
+                job_id=current_job_id(),
+            )
+        except Exception:
+            pass
+
     async def _do(m: str):
         payload = {
             "model": m,
@@ -396,7 +412,9 @@ async def _llm_call(
         async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.post(v1 + "/chat/completions", headers=headers, json=payload)
             r.raise_for_status()
-            msg = r.json()["choices"][0]["message"]
+            body = r.json()
+            _record_usage(body if isinstance(body, dict) else {}, m, ok=True)
+            msg = body["choices"][0]["message"]
             content = (msg.get("content") or "").strip()
             reasoning = (
                 msg.get("reasoning_content")
@@ -437,16 +455,20 @@ async def llm_freeform(
     timeout: float = 60,
     temperature: float = 0.3,
     no_cache: bool = False,
+    lane: str = "",
 ) -> str | None:
     """自由对话式 LLM 调用（非 JSON 意图解析）。"""
-    return await _llm_call(
-        [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        llm_cfg,
-        timeout=timeout,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        no_cache=no_cache,
-    )
+    from .usage import usage_scope
+
+    with usage_scope(lane=lane):
+        return await _llm_call(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            llm_cfg,
+            timeout=timeout,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            no_cache=no_cache,
+        )
 
 
 async def llm_freeform_stream(
@@ -457,6 +479,7 @@ async def llm_freeform_stream(
     max_tokens: int = 4096,
     timeout: float = 120,
     temperature: float = 0.35,
+    lane: str = "",
 ):
     """流式自由对话。只吐原始增量，切分由调用方做全文解析（避免标记被拆碎漏出）。
 
@@ -504,47 +527,69 @@ async def llm_freeform_stream(
         "max_tokens": max_tokens,
         "stream": True,
     }
+    if provider != "ollama":
+        payload["stream_options"] = {"include_usage": True}
+
+    last_usage = None
+    from .usage import usage_scope
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=15.0)) as client:
-            async with client.stream(
-                "POST",
-                v1 + "/chat/completions",
-                headers=headers,
-                json=payload,
-            ) as resp:
-                if resp.status_code >= 400:
-                    body = (await resp.aread()).decode("utf-8", errors="replace")[:300]
-                    yield {"type": "error", "detail": f"LLM HTTP {resp.status_code}: {body}"}
-                    return
-                async for line in resp.aiter_lines():
-                    if not line or line.startswith(":"):
-                        continue
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        obj = _json.loads(data)
-                    except Exception:
-                        continue
-                    choices = obj.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta") or {}
-                    reasoning = delta.get("reasoning_content") or delta.get("reasoning")
-                    content = delta.get("content")
-                    if reasoning:
-                        yield {"type": "reasoning", "delta": reasoning}
-                    if content:
-                        yield {"type": "content", "delta": content}
+        with usage_scope(lane=lane):
+            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=15.0)) as client:
+                async with client.stream(
+                    "POST",
+                    v1 + "/chat/completions",
+                    headers=headers,
+                    json=payload,
+                ) as resp:
+                    if resp.status_code >= 400:
+                        body = (await resp.aread()).decode("utf-8", errors="replace")[:300]
+                        yield {"type": "error", "detail": f"LLM HTTP {resp.status_code}: {body}"}
+                        return
+                    async for line in resp.aiter_lines():
+                        if not line or line.startswith(":"):
+                            continue
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            obj = _json.loads(data)
+                        except Exception:
+                            continue
+                        if isinstance(obj, dict) and obj.get("usage"):
+                            last_usage = obj.get("usage")
+                        choices = obj.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta") or {}
+                        reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                        content = delta.get("content")
+                        if reasoning:
+                            yield {"type": "reasoning", "delta": reasoning}
+                        if content:
+                            yield {"type": "content", "delta": content}
+            try:
+                from .usage import append_event, current_job_id, current_lane, from_openai_usage
+
+                append_event(
+                    source="llm",
+                    lane=current_lane(lane or "chat"),
+                    provider=provider,
+                    model=model or "deepseek-chat",
+                    tokens=from_openai_usage(last_usage if isinstance(last_usage, dict) else None),
+                    ok=True,
+                    job_id=current_job_id(),
+                )
+            except Exception:
+                pass
         yield {"type": "done"}
     except Exception as e:
         yield {"type": "error", "detail": f"{type(e).__name__}: {e}"}
 
 
-async def llm_chat(text: str, llm_cfg: dict, context: str) -> dict | None:
+async def llm_chat(text: str, llm_cfg: dict, context: str, *, lane: str = "chat") -> dict | None:
     """大模型理解任何输入 → 返回：
     - {"kind":"query","intent":{...}}  查数据
     - {"kind":"code_dev","reply":"..."} 写码意图（由调用方接管）
@@ -555,6 +600,7 @@ async def llm_chat(text: str, llm_cfg: dict, context: str) -> dict | None:
     from . import plugins_store
     from .code_deploy.ops import FEATURE_ID as CODE_DEPLOY_FEATURE
     from .code_dev.ops import FEATURE_ID as CODE_DEV_FEATURE
+    from .usage import usage_scope
 
     if plugins_store.is_enabled(CODE_DEV_FEATURE):
         code_boundary = (
@@ -585,10 +631,11 @@ async def llm_chat(text: str, llm_cfg: dict, context: str) -> dict | None:
         .replace("__CODE_DEV_BOUNDARY__", code_boundary)
         .replace("__CODE_DEPLOY_BOUNDARY__", deploy_boundary)
     )
-    content = await _llm_call([
-        {"role": "system", "content": system},
-        {"role": "user", "content": text},
-    ], llm_cfg)
+    with usage_scope(lane=lane):
+        content = await _llm_call([
+            {"role": "system", "content": system},
+            {"role": "user", "content": text},
+        ], llm_cfg)
     if not content:
         return None
     obj = _extract_json(content)

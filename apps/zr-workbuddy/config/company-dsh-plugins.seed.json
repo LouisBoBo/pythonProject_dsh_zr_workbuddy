@@ -1,0 +1,70 @@
+{
+  "name": "company-dsh-plugins",
+  "url": "http://175.178.238.31/dsh-plugins",
+  "updated": "2026-09-11",
+  "count": 4,
+  "categories": {
+    "tools": {
+      "en": "Tools & Capabilities",
+      "zh": "工具与能力"
+    }
+  },
+  "plugins": [
+    {
+      "name": "@zhongruan/dsh-pcb-helper",
+      "owner": "中软",
+      "url": "https://github.com/zhongruan/dsh-pcb-helper",
+      "category": "tools",
+      "description": {
+        "zh": "PCB 尺寸解析、BOM 清单统计",
+        "en": "PCB dimension parsing and BOM counting"
+      },
+      "npm": "@zhongruan/dsh-pcb-helper",
+      "version": "0.1.0",
+      "install": "dsh plugin --profile web add @zhongruan/dsh-pcb-helper",
+      "added": "2026-09-11"
+    },
+    {
+      "name": "@zhongruan/dsh-weather",
+      "owner": "中软",
+      "url": "https://github.com/zhongruan/dsh-weather",
+      "category": "tools",
+      "description": {
+        "zh": "城市天气实况与未来几天预报",
+        "en": "City weather nowcast and short-term forecast"
+      },
+      "npm": "@zhongruan/dsh-weather",
+      "version": "0.1.0",
+      "install": "dsh plugin --profile web add @zhongruan/dsh-weather",
+      "added": "2026-09-11"
+    },
+    {
+      "name": "@zhongruan/dsh-pcb-8d",
+      "owner": "中软",
+      "url": "https://github.com/zhongruan/dsh-pcb-8d",
+      "category": "tools",
+      "description": {
+        "zh": "PCB 8D 报告：对话建稿、按步补全、导出 Markdown",
+        "en": "PCB 8D report: draft, fill steps, export Markdown"
+      },
+      "npm": "@zhongruan/dsh-pcb-8d",
+      "version": "0.1.1",
+      "install": "dsh plugin --profile web add @zhongruan/dsh-pcb-8d",
+      "added": "2026-09-11"
+    },
+    {
+      "name": "@zhongruan/dsh-remote-review",
+      "owner": "中软",
+      "url": "https://github.com/zhongruan/dsh-remote-review",
+      "category": "tools",
+      "description": {
+        "zh": "远端/本地 Webhook 审码：提交触发、共用现有审码 API、报告写入飞书文档",
+        "en": "Webhook code review: commit trigger, existing review API, Feishu Docs"
+      },
+      "npm": "@zhongruan/dsh-remote-review",
+      "version": "0.1.5",
+      "install": "dsh plugin --profile web add @zhongruan/dsh-remote-review",
+      "added": "2026-09-11"
+    }
+  ]
+}

@@ -59,6 +59,7 @@ app = FastAPI(
         {"name": "引擎约定", "description": "与 engine_cli 一致的插件调用入口"},
         {"name": "功能热插拔", "description": "features 启停（无需重启 DSH）"},
         {"name": "配置中心", "description": "业务连接 / LLM 配置读写与连接测试"},
+        {"name": "用量统计", "description": "本机 LLM 与 Cursor 写码 token 流水与汇总（只读）"},
         {"name": "文档导入", "description": "接口文档与数据字典导入"},
     ],
 )
@@ -1168,7 +1169,7 @@ class CliBody(BaseModel):
     "/api/cli",
     tags=["引擎约定"],
     summary="插件统一调用入口",
-    description="与 engine_cli.py 命令一致：ask / pcb-ask / status / config-test-* / plugins-*。",
+    description="与 engine_cli.py 命令一致：ask / pcb-ask / status / config-test-* / plugins-* / usage-summary。",
 )
 async def api_cli(body: CliBody):
     from .cli_ops import run_async
@@ -1180,6 +1181,68 @@ async def api_cli(body: CliBody):
     except Exception as e:
         out = {"ok": False, "detail": f"{type(e).__name__}: {e}"}
     return out
+
+
+@app.get(
+    "/api/usage/summary",
+    tags=["用量统计"],
+    summary="用量区间汇总",
+    description="按北京时间自然日汇总本机 LLM 与 Cursor 写码 token。"
+    "两条账不能加总成一笔钱。只读，无需 HITL。days 默认 7，最大 90。"
+    "on 锚定某一天：卡片与 hourly 为该日；monthly 为该日所在自然月（当月截止今天）。",
+)
+def api_usage_summary(
+    days: int = Query(7, ge=1, le=90, description="回溯天数（北京时间）"),
+    source: str = Query("", description="可选过滤：llm 或 cursor"),
+    on: str = Query("", description="锚定自然日 YYYY-MM-DD，默认今天；卡片为该日，monthly 为当月"),
+):
+    from .usage import summarize
+
+    return summarize(days=days, source=source, on=on)
+
+
+@app.get(
+    "/api/usage/events",
+    tags=["用量统计"],
+    summary="用量流水分页",
+    description="按时间倒序返回流水（无 API Key）。默认每页 10 条。"
+    "quality=session 为 DSH 宿主会话，sdk 为 Cursor SDK，missing 表示未回传 token。",
+)
+def api_usage_events(
+    page: int = Query(1, ge=1, description="页码，从 1 开始"),
+    page_size: int = Query(10, ge=1, le=50, description="每页条数，默认 10"),
+    source: str = Query("", description="可选过滤：llm 或 cursor"),
+    on: str = Query("", description="可选，只看该自然日 YYYY-MM-DD"),
+    limit: int | None = Query(None, ge=1, le=200, description="兼容旧参数，传入时覆盖每页条数"),
+):
+    from .usage import list_events
+
+    size = int(limit or page_size)
+    return list_events(page=page, page_size=size, source=source, limit=size, on=on)
+
+
+@app.get(
+    "/api/usage/daily",
+    tags=["用量统计"],
+    summary="按日用量序列",
+    description="近 N 天每天的 LLM token 与 Cursor token 分列，供折线/柱状展示。"
+    "on 与 summary 相同，锚定区间末日。",
+)
+def api_usage_daily(
+    days: int = Query(7, ge=1, le=90, description="回溯天数（北京时间）"),
+    on: str = Query("", description="锚定自然日 YYYY-MM-DD，默认今天"),
+):
+    from .usage import summarize
+
+    s = summarize(days=days, on=on)
+    return {
+        "ok": True,
+        "days": s.get("days"),
+        "tz": s.get("tz"),
+        "from": s.get("from"),
+        "to": s.get("to"),
+        "daily": s.get("daily") or [],
+    }
 
 
 class PluginBody(BaseModel):

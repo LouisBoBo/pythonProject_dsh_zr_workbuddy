@@ -17,6 +17,35 @@ _USAGE_LIMIT_RE = re.compile(
 )
 
 
+def _note_cursor_usage(
+    result: Any,
+    *,
+    model: str,
+    ok: bool,
+    error_class: str = "",
+    job_id: str = "",
+) -> dict[str, Any]:
+    """从 RunResult.usage 记账；失败吞掉。不调用 Cloud-only 的 agent.get_usage()。"""
+    try:
+        from ..usage import append_event, current_job_id, from_sdk_usage, missing_tokens
+
+        usage_obj = getattr(result, "usage", None) if result is not None else None
+        tokens = from_sdk_usage(usage_obj)
+        append_event(
+            source="cursor",
+            lane="code_dev_write",
+            provider="cursor",
+            model=model or "",
+            tokens=tokens,
+            ok=ok,
+            error_class=error_class,
+            job_id=job_id or current_job_id(),
+        )
+        return tokens or missing_tokens()
+    except Exception:
+        return {}
+
+
 def _emit(sink: Sink | None, event: dict[str, Any]) -> None:
     if sink:
         try:
@@ -2241,18 +2270,18 @@ def run_cursor_local_agent(
             _emit(sink, {"type": "status", "text": f"进度流异常：{type(exc).__name__}: {exc}"[:240]})
         return None
 
-    def _finish_ok(reply: str) -> dict[str, Any]:
+    def _finish_ok(reply: str, usage: dict[str, Any] | None = None) -> dict[str, Any]:
         step("Cursor 定位完成" if read_only else "Cursor 本机 Agent 完成", sid="cursor-local", state="done")
-        return _with_dialog(
-            bus,
-            {
-                "ok": True,
-                "text": (reply or "").strip() or (bus.final_text or "").strip() or "Cursor 已完成本轮本机写码。",
-                "agent_id": agent_id,
-                "run_id": run_id,
-                "error": "",
-            },
-        )
+        payload: dict[str, Any] = {
+            "ok": True,
+            "text": (reply or "").strip() or (bus.final_text or "").strip() or "Cursor 已完成本轮本机写码。",
+            "agent_id": agent_id,
+            "run_id": run_id,
+            "error": "",
+        }
+        if usage:
+            payload["usage"] = usage
+        return _with_dialog(bus, payload)
 
     for mi, model in enumerate(models):
         # 每个 model 重置总线，避免种子/失败状态污染
@@ -2342,13 +2371,27 @@ def run_cursor_local_agent(
                         _emit(sink, {"type": "replace_delivery", "text": bus._last_delivery})
                     bus.flush_think(duration=int(max(0, (time.time() - started) * 1000)), finish=True)
 
+                    detail_for_usage = str(bus.failure_detail or result_text or "")
+                    usage_hit = bool(_USAGE_LIMIT_RE.search(detail_for_usage))
+                    usage_snap = _note_cursor_usage(
+                        result,
+                        model=model,
+                        ok=status != "error",
+                        error_class=(
+                            "usage_limit" if usage_hit else "run_error"
+                        )
+                        if status == "error"
+                        else "",
+                        job_id=run_id,
+                    )
+
                     if stream_abort:
                         abort = stream_abort
                     else:
                         abort = _abort()
                     if abort:
                         if read_only and looks_like_delete_plan_reply(reply):
-                            return _finish_ok(reply)
+                            return _finish_ok(reply, usage_snap)
                         return _with_dialog(
                             bus,
                             {
@@ -2357,17 +2400,17 @@ def run_cursor_local_agent(
                                 "agent_id": agent_id,
                                 "run_id": run_id,
                                 "error": abort,
+                                "usage": usage_snap,
                             },
                         )
 
                     if read_only and (write_violation_hit or read_budget_hit) and (
                         looks_like_delete_plan_reply(reply) or _dialog_captured(bus)
                     ):
-                        return _finish_ok(reply)
+                        return _finish_ok(reply, usage_snap)
 
                     if status == "error":
                         detail = bus.failure_detail or result_text or "未知错误"
-                        usage_hit = bool(_USAGE_LIMIT_RE.search(str(detail)))
                         last_error = f"Cursor Run 失败：{detail}" + (
                             "（额度用尽，将尝试 Auto）" if usage_hit and mi + 1 < len(models) else (
                                 "（额度用尽，请检查 Cursor 账号或改用 Auto）" if usage_hit else ""
@@ -2375,7 +2418,7 @@ def run_cursor_local_agent(
                         )
                         # 已有正文：即使 status=error 也交还给面板
                         if _dialog_captured(bus) or looks_like_delete_plan_reply(reply):
-                            return _finish_ok(reply)
+                            return _finish_ok(reply, usage_snap)
                         if usage_hit and mi + 1 < len(models):
                             _emit(
                                 sink,
@@ -2393,16 +2436,24 @@ def run_cursor_local_agent(
                                 "agent_id": agent_id,
                                 "run_id": run_id,
                                 "error": last_error,
+                                "usage": usage_snap,
                             },
                         )
 
-                    return _finish_ok(reply)
+                    return _finish_ok(reply, usage_snap)
             except CursorAgentError as err:  # type: ignore[misc]
                 last_cae = err
                 msg = str(getattr(err, "message", None) or err or "")
                 usage_hit = bool(_USAGE_LIMIT_RE.search(msg))
                 last_error = f"Cursor Agent 启动失败：{_format_cursor_agent_error(err)}"
                 if usage_hit and mi + 1 < len(models):
+                    _note_cursor_usage(
+                        None,
+                        model=model,
+                        ok=False,
+                        error_class="usage_limit",
+                        job_id=run_id,
+                    )
                     _emit(
                         sink,
                         {
@@ -2419,6 +2470,13 @@ def run_cursor_local_agent(
                     _emit(sink, {"type": "status", "text": "Cursor 云端返回内部错误，正在重试启动…"})
                     time.sleep(2.0)
                     continue
+                _note_cursor_usage(
+                    None,
+                    model=model,
+                    ok=False,
+                    error_class="usage_limit" if usage_hit else "agent_error",
+                    job_id=run_id,
+                )
                 return _with_dialog(
                     bus,
                     {

@@ -15,6 +15,9 @@ export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
 echo "== secrets check =="
 "$ROOT/scripts/check-secrets.sh"
 
+echo "== company dsh market merge =="
+( cd "$ROOT/scripts/lib" && python3 -m unittest test_merge_company_dsh_market.py -q )
+
 echo "== vendor vs host (dsh-tools realpath) =="
 "$ROOT/scripts/check-vendor.sh"
 

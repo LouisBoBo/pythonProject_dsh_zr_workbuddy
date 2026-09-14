@@ -209,6 +209,7 @@ async def pcb_ask(text: str) -> dict:
         max_tokens=4096,
         timeout=120,
         temperature=0.35,
+        lane="pcb",
     )
     if not raw:
         return {
@@ -281,6 +282,7 @@ async def pcb_ask_stream(text: str) -> AsyncIterator[Dict[str, Any]]:
         max_tokens=4096,
         timeout=120,
         temperature=0.35,
+        lane="pcb",
     ):
         t = ev.get("type")
         if t == "reasoning":

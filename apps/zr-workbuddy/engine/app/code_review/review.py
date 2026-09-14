@@ -147,6 +147,7 @@ async def _llm_review_once(
         timeout=REVIEW_TIMEOUT,
         temperature=REVIEW_TEMPERATURE,
         no_cache=True,
+        lane="code_review",
     )
     if raw is None:
         return "", [], None

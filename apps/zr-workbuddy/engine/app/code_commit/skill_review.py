@@ -300,6 +300,7 @@ def run_commit_batch_skill_review(
                 timeout=120,
                 temperature=0.2,
                 no_cache=True,
+                lane="code_commit",
             ),
             timeout=150,
         )

@@ -53,7 +53,7 @@ if [ -n "$PID" ]; then
 fi
 
 CWD="${DSH_CWD:-$HOME}"
-# 公司插件市场（与 host.sh 一致；不覆盖已有 DSHM_REGISTRY_URL）
+# 公司插件市场（与 host.sh 一致：合并目录；不覆盖用户自定义 DSHM_REGISTRY_URL）
 # shellcheck source=lib/company_dsh_market.sh
 . "$ROOT/scripts/lib/company_dsh_market.sh"
 apply_company_dsh_market

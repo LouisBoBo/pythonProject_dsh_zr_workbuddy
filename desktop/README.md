@@ -34,7 +34,7 @@ MAKE_DMG=1 DMG_FORMAT=ULFO ./scripts/package-desktop.sh
 2. 启动后进入聊天壳
    - **设置 → 模型**：填 API Key
    - **设置 → WorkBuddy**：配各车道（密钥写入本机引擎 `config.yaml`）
-   - **设置 → 插件市场**：装 DSH 社区插件（内嵌 `dshmarket` + `pnpm`，不必本机 sudo 装 pnpm）
+   - **设置 → 插件市场**：公司插件在最前，后面是 DSH 社区插件（内嵌 `dshmarket` + `pnpm`，不必本机 sudo 装 pnpm）
 3. 自有写码/审码/提交功能在 **WorkBuddy / 引擎功能插件页**，不要用插件市场当这条通道
 
 ## 配置会不会丢

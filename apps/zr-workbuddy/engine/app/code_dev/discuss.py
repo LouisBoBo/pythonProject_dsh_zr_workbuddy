@@ -125,6 +125,7 @@ async def discuss_requirement(
         max_tokens=2048,
         timeout=90,
         temperature=0.35,
+        lane="code_dev_discuss",
     )
     if not raw:
         return {

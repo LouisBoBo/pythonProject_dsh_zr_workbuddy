@@ -482,7 +482,7 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
         if provider == "deepseek" and not (llm.get("api_key") or "").strip():
             return {"ok": False, "detail": "DeepSeek 未配置 API Key"}
         try:
-            r = await llm_chat("你好", llm, "环境：连接测试")
+            r = await llm_chat("你好", llm, "环境：连接测试", lane="config_test")
             return {"ok": r is not None,
                     "detail": f"LLM 引擎可用（{provider} / {llm.get('model')}）"
                     if r else "LLM 调用失败（未返回有效响应）"}
@@ -979,4 +979,14 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
             return blocked
         from .code_deploy import get_job as code_deploy_get_job
         return code_deploy_get_job(rest[0] if rest else "")
+    if cmd == "usage-summary":
+        from .usage import summarize
+
+        days = 7
+        if rest:
+            try:
+                days = int(rest[0])
+            except (TypeError, ValueError):
+                days = 7
+        return summarize(days=days)
     return {"ok": False, "detail": f"未知命令: {cmd}"}

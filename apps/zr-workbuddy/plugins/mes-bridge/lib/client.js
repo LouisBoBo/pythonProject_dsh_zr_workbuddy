@@ -1,7 +1,7 @@
 /**
  * ZR-WorkBuddy 客户端：
  * - 主聊天 toolview：审码/提交/写码选目录卡
- * - 宿主设置同级页：settings.section「WorkBuddy」配置中心（读写引擎 /api/config）
+ * - 宿主：settings.section「WorkBuddy」配置中心；「用量」挂 sidebar.footer.action，与「设置」同级（只读）
  * 引擎地址 RUNTIME 块由 plugin.sh 从 runtime.yaml 同步。
  */
 /*RUNTIME_BEGIN*/
@@ -16,6 +16,7 @@ window.__ModuleLoader__.load({
     var useState = React.useState;
     var useMemo = React.useMemo;
     var useEffect = React.useEffect;
+    var useLayoutEffect = React.useLayoutEffect || React.useEffect;
     var useRef = React.useRef;
 
     function engineHost() {
@@ -102,7 +103,7 @@ window.__ModuleLoader__.load({
     var cssInjected = false;
     function ensureCss() {
       if (typeof document === "undefined") return;
-      var ver = "composer-17";
+      var ver = "composer-28";
       if (cssInjected && document.querySelector("style[data-wb-cd-css='" + ver + "']")) return;
       document.querySelectorAll("style[data-plugin='@dsh-external/dsh-mes-bridge']").forEach(function (el) {
         if (el.parentNode) el.parentNode.removeChild(el);
@@ -159,7 +160,59 @@ window.__ModuleLoader__.load({
         ".wb-set-msg.ok{color:#047857}" +
         ".wb-set-msg.err{color:#b91c1c}" +
         ".wb-set-test{font-size:11px;margin:8px 0 0;white-space:pre-wrap;color:#64748b}" +
-        "@media (max-width:640px){.wb-set-grid{grid-template-columns:1fr}}" +
+        ".wb-usage-nav-slot{width:100%;min-width:0;flex:1 0 100%}" +
+        ".wb-usage-nav{box-sizing:border-box;cursor:pointer;width:calc(100% + 4px);height:42px;color:var(--dsw-alias-label-primary,inherit);background:transparent;border:none;border-radius:12px;flex:none;align-items:center;gap:8px;margin:4px -2px;padding:0 10px 0 8px;font:inherit;font-size:14px;line-height:22px;display:flex;overflow:hidden}" +
+        ".wb-usage-nav:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(15,23,42,.06))}" +
+        ".wb-usage-nav.rail{border-radius:50%;justify-content:center;gap:0;width:36px;height:36px;margin:8px 0 10px;padding:0}" +
+        ".wb-usage-nav-label{white-space:nowrap;overflow:hidden}" +
+        ".wb-usage-overlay{z-index:1000;justify-content:center;align-items:center;display:flex;position:fixed;inset:0}" +
+        ".wb-usage-mask{background:var(--dsw-alias-bg-mask-1,rgba(15,23,42,.45));backdrop-filter:var(--dsw-mask-blur,blur(8px));position:absolute;inset:0}" +
+        ".wb-usage-panel{z-index:1;background:var(--dsw-alias-bg-layer-2,#fff);width:920px;max-width:calc(100vw - 48px);height:min(800px,100vh - 48px);box-shadow:var(--dsw-shadow-lv3,0 16px 48px rgba(15,23,42,.18));border-radius:24px;display:flex;flex-direction:column;position:relative;overflow:hidden}" +
+        ".wb-usage-panel-head{box-sizing:border-box;flex:none;display:flex;justify-content:space-between;align-items:center;padding:20px 16px 8px 24px}" +
+        ".wb-usage-panel-head .t{font-size:16px;font-weight:500;color:var(--dsw-alias-label-primary,#111827)}" +
+        ".wb-usage-panel-x{cursor:pointer;width:28px;height:28px;color:var(--dsw-alias-label-primary,#111827);background:transparent;border:none;border-radius:28px;font-size:18px;line-height:1;display:inline-flex;align-items:center;justify-content:center}" +
+        ".wb-usage-panel-x:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(15,23,42,.06))}" +
+        ".wb-usage-panel-body{flex:1;min-height:0;overflow:auto;padding:0 24px 24px}" +
+        ".wb-usage-panel .wb-usage-page{max-width:none;padding-top:0}" +
+        ".wb-usage-panel .wb-usage-page-title{display:none}" +
+        ".wb-usage-panel .wb-set-bar{position:static;background:transparent}" +
+        ".wb-usage-page{max-width:920px;padding-top:12px}" +
+        ".wb-usage-filter{display:flex;align-items:center;gap:8px;margin:0 0 12px;min-height:36px}" +
+        ".wb-usage-filter label{font-size:12px;color:#64748b;font-weight:600}" +
+        ".wb-usage-filter input[type=date]{border:1px solid #d1d5db;border-radius:8px;padding:6px 10px;font:13px inherit;color:#111827;background:#fff}" +
+        ".wb-usage-kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 18px}" +
+        ".wb-usage-kpi{border:1px solid var(--ds-color-border-subtle,#e5e7eb);border-radius:14px;padding:12px 14px;background:#fff;min-width:0}" +
+        ".wb-usage-kpi .k{font-size:12px;font-weight:600;color:#64748b;margin:0 0 8px}" +
+        ".wb-usage-kpi .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:3px 0}" +
+        ".wb-usage-kpi .row .t{font-size:12px;color:#64748b}" +
+        ".wb-usage-kpi .row .n{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:#111827}" +
+        ".wb-usage-meter{margin:0 0 22px}" +
+        ".wb-usage-meter-title{font-size:14px;font-weight:700;line-height:1.4;margin:0 0 2px}" +
+        ".wb-usage-meter-sub{font-size:12px;color:#64748b;margin:4px 0 10px}" +
+        ".wb-usage-meter-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}" +
+        ".wb-usage-chart{border:1px solid var(--ds-color-border-subtle,#e5e7eb);border-radius:14px;padding:12px 12px 8px;background:#fff;min-width:0}" +
+        ".wb-usage-chart-head{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}" +
+        ".wb-usage-chart-head .t{font-size:12px;color:#64748b}" +
+        ".wb-usage-chart-head .n{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}" +
+        ".wb-usage-chart-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}" +
+        ".wb-usage-chart-inner{height:150px}" +
+        ".wb-usage-chart svg{display:block;width:100%;height:150px;overflow:visible}" +
+        ".wb-usage-chart-plot{position:relative;height:150px;cursor:crosshair}" +
+        ".wb-usage-guide{position:absolute;width:1px;background:currentColor;opacity:.35;pointer-events:none;transform:translateX(-50%)}" +
+        ".wb-usage-dot{position:absolute;width:9px;height:9px;border-radius:50%;background:#fff;border:2px solid currentColor;pointer-events:none;transform:translate(-50%,-50%);box-sizing:border-box}" +
+        ".wb-usage-tip{position:absolute;top:6px;transform:translateX(-50%);background:#1f2937;color:#fff;font-size:11px;line-height:1.35;border-radius:8px;padding:6px 8px;pointer-events:none;z-index:2;white-space:nowrap;box-shadow:0 6px 16px rgba(15,23,42,.18)}" +
+        ".wb-usage-colhi{position:absolute;background:rgba(15,23,42,.06);pointer-events:none;border-radius:2px}" +
+        ".wb-usage-legend{display:flex;flex-wrap:wrap;gap:6px 12px;margin:6px 0 2px;font-size:11px;color:#64748b}" +
+        ".wb-usage-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}" +
+        ".wb-usage-hour-sub{font-size:12px;color:#64748b;margin:0 0 10px}" +
+        ".wb-usage-hour-plot{position:relative;height:200px;cursor:crosshair;background:#f5f6f8;border-radius:14px}" +
+        ".wb-usage-hour-plot svg{display:block;width:100%;height:200px}" +
+        ".wb-usage-hour-guide{position:absolute;width:0;border-left:1px dashed #c5cad3;pointer-events:none;transform:translateX(-50%)}" +
+        ".wb-usage-hour-tip{position:absolute;top:10px;transform:translateX(-50%);background:#fff;color:#111827;font-size:12px;line-height:1.3;border-radius:999px;padding:8px 14px;pointer-events:none;z-index:2;white-space:nowrap;box-shadow:0 8px 24px rgba(15,23,42,.12);display:flex;align-items:center;gap:14px}" +
+        ".wb-usage-hour-tip .r{color:#64748b}" +
+        ".wb-usage-hour-tip .v{font-weight:700;font-variant-numeric:tabular-nums}" +
+        ".wb-usage-hour-tip .c{color:#94a3b8;font-size:11px}" +
+        "@media (max-width:640px){.wb-set-grid{grid-template-columns:1fr}.wb-usage-meter-grid{grid-template-columns:1fr}.wb-usage-kpis{grid-template-columns:1fr}}" +
         ".wb-cr-progress{font-size:12px;color:#475569;white-space:pre-wrap;max-height:280px;overflow:auto;background:#f8fafc;border-radius:8px;padding:10px;margin-top:8px}" +
         ".wb-cd-plan{border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;padding:10px;margin:8px 0}" +
         ".wb-cd-plan-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 8px;font-size:12px}" +
@@ -8509,6 +8562,761 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function fmtUsageTokens(n) {
+      var x = Number(n) || 0;
+      if (x >= 1000000) {
+        return (x / 1000000).toFixed(2).replace(/\.?0+$/, "") + "M";
+      }
+      if (x >= 1000) {
+        return (x / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+      }
+      return String(Math.round(x));
+    }
+
+    function fmtUsageTokensTitle(n) {
+      return Math.round(Number(n) || 0).toLocaleString("zh-CN");
+    }
+
+    function qualityLabel(q, source) {
+      if (q === "provider") return "供应商回传";
+      if (q === "session") return "DSH 会话";
+      if (q === "sdk") return source === "llm" ? "DSH 会话" : "Cursor SDK";
+      if (q === "estimate") return "估算（非真值）";
+      return "未回传";
+    }
+
+    function usageNiceMax(v) {
+      v = Number(v) || 0;
+      if (v <= 0) return 1;
+      if (v <= 10) return 10;
+      var exp = Math.pow(10, Math.floor(Math.log10(v)));
+      return Math.ceil(v / exp) * exp;
+    }
+
+    function usageMd(date) {
+      var s = String(date || "");
+      return s.length >= 10 ? s.slice(5).replace("-", "/") : s;
+    }
+
+    function usageMonthLabel(ym) {
+      var s = String(ym || "");
+      if (s.length >= 7) return s.slice(0, 4) + "年" + String(Number(s.slice(5, 7))) + "月";
+      return "";
+    }
+
+    function usageShowDayTick(i, n, label) {
+      if (n <= 8) return true;
+      if (i === 0 || i === n - 1) return true;
+      var d = String(label || "");
+      var dd = d.length >= 2 ? d.slice(-2) : "";
+      return dd === "01" || dd === "08" || dd === "15" || dd === "22";
+    }
+
+    function usageChartWidth(n) {
+      return Math.max(340, (n || 1) * 44);
+    }
+
+    function usagePlotBox(n) {
+      var L = 40, R = 28, T = 8, B = 26, H = 150;
+      var W = usageChartWidth(n);
+      return { W: W, H: H, L: L, R: R, T: T, B: B, iw: W - L - R, ih: H - T - B };
+    }
+
+    function usageXTickAnchor(i, n) {
+      if (n > 1 && i === 0) return "start";
+      if (n > 1 && i === n - 1) return "end";
+      return "middle";
+    }
+
+    function usageTipShift(xPct) {
+      if (xPct >= 82) return "translateX(-100%)";
+      if (xPct <= 18) return "translateX(0)";
+      return "translateX(-50%)";
+    }
+
+    function usageChartScroll(n, child) {
+      var w = usageChartWidth(n);
+      return h(
+        "div",
+        { className: "wb-usage-chart-scroll" },
+        h("div", { className: "wb-usage-chart-inner", style: { width: w + "px", minWidth: w + "px" } }, child),
+      );
+    }
+
+    function usageAlignMonthScroll(el, idx, n) {
+      if (!el || n < 1) return;
+      var view = el.clientWidth;
+      var total = el.scrollWidth;
+      if (view < 8 || total <= view + 1) return;
+      var i = Math.max(0, Math.min(n - 1, idx | 0));
+      var left = ((i + 1) / n) * total - view;
+      if (left < 0) left = 0;
+      var max = total - view;
+      if (left > max) left = max;
+      el.scrollLeft = left;
+    }
+
+    function usageScrollToFocus(root, dates, focusYmd) {
+      if (!root) return;
+      var list = dates || [];
+      var n = list.length || 1;
+      var idx = n - 1;
+      var want = String(focusYmd || "").slice(0, 10);
+      if (want) {
+        for (var i = 0; i < list.length; i++) {
+          if (String(list[i].date || "").slice(0, 10) === want) {
+            idx = i;
+            break;
+          }
+        }
+      }
+      var nodes = root.querySelectorAll(".wb-usage-chart-scroll");
+      for (var j = 0; j < nodes.length; j++) {
+        usageAlignMonthScroll(nodes[j], idx, n);
+      }
+    }
+
+    function usageTodayYmd() {
+      try {
+        return new Date().toLocaleString("sv-SE", { timeZone: "Asia/Shanghai" }).slice(0, 10);
+      } catch (e) {
+        return new Date().toISOString().slice(0, 10);
+      }
+    }
+
+    function usageAddDays(ymd, delta) {
+      var parts = String(ymd || "").split("-");
+      if (parts.length < 3) return usageTodayYmd();
+      var d = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]) + Number(delta || 0)));
+      return d.toISOString().slice(0, 10);
+    }
+
+    function usageKpiDayLabel(ymd) {
+      var day = String(ymd || "").slice(0, 10);
+      var md = usageMd(day);
+      if (!md) return "今日";
+      return day === usageTodayYmd() ? "今日 " + md : md;
+    }
+
+    function usageCatmullPath(pts) {
+      if (!pts.length) return "";
+      var d = "M " + pts[0].x.toFixed(2) + " " + pts[0].y.toFixed(2);
+      if (pts.length === 1) return d;
+      if (pts.length === 2) {
+        return d + " L " + pts[1].x.toFixed(2) + " " + pts[1].y.toFixed(2);
+      }
+      for (var i = 0; i < pts.length - 1; i++) {
+        var p0 = pts[Math.max(0, i - 1)];
+        var p1 = pts[i];
+        var p2 = pts[i + 1];
+        var p3 = pts[Math.min(pts.length - 1, i + 2)];
+        var c1x = p1.x + (p2.x - p0.x) / 6;
+        var c1y = p1.y + (p2.y - p0.y) / 6;
+        var c2x = p2.x - (p3.x - p1.x) / 6;
+        var c2y = p2.y - (p3.y - p1.y) / 6;
+        d += " C " + c1x.toFixed(2) + " " + c1y.toFixed(2) + ", " +
+          c2x.toFixed(2) + " " + c2y.toFixed(2) + ", " +
+          p2.x.toFixed(2) + " " + p2.y.toFixed(2);
+      }
+      return d;
+    }
+
+    function usageCurveSvg(values, labels, fill, stroke, gid) {
+      var n = values.length || 1;
+      var box = usagePlotBox(n);
+      var W = box.W, H = box.H, L = box.L, R = box.R, T = box.T, iw = box.iw, ih = box.ih;
+      var max = usageNiceMax(Math.max.apply(null, [0].concat(values)));
+      function xAt(i) { return L + (n <= 1 ? iw / 2 : (i * iw) / (n - 1)); }
+      function yAt(v) { return T + ih - (max ? (v / max) * ih : 0); }
+      var pts = values.map(function (v, i) { return { x: xAt(i), y: yAt(v) }; });
+      var line = usageCatmullPath(pts);
+      var baseY = (T + ih).toFixed(2);
+      var area = line
+        ? line + " L " + xAt(n - 1).toFixed(2) + " " + baseY + " L " + xAt(0).toFixed(2) + " " + baseY + " Z"
+        : "";
+      var clip = "uc-" + String(gid || "g").replace(/[^a-zA-Z0-9_-]/g, "");
+      var grid = [0, 0.5, 1].map(function (f) {
+        var yy = yAt(max * f);
+        var label = f === 0 ? "0" : String(Math.round(max * f));
+        return '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + yy + '" y2="' + yy + '" stroke="#e5e7eb"/>' +
+          '<text x="' + (L - 6) + '" y="' + (yy + 3) + '" text-anchor="end" font-size="10" fill="#94a3b8">' + label + "</text>";
+      }).join("");
+      var xlabs = labels.map(function (lb, i) {
+        if (!usageShowDayTick(i, n, lb)) return "";
+        return '<text x="' + xAt(i) + '" y="' + (H - 8) + '" text-anchor="' + usageXTickAnchor(i, n) + '" font-size="10" fill="#94a3b8">' + String(lb) + "</text>";
+      }).join("");
+      return '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" height="150" preserveAspectRatio="none">' +
+        "<defs><linearGradient id=\"" + clip + "-fg\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">" +
+        '<stop offset="0%" stop-color="' + stroke + '" stop-opacity="0.38"/>' +
+        '<stop offset="100%" stop-color="' + stroke + '" stop-opacity="0.04"/>' +
+        "</linearGradient>" +
+        '<clipPath id="' + clip + '"><rect x="' + L + '" y="' + T + '" width="' + iw + '" height="' + ih + '"/></clipPath></defs>' +
+        grid +
+        '<g clip-path="url(#' + clip + ')">' +
+        '<path d="' + area + '" fill="url(#' + clip + '-fg)"/>' +
+        '<path d="' + line + '" fill="none" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+        "</g>" + xlabs + "</svg>";
+    }
+
+    function UsageCurveChart(props) {
+      var hoverState = useState(-1);
+      var hover = hoverState[0];
+      var setHover = hoverState[1];
+      var values = props.values || [];
+      var labels = props.labels || [];
+      var n = values.length || 1;
+      var box = usagePlotBox(n);
+      var W = box.W, H = box.H, L = box.L, T = box.T, iw = box.iw, ih = box.ih;
+      var max = usageNiceMax(Math.max.apply(null, [0].concat(values)));
+      function xAt(i) { return L + (n <= 1 ? iw / 2 : (i * iw) / (n - 1)); }
+      function yAt(v) { return T + ih - (max ? (v / max) * ih : 0); }
+      function onMove(ev) {
+        var rect = ev.currentTarget.getBoundingClientRect();
+        var x = ev.clientX - rect.left;
+        var scale = rect.width / W;
+        var t = n <= 1 ? 0 : (x / scale - L) / Math.max(1, iw);
+        var i = Math.round(Math.max(0, Math.min(1, t)) * (n - 1));
+        setHover(i);
+      }
+      var xPct = (xAt(hover) / W) * 100;
+      var tip = hover >= 0 && hover < n
+        ? {
+          label: labels[hover] || "",
+          value: values[hover] || 0,
+          left: xPct,
+          tipShift: usageTipShift(xPct),
+          top: (yAt(values[hover] || 0) / H) * 100,
+          gTop: (T / H) * 100,
+          gH: (ih / H) * 100,
+        }
+        : null;
+      return h(
+        "div",
+        {
+          className: "wb-usage-chart-plot",
+          style: { color: props.stroke },
+          onMouseMove: onMove,
+          onMouseLeave: function () { setHover(-1); },
+        },
+        h("div", { dangerouslySetInnerHTML: { __html: usageCurveSvg(values, labels, props.fill, props.stroke, props.gid) } }),
+        tip
+          ? h("div", { className: "wb-usage-guide", style: { left: tip.left + "%", top: tip.gTop + "%", height: tip.gH + "%" } })
+          : null,
+        tip
+          ? h("div", { className: "wb-usage-dot", style: { left: tip.left + "%", top: tip.top + "%" } })
+          : null,
+        tip
+          ? h(
+            "div",
+            { className: "wb-usage-tip", style: { left: tip.left + "%", transform: tip.tipShift } },
+            h("div", { className: "d" }, String(tip.label)),
+            "请求 " + String(tip.value),
+          )
+          : null,
+      );
+    }
+
+    function usageStackSvg(rows, colors, hoverIdx) {
+      var n = rows.length || 1;
+      var box = usagePlotBox(n);
+      var W = box.W, H = box.H, L = box.L, R = box.R, T = box.T, iw = box.iw, ih = box.ih;
+      var totals = rows.map(function (r) { return r.hit + r.miss + r.out; });
+      var max = usageNiceMax(Math.max.apply(null, [0].concat(totals)));
+      var slot = iw / n;
+      var bw = Math.max(2, slot * 0.58);
+      var hi = hoverIdx == null ? -1 : hoverIdx;
+      var grid = [0, 0.5, 1].map(function (f) {
+        var yy = T + ih - f * ih;
+        var label = f === 0 ? "0" : fmtUsageTokens(max * f);
+        return '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + yy + '" y2="' + yy + '" stroke="#e5e7eb"/>' +
+          '<text x="' + (L - 6) + '" y="' + (yy + 3) + '" text-anchor="end" font-size="10" fill="#94a3b8">' + label + "</text>";
+      }).join("");
+      var bars = rows.map(function (r, i) {
+        var cx = L + (i + 0.5) * slot;
+        var x0 = cx - bw / 2;
+        var y = T + ih;
+        var segs = [
+          [r.out, colors.out],
+          [r.miss, colors.miss],
+          [r.hit, colors.hit],
+        ];
+        var hiRect = i === hi
+          ? '<rect x="' + (L + i * slot).toFixed(1) + '" y="' + T + '" width="' + slot.toFixed(1) +
+            '" height="' + ih + '" fill="rgba(15,23,42,0.06)"/>'
+          : "";
+        var rects = segs.map(function (seg) {
+          var v = seg[0], c = seg[1];
+          var hh = max ? (v / max) * ih : 0;
+          y -= hh;
+          if (hh <= 0.4) return "";
+          return '<rect x="' + x0.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) +
+            '" height="' + hh.toFixed(1) + '" fill="' + c + '"/>';
+        }).join("");
+        var showLab = usageShowDayTick(i, n, r.label);
+        var lab = showLab
+          ? '<text x="' + cx + '" y="' + (H - 8) + '" text-anchor="' + usageXTickAnchor(i, n) + '" font-size="10" fill="#94a3b8">' + r.label + "</text>"
+          : "";
+        return hiRect + rects + lab;
+      }).join("");
+      return '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" height="150" preserveAspectRatio="none">' +
+        grid + bars + "</svg>";
+    }
+
+    function UsageStackChart(props) {
+      var hoverState = useState(-1);
+      var hover = hoverState[0];
+      var setHover = hoverState[1];
+      var rows = props.rows || [];
+      var n = rows.length || 1;
+      var box = usagePlotBox(n);
+      var W = box.W, H = box.H, L = box.L, T = box.T, iw = box.iw, ih = box.ih;
+      function onMove(ev) {
+        var rect = ev.currentTarget.getBoundingClientRect();
+        var x = ev.clientX - rect.left;
+        var scale = rect.width / W;
+        var t = (x / scale - L) / Math.max(1, iw);
+        var i = Math.floor(Math.max(0, Math.min(0.999, t)) * n);
+        setHover(i);
+      }
+      var row = hover >= 0 && hover < n ? rows[hover] : null;
+      var xPct = ((L + (hover + 0.5) * (iw / n)) / W) * 100;
+      var tip = row
+        ? {
+          left: xPct,
+          tipShift: usageTipShift(xPct),
+          colL: ((L + hover * (iw / n)) / W) * 100,
+          colW: ((iw / n) / W) * 100,
+          gTop: (T / H) * 100,
+          gH: (ih / H) * 100,
+        }
+        : null;
+      return h(
+        "div",
+        {
+          className: "wb-usage-chart-plot",
+          onMouseMove: onMove,
+          onMouseLeave: function () { setHover(-1); },
+        },
+        h("div", { dangerouslySetInnerHTML: { __html: usageStackSvg(rows, props.colors, hover) } }),
+        tip
+          ? h("div", { className: "wb-usage-colhi", style: { left: tip.colL + "%", width: tip.colW + "%", top: tip.gTop + "%", height: tip.gH + "%" } })
+          : null,
+        row
+          ? h(
+            "div",
+            { className: "wb-usage-tip", style: { left: tip.left + "%", transform: tip.tipShift } },
+            h("div", { className: "d" }, String(row.label || "")),
+            h("div", null, "合计 " + fmtUsageTokens((row.hit || 0) + (row.miss || 0) + (row.out || 0))),
+            h("div", null, "命中缓存 " + fmtUsageTokens(row.hit)),
+            h("div", null, "未命中 " + fmtUsageTokens(row.miss)),
+            h("div", null, "输出 " + fmtUsageTokens(row.out)),
+          )
+          : null,
+      );
+    }
+
+    function usageHourRange(h) {
+      var a = (h < 10 ? "0" : "") + h + ":00";
+      if (h >= 23) return "23:00～24:00";
+      var n = h + 1;
+      return a + "～" + (n < 10 ? "0" : "") + n + ":00";
+    }
+
+    function usageHourRows(hourly, prefix) {
+      var byH = {};
+      (hourly || []).forEach(function (r) {
+        byH[Number(r.hour)] = r;
+      });
+      var out = [];
+      for (var h = 0; h < 24; h++) {
+        var r = byH[h] || {};
+        out.push({
+          hour: h,
+          range: usageHourRange(h),
+          tokens: Number(r[prefix + "tokens"]) || 0,
+          calls: Number(r[prefix + "calls"]) || 0,
+        });
+      }
+      return out;
+    }
+
+    var USAGE_HOUR_GEO = { W: 560, H: 200, L: 48, R: 14, T: 16, B: 30 };
+
+    function usageHourSvg(rows, color, hoverIdx) {
+      var g = USAGE_HOUR_GEO;
+      var W = g.W, H = g.H, L = g.L, R = g.R, T = g.T, B = g.B;
+      var iw = W - L - R, ih = H - T - B;
+      var n = 24;
+      var values = [];
+      for (var i = 0; i < n; i++) values.push((rows[i] && rows[i].tokens) || 0);
+      var max = usageNiceMax(Math.max.apply(null, [0].concat(values)));
+      var slot = iw / n;
+      var bw = Math.max(4, slot * 0.55);
+      var hi = hoverIdx == null ? -1 : hoverIdx;
+      var grid = [0, 0.5, 1].map(function (f) {
+        var yy = T + ih - f * ih;
+        var label = f === 0 ? "0" : fmtUsageTokens(max * f);
+        return '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + yy + '" y2="' + yy + '" stroke="#eceef2"/>' +
+          '<text x="' + (L - 8) + '" y="' + (yy + 3) + '" text-anchor="end" font-size="10" fill="#94a3b8">' + label + "</text>";
+      }).join("");
+      var xMarks = { 0: "00:00", 8: "08:00", 15: "15:00", 23: "23:00" };
+      var bars = "";
+      for (var j = 0; j < n; j++) {
+        var cx = L + (j + 0.5) * slot;
+        var x0 = cx - bw / 2;
+        var hh = max ? (values[j] / max) * ih : 0;
+        var y = T + ih - hh;
+        if (j === hi) {
+          bars += '<rect x="' + (L + j * slot).toFixed(1) + '" y="' + T + '" width="' + slot.toFixed(1) +
+            '" height="' + ih + '" fill="rgba(15,23,42,0.04)"/>';
+        }
+        if (hh > 0.6) {
+          bars += '<rect x="' + x0.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) +
+            '" height="' + hh.toFixed(1) + '" rx="2.5" fill="' + color + '"/>';
+        }
+        if (xMarks[j]) {
+          bars += '<text x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="#94a3b8">' + xMarks[j] + "</text>";
+        }
+      }
+      return '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" height="200" preserveAspectRatio="none">' + grid + bars + "</svg>";
+    }
+
+    function UsageHourChart(props) {
+      var hoverState = useState(-1);
+      var hover = hoverState[0];
+      var setHover = hoverState[1];
+      var rows = props.rows || [];
+      var n = 24;
+      var g = USAGE_HOUR_GEO;
+      var W = g.W, H = g.H, L = g.L, R = g.R, T = g.T, B = g.B;
+      var iw = W - L - R, ih = H - T - B;
+      function onMove(ev) {
+        var rect = ev.currentTarget.getBoundingClientRect();
+        var x = ev.clientX - rect.left;
+        var scale = rect.width / W;
+        var t = (x / scale - L) / Math.max(1, iw);
+        var i = Math.floor(Math.max(0, Math.min(0.999, t)) * n);
+        setHover(i);
+      }
+      var row = hover >= 0 && hover < n ? rows[hover] : null;
+      var tip = row
+        ? {
+          left: Math.max(14, Math.min(86, ((L + (hover + 0.5) * (iw / n)) / W) * 100)),
+          gTop: (T / H) * 100,
+          gH: (ih / H) * 100,
+        }
+        : null;
+      return h(
+        "div",
+        {
+          className: "wb-usage-hour-plot",
+          onMouseMove: onMove,
+          onMouseLeave: function () { setHover(-1); },
+        },
+        h("div", { dangerouslySetInnerHTML: { __html: usageHourSvg(rows, props.color || "#ff5a1f", hover) } }),
+        tip
+          ? h("div", { className: "wb-usage-hour-guide", style: { left: tip.left + "%", top: tip.gTop + "%", height: tip.gH + "%" } })
+          : null,
+        row
+          ? h(
+            "div",
+            { className: "wb-usage-hour-tip", style: { left: tip.left + "%" } },
+            h("span", { className: "r" }, String(row.range || "")),
+            h("span", { className: "v" }, fmtUsageTokens(row.tokens)),
+            h("span", { className: "c" }, "请求 " + String(row.calls || 0)),
+          )
+          : null,
+      );
+    }
+
+    function usageHourCard(title, hourly, prefix, color, day) {
+      var rows = usageHourRows(hourly, prefix);
+      var sumTok = rows.reduce(function (a, r) { return a + r.tokens; }, 0);
+      var sumCalls = rows.reduce(function (a, r) { return a + r.calls; }, 0);
+      var when = String(day || "").slice(0, 10) || "所选日期";
+      return h(
+        "div",
+        { className: "wb-set-card" },
+        h("h3", null, title),
+        h(
+          "div",
+          { className: "body" },
+          h("div", { className: "wb-usage-hour-sub" }, when + " 00:00–24:00 · 请求 " + sumCalls + " · Token " + fmtUsageTokens(sumTok)),
+          h(UsageHourChart, { rows: rows, color: color }),
+        ),
+      );
+    }
+
+    function usageKpiCard(title, calls, tokens) {
+      return h(
+        "div",
+        { className: "wb-usage-kpi" },
+        h("div", { className: "k" }, title),
+        h("div", { className: "row" }, h("span", { className: "t" }, "API 请求次数"), h("span", { className: "n" }, String(calls || 0))),
+        h("div", { className: "row" }, h("span", { className: "t" }, "Token 消耗"), h("span", { className: "n", title: fmtUsageTokensTitle(tokens) }, fmtUsageTokens(tokens))),
+      );
+    }
+
+    function usageTodayKpis(today, dateLabel) {
+      var t = today || {};
+      var llmT = t.llm || {};
+      var curT = t.cursor || {};
+      var day = dateLabel || "今日";
+      return h(
+        "div",
+        { className: "wb-usage-kpis" },
+        usageKpiCard(day + " · LLM", llmT.calls, llmT.tokens),
+        usageKpiCard(day + " · Cursor 写码", curT.calls, curT.tokens),
+      );
+    }
+
+    function usageMeterNode(title, subtitle, daily, prefix, palette, extraNote) {
+      var calls = daily.map(function (d) { return Number(d[prefix + "calls"]) || 0; });
+      var labels = daily.map(function (d) { return usageMd(d.date); });
+      var stacks = daily.map(function (d) {
+        return {
+          label: usageMd(d.date),
+          hit: Number(d[prefix + "cache_hit"]) || 0,
+          miss: Number(d[prefix + "cache_miss"]) || 0,
+          out: Number(d[prefix + "output"]) || 0,
+        };
+      });
+      var sumCalls = calls.reduce(function (a, b) { return a + b; }, 0);
+      var sumTok = daily.reduce(function (a, d) { return a + (Number(d[prefix + "tokens"]) || 0); }, 0);
+      return h(
+        "section",
+        { className: "wb-usage-meter" },
+        h("div", { className: "wb-usage-meter-title" }, title),
+        h("div", { className: "wb-usage-meter-sub" }, subtitle + (extraNote ? " · " + extraNote : "")),
+        h(
+          "div",
+          { className: "wb-usage-meter-grid" },
+          h(
+            "div",
+            { className: "wb-usage-chart" },
+            h("div", { className: "wb-usage-chart-head" }, h("span", { className: "t" }, "API 请求次数"), h("span", { className: "n" }, String(sumCalls))),
+            usageChartScroll(calls.length, h(UsageCurveChart, { values: calls, labels: labels, fill: palette.fill, stroke: palette.stroke, gid: prefix })),
+          ),
+          h(
+            "div",
+            { className: "wb-usage-chart" },
+            h("div", { className: "wb-usage-chart-head" }, h("span", { className: "t" }, "Tokens"), h("span", { className: "n", title: fmtUsageTokensTitle(sumTok) }, fmtUsageTokens(sumTok))),
+            usageChartScroll(stacks.length, h(UsageStackChart, { rows: stacks, colors: palette })),
+            h(
+              "div",
+              { className: "wb-usage-legend" },
+              h("span", null, h("i", { style: { background: palette.hit } }), "输入（命中缓存）"),
+              h("span", null, h("i", { style: { background: palette.miss } }), "输入（未命中缓存）"),
+              h("span", null, h("i", { style: { background: palette.out } }), "输出"),
+            ),
+          ),
+        ),
+      );
+    }
+
+    function WorkBuddyUsageSection() {
+      ensureCss();
+      var busyState = useState(false);
+      var busy = busyState[0];
+      var setBusy = busyState[1];
+      var msgState = useState("");
+      var msg = msgState[0];
+      var setMsg = msgState[1];
+      var msgOkState = useState(false);
+      var msgOk = msgOkState[0];
+      var setMsgOk = msgOkState[1];
+      var dataState = useState(null);
+      var data = dataState[0];
+      var setData = dataState[1];
+      var onDateState = useState(usageTodayYmd);
+      var onDate = onDateState[0];
+      var setOnDate = onDateState[1];
+      var pageRef = useRef(null);
+
+      function loadUsage(day) {
+        var d = day || onDate || usageTodayYmd();
+        setBusy(true);
+        setMsg("加载中…");
+        setMsgOk(false);
+        fetch(engineBase() + "/api/usage/summary?days=7&on=" + encodeURIComponent(d))
+          .then(function (r) { return r.json(); })
+          .then(function (s) {
+            if (!s || !s.ok) {
+              throw new Error((s && (s.detail || s.message)) || "引擎未响应");
+            }
+            setData(s);
+            if (s.on && s.on !== d) setOnDate(s.on);
+            setMsg("已从引擎加载");
+            setMsgOk(true);
+          })
+          .catch(function (err) {
+            setMsg(
+              "加载失败：" +
+                (err && err.message ? err.message : String(err)) +
+                "（请先 scripts/engine.sh zr-workbuddy ensure）",
+            );
+            setMsgOk(false);
+          })
+          .finally(function () {
+            setBusy(false);
+          });
+      }
+
+      useEffect(function () {
+        loadUsage();
+      }, []);
+
+      useLayoutEffect(function () {
+        if (!data) return;
+        usageScrollToFocus(pageRef.current, data.monthly || data.daily || [], data.on || onDate);
+      }, [data, onDate]);
+
+      var llm = (data && data.llm) || {};
+      var cursor = (data && data.cursor) || {};
+      var daily = (data && data.monthly) || (data && data.daily) || [];
+      var monthLab = usageMonthLabel(data && data.month);
+      var llmModel = (llm.models && llm.models[0] && llm.models[0].model) || "暂无调用";
+      var curModel = (cursor.models && cursor.models[0] && cursor.models[0].model) || "暂无调用";
+      var llmPal = { fill: "#93c5fd", stroke: "#3b82f6", hit: "#93c5fd", miss: "#3b82f6", out: "#1d4ed8" };
+      var curPal = { fill: "#99f6e4", stroke: "#14b8a6", hit: "#99f6e4", miss: "#14b8a6", out: "#0f766e" };
+      var hourly = (data && data.hourly) || [];
+
+      return h(
+        "div",
+        { className: "wb-set wb-usage-page", ref: pageRef },
+        h("div", { className: "wb-usage-page-title" }, "用量统计"),
+        h(
+          "p",
+          { className: "wb-set-lead" },
+          "LLM 含引擎聊天/审码，以及 DSH 宿主会话（DeepSeek 等）。Cursor 含本机写码与 DSH「Cursor 写码」。两条账不能加总成一笔钱。",
+        ),
+        h(
+          "div",
+          { className: "wb-usage-filter" },
+          h("label", { htmlFor: "wb-usage-on" }, "日期"),
+          h("input", {
+            id: "wb-usage-on",
+            type: "date",
+            value: onDate,
+            min: usageAddDays(usageTodayYmd(), -89),
+            max: usageTodayYmd(),
+            onChange: function (ev) {
+              var v = ev.target.value;
+              if (!v) return;
+              setOnDate(v);
+              loadUsage(v);
+            },
+          }),
+        ),
+        usageTodayKpis(data && data.today, usageKpiDayLabel((data && data.on) || onDate)),
+        usageHourCard("LLM 各时段", hourly, "llm_", "#ff5a1f", (data && data.on) || onDate),
+        usageHourCard("Cursor 各时段", hourly, "cursor_", "#14b8a6", (data && data.on) || onDate),
+        usageMeterNode("LLM", llmModel + (monthLab ? " · " + monthLab : ""), daily, "llm_", llmPal, llm.missing_calls ? "未回传 " + llm.missing_calls + " 次" : ""),
+        usageMeterNode(
+          "Cursor 写码",
+          curModel + (monthLab ? " · " + monthLab : ""),
+          daily,
+          "cursor_",
+          curPal,
+          cursor.missing_calls ? "未回传 " + cursor.missing_calls + " 次（不代表没消耗）" : "",
+        ),
+        h(
+          "div",
+          { className: "wb-set-bar" },
+          h(
+            "button",
+            { type: "button", className: "wb-set-btn", disabled: busy, onClick: loadUsage },
+            busy ? "刷新中…" : "刷新",
+          ),
+          msg ? h("span", { className: "wb-set-msg" + (msgOk ? " ok" : " err") }, msg) : null,
+        ),
+      );
+    }
+
+    function usageNavIcon(size) {
+      return h(
+        "svg",
+        { width: size, height: size, viewBox: "0 0 16 16", fill: "none", "aria-hidden": "true" },
+        h("rect", { x: "2", y: "8", width: "3", height: "6", rx: "0.5", fill: "currentColor" }),
+        h("rect", { x: "6.5", y: "4", width: "3", height: "10", rx: "0.5", fill: "currentColor" }),
+        h("rect", { x: "11", y: "6", width: "3", height: "8", rx: "0.5", fill: "currentColor" }),
+      );
+    }
+
+    function WorkBuddyUsageNav(props) {
+      ensureCss();
+      var wide = !!(props && props.wide);
+      var openState = useState(false);
+      var open = openState[0];
+      var setOpen = openState[1];
+      useEffect(
+        function () {
+          if (!open) return undefined;
+          function onKey(ev) {
+            if (ev.key === "Escape") setOpen(false);
+          }
+          document.addEventListener("keydown", onKey);
+          return function () {
+            document.removeEventListener("keydown", onKey);
+          };
+        },
+        [open],
+      );
+      return h(
+        "div",
+        { className: "wb-usage-nav-slot" },
+        h(
+          "button",
+          {
+            type: "button",
+            className: "wb-usage-nav" + (wide ? "" : " rail"),
+            "aria-haspopup": "dialog",
+            "aria-expanded": open,
+            title: "用量",
+            onClick: function () {
+              setOpen(true);
+            },
+          },
+          usageNavIcon(wide ? 16 : 18),
+          wide ? h("span", { className: "wb-usage-nav-label" }, "用量") : null,
+        ),
+        open
+          ? h(
+              "div",
+              { className: "wb-usage-overlay", role: "dialog", "aria-modal": "true", "aria-label": "用量" },
+              h("div", {
+                className: "wb-usage-mask",
+                onClick: function () {
+                  setOpen(false);
+                },
+              }),
+              h(
+                "div",
+                { className: "wb-usage-panel" },
+                h(
+                  "div",
+                  { className: "wb-usage-panel-head" },
+                  h("span", { className: "t" }, "用量"),
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "wb-usage-panel-x",
+                      "aria-label": "关闭",
+                      onClick: function () {
+                        setOpen(false);
+                      },
+                    },
+                    "×",
+                  ),
+                ),
+                h("div", { className: "wb-usage-panel-body" }, h(WorkBuddyUsageSection)),
+              ),
+            )
+          : null,
+      );
+    }
+
     function apply(ctx) {
       discoverEngine();
       if (!ctx || !ctx.slots || typeof ctx.slots.inject !== "function") {
@@ -8524,6 +9332,17 @@ window.__ModuleLoader__.load({
             label: "WorkBuddy",
           },
           WorkBuddySettingsSection,
+        );
+      });
+      ctx.slots.inject("sidebar.footer.action", function () {
+        return ctx.slots.register(
+          {
+            name: "sidebar.footer.action",
+            id: "workbuddy-usage",
+            order: 100,
+            label: "用量",
+          },
+          WorkBuddyUsageNav,
         );
       });
       ctx.slots.inject("tool.call.toolview", function () {
@@ -8563,7 +9382,7 @@ window.__ModuleLoader__.load({
         );
       });
       console.log(
-        "[dsh-mes-bridge] settings.section=WorkBuddy + toolview review/commit/code_dev/deploy",
+        "[dsh-mes-bridge] settings.section=WorkBuddy + sidebar.footer.action=用量 + toolview review/commit/code_dev/deploy",
       );
       try {
         if (document && document.title && document.title.indexOf("WorkBuddy") < 0) {

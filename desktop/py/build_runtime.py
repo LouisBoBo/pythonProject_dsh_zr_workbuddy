@@ -264,6 +264,21 @@ def sync_app_sources() -> None:
     scripts_lib = APP / "scripts" / "lib"
     scripts_lib.mkdir(parents=True)
     shutil.copy2(REPO / "scripts" / "lib" / "read_runtime.py", scripts_lib / "read_runtime.py")
+    shutil.copy2(
+        REPO / "scripts" / "lib" / "merge_company_dsh_market.py",
+        scripts_lib / "merge_company_dsh_market.py",
+    )
+    cfg_src = REPO / "apps" / "zr-workbuddy" / "config"
+    cfg_dst = app_root / "config"
+    cfg_dst.mkdir(parents=True, exist_ok=True)
+    for name in (
+        "company-dsh-plugins.seed.json",
+        "company-dsh-market.env.example",
+        "company-dsh-market.env",
+    ):
+        src = cfg_src / name
+        if src.is_file():
+            shutil.copy2(src, cfg_dst / name)
 
     # mes-bridge → link:../../../../vendor/@deepseek-ai/dsh-tools
     vendor_src = REPO / "vendor" / "@deepseek-ai" / "dsh-tools"

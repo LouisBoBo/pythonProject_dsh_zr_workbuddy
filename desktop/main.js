@@ -468,9 +468,10 @@ function applyDesktopToolchain(env) {
   return env
 }
 
-/** 公司插件市场配置（仅 DSHM_REGISTRY_URL + @zhongruan 私有源；不改其它逻辑） */
+/** 公司插件市场配置（公司目录为公司插件真相源；官方目录每天最多合并一次） */
 const COMPANY_MARKET_DEFAULTS = {
-  DSHM_REGISTRY_URL: 'http://175.178.238.31/dsh-plugins/plugins.json',
+  COMPANY_DSH_MARKET_URL: 'http://175.178.238.31/dsh-plugins/plugins.json',
+  OFFICIAL_DSH_MARKET_URL: 'https://awesome-dsh-plugin.com/plugins.json',
   ZHONGRUAN_NPM_REGISTRY: 'http://175.178.238.31/dsh-plugins/npm/',
 }
 
@@ -489,7 +490,12 @@ function loadCompanyDshMarketEnv(appRoot) {
         if (i < 0) continue
         const key = t.slice(0, i).trim()
         const val = t.slice(i + 1).trim()
-        if (key === 'DSHM_REGISTRY_URL' || key === 'ZHONGRUAN_NPM_REGISTRY') {
+        if (
+          key === 'DSHM_REGISTRY_URL' ||
+          key === 'ZHONGRUAN_NPM_REGISTRY' ||
+          key === 'COMPANY_DSH_MARKET_URL' ||
+          key === 'OFFICIAL_DSH_MARKET_URL'
+        ) {
           out[key] = val
         }
       }
@@ -497,11 +503,77 @@ function loadCompanyDshMarketEnv(appRoot) {
       console.warn('[desktop] 读取 company-dsh-market.env 失败:', e && e.message ? e.message : e)
     }
   }
-  if (process.env.DSHM_REGISTRY_URL) out.DSHM_REGISTRY_URL = process.env.DSHM_REGISTRY_URL
+  if (process.env.DSHM_REGISTRY_URL !== undefined) {
+    out.DSHM_REGISTRY_URL = process.env.DSHM_REGISTRY_URL
+  }
+  if (process.env.COMPANY_DSH_MARKET_URL) {
+    out.COMPANY_DSH_MARKET_URL = process.env.COMPANY_DSH_MARKET_URL
+  }
+  if (process.env.OFFICIAL_DSH_MARKET_URL) {
+    out.OFFICIAL_DSH_MARKET_URL = process.env.OFFICIAL_DSH_MARKET_URL
+  }
   if (process.env.ZHONGRUAN_NPM_REGISTRY) {
     out.ZHONGRUAN_NPM_REGISTRY = process.env.ZHONGRUAN_NPM_REGISTRY
   }
   return out
+}
+
+function findMergePython() {
+  const bundled = path.join(runtimeRoot(), 'python', 'bin', 'python3')
+  if (fs.existsSync(bundled)) return bundled
+  const bundledAlt = path.join(runtimeRoot(), 'python', 'bin', 'python')
+  if (fs.existsSync(bundledAlt)) return bundledAlt
+  try {
+    execFileSync('python3', ['-c', 'print(1)'], { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] })
+    return 'python3'
+  } catch {
+    return ''
+  }
+}
+
+/** 公司插件永远可展示；官方目录后台每天最多拉一次。失败则回退公司原 URL。 */
+function ensureMergedMarketCatalog(appRoot, market) {
+  const companyUrl =
+    market.COMPANY_DSH_MARKET_URL || COMPANY_MARKET_DEFAULTS.COMPANY_DSH_MARKET_URL
+  const fromEnv = Object.prototype.hasOwnProperty.call(process.env, 'DSHM_REGISTRY_URL')
+    ? process.env.DSHM_REGISTRY_URL || ''
+    : market.DSHM_REGISTRY_URL
+  if (typeof fromEnv === 'string' && fromEnv !== '' && fromEnv !== companyUrl) {
+    return fromEnv
+  }
+  if (fromEnv === '') return ''
+  const script = path.join(appRoot, 'scripts', 'lib', 'merge_company_dsh_market.py')
+  if (!fs.existsSync(script)) return companyUrl
+  const py = findMergePython()
+  if (!py) return companyUrl
+  const cacheDir = path.join(dshHome(), 'market-merge')
+  const officialUrl =
+    market.OFFICIAL_DSH_MARKET_URL || COMPANY_MARKET_DEFAULTS.OFFICIAL_DSH_MARKET_URL
+  try {
+    const out = execFileSync(
+      py,
+      [
+        script,
+        'ensure',
+        '--root',
+        appRoot,
+        '--cache-dir',
+        cacheDir,
+        '--company-url',
+        companyUrl,
+        '--official-url',
+        officialUrl,
+        '--port',
+        String(process.env.WORKBUDDY_MARKET_MERGE_PORT || 18732),
+      ],
+      { encoding: 'utf8', timeout: 20000, maxBuffer: 2 * 1024 * 1024 }
+    )
+    const m = String(out).match(/^DSHM_REGISTRY_URL=(.+)$/m)
+    if (m && m[1].trim()) return m[1].trim()
+  } catch (e) {
+    console.warn('[desktop] 合并插件市场失败，回退公司目录:', e && e.message ? e.message : e)
+  }
+  return companyUrl
 }
 
 /**
@@ -955,6 +1027,7 @@ async function startBundledHost(enginePort, appRoot) {
   const port = await findFreePort(DSH_PORT_START)
   const hostNode = findHostNodeBinary()
   const market = loadCompanyDshMarketEnv(appRoot)
+  const registryUrl = ensureMergedMarketCatalog(appRoot, market)
   const env = applyDesktopToolchain({
     ...process.env,
     DSH_HOME: dshHome(),
@@ -962,16 +1035,15 @@ async function startBundledHost(enginePort, appRoot) {
     APP_ENGINE_PORT: String(enginePort),
     DSH_DESKTOP: '1',
     WORKBUDDY_DESKTOP: '1',
-    // 仅当配置/环境提供了目录 URL 时注入（公司插件市场）
-    ...(market.DSHM_REGISTRY_URL
-      ? { DSHM_REGISTRY_URL: market.DSHM_REGISTRY_URL }
-      : {}),
+    ...(registryUrl ? { DSHM_REGISTRY_URL: registryUrl } : {}),
     ...(market.ZHONGRUAN_NPM_REGISTRY
       ? { ZHONGRUAN_NPM_REGISTRY: market.ZHONGRUAN_NPM_REGISTRY }
       : {}),
   })
-  if (market.DSHM_REGISTRY_URL) {
-    console.log('[desktop] 公司插件市场目录:', market.DSHM_REGISTRY_URL)
+  if (registryUrl) {
+    console.log('[desktop] 插件市场目录:', registryUrl)
+  } else {
+    console.log('[desktop] 插件市场目录: dshmarket 默认官方')
   }
   // 切勿把 ELECTRON_RUN_AS_NODE 留给宿主：会误用 Electron 的 Node 20
   delete env.ELECTRON_RUN_AS_NODE

@@ -227,7 +227,7 @@ _launch_web_daemon() {
   # 强制会话库落到本脚本解析出的家目录（daemon 子进程也继承）
   export DSH_HOME="$DSH_HOME_DIR"
   echo "DSH_HOME=$DSH_HOME  PROFILE=$PROFILE  port=$PORT"
-  # 公司插件市场：仅注入 DSHM_REGISTRY_URL + @zhongruan npmrc（可被环境变量覆盖）
+  # 公司插件市场：合并目录（公司在前）+ @zhongruan npmrc（可被环境变量覆盖）
   # shellcheck source=lib/company_dsh_market.sh
   . "$ROOT/scripts/lib/company_dsh_market.sh"
   apply_company_dsh_market
