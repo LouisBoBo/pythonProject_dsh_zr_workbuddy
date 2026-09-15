@@ -51,6 +51,8 @@ apps/*/plugins/*/node_modules/
 **/engine/data/feature_quarantine/
 **/engine/data/feature_install_tmp/
 **/engine/data/usage/
+**/engine/data/usage_hub/
+**/engine/data/auth/
 
 # 宿主 host/（禁止再导入 DeepSeek Harness Studio 源码树）
 /host/

@@ -256,6 +256,8 @@ class UsageApiTests(unittest.TestCase):
     def test_summary_endpoint_ok(self):
         from fastapi.testclient import TestClient
 
+        from app.auth import paths as auth_paths
+        from app.auth.users import ensure_seed_users
         from app.main import app
         from app.usage import store
 
@@ -263,6 +265,16 @@ class UsageApiTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as td:
                 store.set_data_dir(td)
+                auth_paths.set_data_dir(os.path.join(td, "auth"))
+                ensure_seed_users()
+                client = TestClient(app)
+                login = client.post(
+                    "/api/auth/login",
+                    json={"username": "hebo", "password": "hebo123"},
+                )
+                self.assertEqual(login.status_code, 200)
+                token = login.json()["token"]
+                headers = {"Authorization": "Bearer " + token}
                 store.append_event(
                     source="llm",
                     lane="pcb",
@@ -278,29 +290,44 @@ class UsageApiTests(unittest.TestCase):
                         "quality": "provider",
                     },
                 )
-                client = TestClient(app)
-                r = client.get("/api/usage/summary?days=7")
+                r = client.get("/api/usage/summary?days=7", headers=headers)
                 self.assertEqual(r.status_code, 200)
                 d = r.json()
                 self.assertTrue(d.get("ok"))
+                self.assertEqual(d.get("user_id"), "u_hebo")
                 self.assertEqual(d["llm"]["tokens"], 10)
-                r2 = client.get("/api/usage/daily?days=7")
+                r2 = client.get("/api/usage/daily?days=7", headers=headers)
                 self.assertEqual(r2.status_code, 200)
                 self.assertIn("daily", r2.json())
-                r3 = client.get("/api/usage/events?limit=5")
+                r3 = client.get("/api/usage/events?limit=5", headers=headers)
                 self.assertEqual(r3.status_code, 200)
                 self.assertGreaterEqual(r3.json().get("count") or 0, 1)
-                r4 = client.get("/api/usage/events?source=llm&page=1&page_size=10")
+                r4 = client.get("/api/usage/events?source=llm&page=1&page_size=10", headers=headers)
                 self.assertEqual(r4.status_code, 200)
                 body = r4.json()
                 self.assertEqual(body.get("page"), 1)
                 self.assertEqual(body.get("page_size"), 10)
                 self.assertIn("total", body)
-                r5 = client.get("/api/usage/summary?days=7&on=2099-01-01")
+                r5 = client.get("/api/usage/summary?days=7&on=2099-01-01", headers=headers)
                 self.assertEqual(r5.status_code, 200)
                 self.assertEqual(r5.json().get("on"), r5.json().get("to"))
+                # 未登录不可看用量
+                client.post("/api/auth/logout", headers=headers)
+                denied = client.get("/api/usage/summary?days=1")
+                self.assertEqual(denied.status_code, 401)
+                # admin 看不到 hebo 的账
+                admin = client.post(
+                    "/api/auth/login",
+                    json={"username": "admin", "password": "admin123"},
+                )
+                ah = {"Authorization": "Bearer " + admin.json()["token"]}
+                other = client.get("/api/usage/summary?days=7", headers=ah)
+                self.assertEqual(other.status_code, 200)
+                self.assertEqual(other.json().get("user_id"), "u_admin")
+                self.assertEqual(other.json()["llm"]["tokens"], 0)
         finally:
             store.set_data_dir(prev)
+            auth_paths.set_data_dir(None)
 
 
 class IngestCursorTests(unittest.TestCase):

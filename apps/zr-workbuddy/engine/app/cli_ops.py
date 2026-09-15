@@ -980,6 +980,7 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
         from .code_deploy import get_job as code_deploy_get_job
         return code_deploy_get_job(rest[0] if rest else "")
     if cmd == "usage-summary":
+        from .auth import get_active_user
         from .usage import summarize
 
         days = 7
@@ -988,5 +989,9 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
                 days = int(rest[0])
             except (TypeError, ValueError):
                 days = 7
-        return summarize(days=days)
+        active = get_active_user()
+        uid = str((active or {}).get("id") or "").strip()
+        if not uid:
+            return {"ok": False, "detail": "请先登录后查看用量（用量跟账号，不跟设备）"}
+        return summarize(days=days, user_id=uid)
     return {"ok": False, "detail": f"未知命令: {cmd}"}

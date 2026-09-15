@@ -60,6 +60,7 @@ app = FastAPI(
         {"name": "功能热插拔", "description": "features 启停（无需重启 DSH）"},
         {"name": "配置中心", "description": "业务连接 / LLM 配置读写与连接测试"},
         {"name": "用量统计", "description": "本机 LLM 与 Cursor 写码 token 流水与汇总（只读）"},
+        {"name": "账号", "description": "本机登录会话；引擎 SPA 进应用须先登录；用量流水带 user_id"},
         {"name": "文档导入", "description": "接口文档与数据字典导入"},
     ],
 )
@@ -118,6 +119,20 @@ def _warn_non_loopback_bind():
             host,
         )
     try:
+        from .auth import ensure_seed_users
+
+        ensure_seed_users()
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("uvicorn.error").warning("本机账号种子初始化失败：%s", exc)
+    try:
+        from .usage import backfill_orphan_user_id
+
+        n = backfill_orphan_user_id(default_user_id="u_hebo")
+        if n:
+            logging.getLogger("uvicorn.error").info("用量：已将 %d 条历史流水归到账号 hebo", n)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("uvicorn.error").warning("用量历史流水归户失败：%s", exc)
+    try:
         from .code_dev.service import default_data_dir, reconcile_stale_jobs
 
         n = reconcile_stale_jobs(default_data_dir())
@@ -125,6 +140,24 @@ def _warn_non_loopback_bind():
             logging.getLogger("uvicorn.error").info("本机写码：已将 %d 个孤儿任务标为已取消", n)
     except Exception as exc:  # noqa: BLE001
         logging.getLogger("uvicorn.error").warning("本机写码孤儿任务 reconcile 失败：%s", exc)
+
+    def _delayed_usage_report() -> None:
+        import time
+
+        time.sleep(3)
+        try:
+            from .usage.report import flush_report
+
+            flush_report(force=True)
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("uvicorn.error").warning("用量上报启动刷新失败：%s", exc)
+
+    try:
+        import threading
+
+        threading.Thread(target=_delayed_usage_report, name="usage-report", daemon=True).start()
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("uvicorn.error").warning("用量上报后台线程启动失败：%s", exc)
 
 from .health import check_net  # noqa: E402
 
@@ -1183,32 +1216,273 @@ async def api_cli(body: CliBody):
     return out
 
 
+class AuthLoginBody(BaseModel):
+    username: str = Field("", description="用户名")
+    password: str = Field("", description="密码")
+    enterprise_code: str = Field("", description="企业编码（展示用，本机登录可留空）")
+
+
+class AuthChangePasswordBody(BaseModel):
+    username: str = Field("", description="用户名（可留空，默认当前 Bearer 用户）")
+    old_password: str = Field("", description="旧密码")
+    new_password: str = Field("", description="新密码，至少 8 位")
+
+
+def _bearer_token(request: Request) -> str:
+    auth = (request.headers.get("authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ""
+
+
+def _live_user_row_from_bearer(request: Request):
+    """校验 Bearer → users.json 存活账号。返回 (row, error_response)。"""
+    from .auth import verify_token
+    from .auth.users import find_user_by_id, user_is_active
+
+    tok = _bearer_token(request)
+    if not tok:
+        return None, JSONResponse(
+            {"ok": False, "detail": "请先登录后查看用量", "code": "auth_required"},
+            status_code=401,
+        )
+    claims = verify_token(tok)
+    if not claims or not claims.get("id"):
+        return None, JSONResponse(
+            {"ok": False, "detail": "登录已失效，请重新登录", "code": "auth_required"},
+            status_code=401,
+        )
+    row = find_user_by_id(str(claims.get("id") or ""))
+    if not user_is_active(row):
+        return None, JSONResponse(
+            {"ok": False, "detail": "账号不存在或已禁用", "code": "auth_required"},
+            status_code=401,
+        )
+    if row.get("must_change_password"):
+        return None, JSONResponse(
+            {
+                "ok": False,
+                "detail": "请先修改默认密码后再查看用量",
+                "code": "password_change_required",
+            },
+            status_code=403,
+        )
+    return row, None
+
+
+@app.post(
+    "/api/auth/login",
+    tags=["账号"],
+    summary="本机登录",
+    description="校验本机用户库账号密码，签发 JWT，并写入本机当前用户（供进程内用量流水 user_id）。"
+    "用量 HTTP 接口须携带 Bearer；active.json 不作为用量 HTTP 鉴权。"
+    "种子账号须改密后才可查用量。",
+)
+def api_auth_login(body: AuthLoginBody):
+    from .auth import issue_token, public_user, set_active, verify_password
+
+    user = verify_password(body.username or "", body.password or "")
+    if not user:
+        return JSONResponse(
+            {"ok": False, "detail": "用户名或密码错误", "code": "auth_failed"},
+            status_code=401,
+        )
+    pub = public_user(user) or {}
+    token, exp = issue_token(
+        user_id=str(pub.get("id") or ""),
+        username=str(pub.get("username") or ""),
+        role=str(pub.get("role") or "user"),
+    )
+    set_active(pub, exp=exp)
+    return {
+        "ok": True,
+        "token": token,
+        "token_type": "Bearer",
+        "expires_at": exp,
+        "user": pub,
+        "must_change_password": bool(pub.get("must_change_password")),
+    }
+
+
+@app.post(
+    "/api/auth/change-password",
+    tags=["账号"],
+    summary="修改本机密码",
+    description="校验旧密码后写入新密码（至少 8 位），并清除 must_change_password。"
+    "可匿名带 username，或已登录时省略 username 用 Bearer 对应用户。",
+)
+def api_auth_change_password(request: Request, body: AuthChangePasswordBody):
+    from .auth import public_user, verify_token
+    from .auth.users import change_password, find_user_by_id
+
+    username = (body.username or "").strip()
+    if not username:
+        tok = _bearer_token(request)
+        claims = verify_token(tok) if tok else None
+        if claims and claims.get("id"):
+            row = find_user_by_id(str(claims.get("id") or ""))
+            username = str((row or {}).get("username") or "")
+    if not username:
+        return JSONResponse(
+            {"ok": False, "detail": "请提供用户名或先登录", "code": "auth_required"},
+            status_code=401,
+        )
+    if len(body.new_password or "") < 8:
+        return JSONResponse(
+            {"ok": False, "detail": "新密码至少 8 位", "code": "weak_password"},
+            status_code=400,
+        )
+    row = change_password(username, body.old_password or "", body.new_password or "")
+    if not row:
+        return JSONResponse(
+            {"ok": False, "detail": "旧密码错误或账号不可用", "code": "auth_failed"},
+            status_code=401,
+        )
+    return {"ok": True, "user": public_user(row)}
+
+
+@app.get(
+    "/api/auth/me",
+    tags=["账号"],
+    summary="当前登录用户",
+    description="优先读 Authorization: Bearer（并核对 users.json 是否仍有效）；"
+    "否则读本机 active 会话（仅供登录门闸展示，不作用量 HTTP 鉴权）。未登录返回 authenticated=false。",
+)
+def api_auth_me(request: Request):
+    from .auth import get_active_user, public_user, verify_token
+    from .auth.users import find_user_by_id, user_is_active
+
+    tok = _bearer_token(request)
+    if tok:
+        claims = verify_token(tok)
+        if claims and claims.get("id"):
+            row = find_user_by_id(str(claims.get("id") or ""))
+            if user_is_active(row):
+                return {
+                    "ok": True,
+                    "authenticated": True,
+                    "user": public_user(row),
+                    "source": "token",
+                }
+            return {
+                "ok": True,
+                "authenticated": False,
+                "user": None,
+                "detail": "账号不存在或已禁用",
+                "code": "auth_required",
+            }
+    active = get_active_user()
+    if active:
+        row = find_user_by_id(str(active.get("id") or ""))
+        if user_is_active(row):
+            return {
+                "ok": True,
+                "authenticated": True,
+                "user": public_user(row),
+                "source": "active",
+            }
+    return {"ok": True, "authenticated": False, "user": None}
+
+
+@app.post(
+    "/api/auth/logout",
+    tags=["账号"],
+    summary="本机登出",
+    description="清除本机当前用户会话文件；客户端应同时丢弃 localStorage 中的 token。"
+    "不影响其它业务接口可用性。",
+)
+def api_auth_logout():
+    from .auth import clear_active
+
+    clear_active()
+    return {"ok": True}
+
+
+def _request_user_id(request: Request) -> str | None:
+    """用量 HTTP：仅认有效 Bearer + 存活账号（不含 active.json 回落，不含须改密账号）。"""
+    row, err = _live_user_row_from_bearer(request)
+    if err or not row:
+        return None
+    return str(row.get("id") or "").strip() or None
+
+
+def _request_user(request: Request) -> dict | None:
+    """当前登录用户公开字段；用量场景须 Bearer。"""
+    from .auth.users import public_user
+
+    row, err = _live_user_row_from_bearer(request)
+    if err or not row:
+        return None
+    return public_user(row)
+
+
+def _require_login(request: Request):
+    """个人用量等：须 Bearer + 未禁用 + 已改默认密。"""
+    from .auth.users import public_user
+
+    row, err = _live_user_row_from_bearer(request)
+    if err:
+        return None, err
+    return public_user(row), None
+
+
+def _require_admin(request: Request):
+    """企业用量须有效 Bearer，且 users.json 中 role=admin（不以 active.json 单独提权）。"""
+    from .auth.users import public_user
+
+    row, err = _live_user_row_from_bearer(request)
+    if err:
+        return None, err
+    user = public_user(row)
+    if not user or str(user.get("role") or "") != "admin":
+        return None, JSONResponse(
+            {"ok": False, "detail": "仅管理员可查看企业用量", "code": "forbidden"},
+            status_code=403,
+        )
+    return user, None
+
+
 @app.get(
     "/api/usage/summary",
     tags=["用量统计"],
     summary="用量区间汇总",
-    description="按北京时间自然日汇总本机 LLM 与 Cursor 写码 token。"
-    "两条账不能加总成一笔钱。只读，无需 HITL。days 默认 7，最大 90。"
-    "on 锚定某一天：卡片与 hourly 为该日；monthly 为该日所在自然月（当月截止今天）。",
+    description="按北京时间自然日汇总**当前登录账号**的 LLM 与 Cursor token（跟账号，不跟设备）。"
+    "须先登录。两条账不能加总成一笔钱。days 默认 7，最大 90。"
+    "grain=day：卡片与 hourly 锚定 on 当日；monthly 为当月。"
+    "grain=month：卡片为整月合计；daily/monthly 为当月逐日。",
 )
 def api_usage_summary(
+    request: Request,
     days: int = Query(7, ge=1, le=90, description="回溯天数（北京时间）"),
     source: str = Query("", description="可选过滤：llm 或 cursor"),
     on: str = Query("", description="锚定自然日 YYYY-MM-DD，默认今天；卡片为该日，monthly 为当月"),
+    grain: str = Query("day", description="粒度：day=锚定日分时段；month=整月逐日"),
 ):
     from .usage import summarize
+    from .usage.report import pending_count
 
-    return summarize(days=days, source=source, on=on)
+    user, err = _require_login(request)
+    if err:
+        return err
+    uid = str((user or {}).get("id") or "")
+    g = grain if grain in {"day", "month"} else "day"
+    out = summarize(days=days, source=source, on=on, user_id=uid, grain=g)
+    try:
+        out["pending_report"] = pending_count()
+    except Exception:
+        out["pending_report"] = 0
+    return out
 
 
 @app.get(
     "/api/usage/events",
     tags=["用量统计"],
     summary="用量流水分页",
-    description="按时间倒序返回流水（无 API Key）。默认每页 10 条。"
+    description="按时间倒序返回**当前登录账号**的流水（无 API Key）。须先登录。默认每页 10 条。"
     "quality=session 为 DSH 宿主会话，sdk 为 Cursor SDK，missing 表示未回传 token。",
 )
 def api_usage_events(
+    request: Request,
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(10, ge=1, le=50, description="每页条数，默认 10"),
     source: str = Query("", description="可选过滤：llm 或 cursor"),
@@ -1217,32 +1491,196 @@ def api_usage_events(
 ):
     from .usage import list_events
 
+    user, err = _require_login(request)
+    if err:
+        return err
+    uid = str((user or {}).get("id") or "")
     size = int(limit or page_size)
-    return list_events(page=page, page_size=size, source=source, limit=size, on=on)
+    return list_events(page=page, page_size=size, source=source, limit=size, on=on, user_id=uid)
 
 
 @app.get(
     "/api/usage/daily",
     tags=["用量统计"],
     summary="按日用量序列",
-    description="近 N 天每天的 LLM token 与 Cursor token 分列，供折线/柱状展示。"
-    "on 与 summary 相同，锚定区间末日。",
+    description="近 N 天每天的 LLM token 与 Cursor token 分列（**当前登录账号**），供折线/柱状展示。"
+    "须先登录。on 与 summary 相同，锚定区间末日。",
 )
 def api_usage_daily(
+    request: Request,
     days: int = Query(7, ge=1, le=90, description="回溯天数（北京时间）"),
     on: str = Query("", description="锚定自然日 YYYY-MM-DD，默认今天"),
 ):
     from .usage import summarize
 
-    s = summarize(days=days, on=on)
+    user, err = _require_login(request)
+    if err:
+        return err
+    uid = str((user or {}).get("id") or "")
+    s = summarize(days=days, on=on, user_id=uid)
     return {
         "ok": True,
         "days": s.get("days"),
         "tz": s.get("tz"),
         "from": s.get("from"),
         "to": s.get("to"),
+        "user_id": s.get("user_id") or "",
         "daily": s.get("daily") or [],
     }
+
+
+@app.post(
+    "/api/usage-hub/v1/ingest",
+    tags=["企业用量汇总"],
+    summary="接收本机用量上报",
+    description="按事件 id 幂等入库。Authorization: Bearer 使用 config usage.report_token。"
+    "失败不得回写本机业务；本机上报客户端超时短、失败下次再报。",
+)
+async def api_usage_hub_ingest(request: Request):
+    from . import usage_hub
+
+    if not usage_hub.check_ingest_token(request.headers.get("authorization")):
+        return JSONResponse(
+            {"ok": False, "detail": "机器票据无效", "code": "bad_token", "accepted": [], "duplicate": []},
+            status_code=401,
+        )
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"ok": False, "detail": "JSON 无效", "accepted": [], "duplicate": []},
+            status_code=400,
+        )
+    if not isinstance(payload, dict):
+        return JSONResponse(
+            {"ok": False, "detail": "body 须为对象", "accepted": [], "duplicate": []},
+            status_code=400,
+        )
+    return usage_hub.ingest_batch(payload)
+
+
+@app.get(
+    "/api/usage-hub/v1/company",
+    tags=["企业用量汇总"],
+    summary="公司 LLM / Cursor 合计",
+    description="须管理员登录。管理页优先走 /api/usage/enterprise/*；本接口与之同权，禁止匿名读取。",
+)
+def api_usage_hub_company(
+    request: Request,
+    from_date: str = Query("", alias="from", description="起始自然日 YYYY-MM-DD（北京时间）"),
+    to_date: str = Query("", alias="to", description="结束自然日 YYYY-MM-DD（北京时间）"),
+):
+    from . import usage_hub
+
+    _, err = _require_admin(request)
+    if err:
+        return err
+    return usage_hub.company_summary(from_date=from_date, to_date=to_date)
+
+
+@app.get(
+    "/api/usage-hub/v1/people",
+    tags=["企业用量汇总"],
+    summary="按人日/月序列",
+    description="须管理员登录。Cursor 永不计入公司 Key 总额。禁止匿名读取。",
+)
+def api_usage_hub_people(
+    request: Request,
+    from_date: str = Query("", alias="from", description="起始自然日 YYYY-MM-DD"),
+    to_date: str = Query("", alias="to", description="结束自然日 YYYY-MM-DD"),
+    grain: str = Query("month", description="粒度：day 或 month"),
+):
+    from . import usage_hub
+
+    _, err = _require_admin(request)
+    if err:
+        return err
+    return usage_hub.people_summary(from_date=from_date, to_date=to_date, grain=grain)
+
+
+@app.get(
+    "/api/usage/enterprise/summary",
+    tags=["企业用量汇总"],
+    summary="管理页·企业用量总览（同个人汇总形态）",
+    description="须管理员登录。返回形态与 /api/usage/summary 相同，但统计**全部账号**。"
+    "grain=day：卡片/分时段锚定 on 当日；grain=month：卡片为整月合计，分时段为当月同时段累加。"
+    "LLM 与 Cursor 仍分列，不能加总成一笔钱。",
+)
+def api_usage_enterprise_summary(
+    request: Request,
+    days: int = Query(7, ge=1, le=90, description="回溯天数（北京时间）"),
+    source: str = Query("", description="可选过滤：llm 或 cursor"),
+    on: str = Query("", description="锚定自然日 YYYY-MM-DD，默认今天"),
+    grain: str = Query("day", description="粒度：day=锚定日卡片/分时段；month=整月合计与当月分时段累加"),
+):
+    from .usage import summarize
+    from .usage.report import pending_count
+
+    _, err = _require_admin(request)
+    if err:
+        return err
+    g = grain if grain in {"day", "month"} else "day"
+    out = summarize(days=days, source=source, on=on, user_id=None, grain=g)
+    out["scope"] = "enterprise"
+    try:
+        out["pending_report"] = pending_count()
+    except Exception:
+        out["pending_report"] = 0
+    return out
+
+
+@app.get(
+    "/api/usage/enterprise/company",
+    tags=["企业用量汇总"],
+    summary="管理页·公司合计",
+    description="须管理员登录。数据来自本机汇总库（P0 与引擎同进程）。",
+)
+def api_usage_enterprise_company(
+    request: Request,
+    from_date: str = Query("", alias="from", description="起始自然日 YYYY-MM-DD"),
+    to_date: str = Query("", alias="to", description="结束自然日 YYYY-MM-DD"),
+):
+    from . import usage_hub
+
+    _, err = _require_admin(request)
+    if err:
+        return err
+    return usage_hub.company_summary(from_date=from_date, to_date=to_date)
+
+
+@app.get(
+    "/api/usage/enterprise/people",
+    tags=["企业用量汇总"],
+    summary="管理页·按人序列",
+    description="须管理员登录。grain=day|month。",
+)
+def api_usage_enterprise_people(
+    request: Request,
+    from_date: str = Query("", alias="from", description="起始自然日 YYYY-MM-DD"),
+    to_date: str = Query("", alias="to", description="结束自然日 YYYY-MM-DD"),
+    grain: str = Query("month", description="粒度：day 或 month"),
+):
+    from . import usage_hub
+
+    _, err = _require_admin(request)
+    if err:
+        return err
+    return usage_hub.people_summary(from_date=from_date, to_date=to_date, grain=grain)
+
+
+@app.post(
+    "/api/usage/report-now",
+    tags=["用量统计"],
+    summary="立即尝试上报待报流水",
+    description="须已登录。失败只返回摘要，不影响聊天/写码。report_enabled 关闭时跳过。",
+)
+def api_usage_report_now(request: Request):
+    from .usage.report import flush_report
+
+    _, err = _require_login(request)
+    if err:
+        return err
+    return flush_report(force=True)
 
 
 class PluginBody(BaseModel):
@@ -1733,6 +2171,11 @@ def api_commit_dictionary(body: DictCommitBody):
 
 
 # ================= 静态页面 =================
+
+@app.get("/zr-logo.svg", include_in_schema=False)
+def zr_logo():
+    return FileResponse(os.path.join(STATIC_DIR, "zr-logo.svg"))
+
 
 @app.get("/", include_in_schema=False)
 def index():

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-mes-bridge",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -13,7 +13,8 @@
   "description": "ZR-WorkBuddy Bridge：唯一常驻 Cordis 包；features 热插拔 + 聊天面板壳",
   "dsh": {
     "client": {
-      "platform": "web"
+      "platform": "web",
+      "immediately": true
     }
   },
   "dshApp": {

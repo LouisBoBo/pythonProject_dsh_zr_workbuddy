@@ -32,6 +32,9 @@ def mutating_path_guarded(path: str, method: str) -> bool:
         return True
     if p in {"/api/pick-folder"}:
         return True
+    # 本机登录/登出：有 Origin 时须回环（无头 CLI 仍可调，不挡其它业务）
+    if p in {"/api/auth/login", "/api/auth/logout", "/api/auth/change-password"}:
+        return True
     return False
 
 

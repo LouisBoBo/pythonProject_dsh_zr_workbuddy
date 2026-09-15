@@ -80,6 +80,72 @@ def _event_id(now: datetime) -> str:
     return f"usg_{now.strftime('%Y%m%d%H%M%S')}_{secrets.token_hex(3)}"
 
 
+def _current_user_id() -> str:
+    """已登录本机账号则写入流水；失败/未登录为空串（不上报企业总账）。"""
+    try:
+        from ..auth import current_user_id, get_active_user
+
+        uid = (current_user_id() or "").strip()
+        if uid:
+            return uid
+        active = get_active_user()
+        if active and active.get("id"):
+            return str(active["id"]).strip()
+    except Exception:
+        _LOG.debug("usage resolve user_id skipped", exc_info=True)
+    return ""
+
+
+def _match_user(evt: dict[str, Any], user_id: str) -> bool:
+    return str(evt.get("user_id") or "").strip() == str(user_id or "").strip()
+
+
+def backfill_orphan_user_id(*, default_user_id: str = "u_hebo") -> int:
+    """一次性：把无 user_id 的历史流水归到指定账号（默认 hebo）。已标记则跳过。"""
+    uid = (default_user_id or "").strip()
+    if not uid:
+        return 0
+    marker = os.path.join(_dir(), f".orphan_bound_{uid}")
+    if os.path.isfile(marker):
+        return 0
+    path = events_path()
+    if not os.path.isfile(path):
+        try:
+            os.makedirs(_dir(), exist_ok=True)
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write("ok\n")
+        except OSError:
+            pass
+        return 0
+    changed = 0
+    rewritten: list[str] = []
+    try:
+        with open(_lock_path(), "a+", encoding="utf-8") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                for evt in _iter_events():
+                    if not str(evt.get("user_id") or "").strip():
+                        evt = dict(evt)
+                        evt["user_id"] = uid
+                        changed += 1
+                    rewritten.append(json.dumps(evt, ensure_ascii=False))
+                if changed:
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write("\n".join(rewritten) + ("\n" if rewritten else ""))
+                        f.flush()
+                        os.fsync(f.fileno())
+                with open(marker, "w", encoding="utf-8") as f:
+                    f.write(f"bound={uid}\nchanged={changed}\n")
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        _LOG.warning("usage backfill orphan user_id failed", exc_info=True)
+        return 0
+    if changed:
+        _LOG.info("usage: 已将 %d 条无账号流水归到 %s", changed, uid)
+    return changed
+
+
 def _lock_path() -> str:
     return events_path() + ".lock"
 
@@ -119,7 +185,16 @@ def append_event(
             "ok": bool(ok),
             "job_id": str(job_id or "")[:80],
             "error_class": str(error_class or "")[:80],
+            "user_id": _current_user_id()[:80],
+            "machine_id": "",
+            "reported_at": None,
         }
+        try:
+            from .machine import get_machine_id
+
+            evt["machine_id"] = get_machine_id()[:80]
+        except Exception:
+            pass
         os.makedirs(_dir(), exist_ok=True)
         line = json.dumps(evt, ensure_ascii=False) + "\n"
         with open(_lock_path(), "a+", encoding="utf-8") as lf:
@@ -167,6 +242,11 @@ def _iter_events() -> list[dict[str, Any]]:
     except OSError:
         return []
     return out
+
+
+def iter_all_events() -> list[dict[str, Any]]:
+    """本机用量账本全部流水（企业管理视图与 hub 合并用）。"""
+    return list(_iter_events())
 
 
 def known_job_ids(*, only_quality: str = "") -> set[str]:
@@ -343,8 +423,13 @@ def _month_span(focus: datetime) -> tuple[datetime, datetime]:
     return start, end
 
 
-def summarize(*, days: int = 7, source: str = "", on: str = "") -> dict[str, Any]:
-    """按北京时间汇总；卡片与 hourly 锚定 on，monthly 为该日所在自然月。"""
+def summarize(*, days: int = 7, source: str = "", on: str = "", user_id: str | None = None, grain: str = "day") -> dict[str, Any]:
+    """按北京时间汇总。
+
+    grain=day（默认）：卡片与 hourly 锚定 on 当日；monthly 为该日所在自然月。
+    grain=month：卡片为整月合计；hourly 为当月各小时跨日累加；daily/monthly 为当月逐日。
+    user_id 非空时只统计该账号流水（用量跟账号，不跟设备）。
+    """
     try:
         from .ingest_cursor import ingest_dsh_cursor_jobs
 
@@ -357,11 +442,25 @@ def summarize(*, days: int = 7, source: str = "", on: str = "") -> dict[str, Any
         ingest_dsh_sessions()
     except Exception:
         _LOG.warning("usage ingest dsh sessions failed", exc_info=True)
+    try:
+        from .report import flush_report
+
+        flush_report(force=False)
+    except Exception:
+        _LOG.warning("usage report flush failed", exc_info=True)
+    grain = grain if grain in {"day", "month"} else "day"
     days = max(1, min(int(days or 7), 90))
     focus = _focus_day(on)
-    end = focus + timedelta(days=1)
-    start = end - timedelta(days=days)
+    m_start, m_end = _month_span(focus)
+    if grain == "month":
+        start, end = m_start, m_end
+    else:
+        end = focus + timedelta(days=1)
+        start = end - timedelta(days=days)
+    uid = None if user_id is None else str(user_id).strip()
     events = [e for e in _iter_events() if _in_range(e, start, end)]
+    if uid is not None:
+        events = [e for e in events if _match_user(e, uid)]
     if source in {"llm", "cursor"}:
         events = [e for e in events if e.get("source") == source]
 
@@ -397,7 +496,8 @@ def summarize(*, days: int = 7, source: str = "", on: str = "") -> dict[str, Any
         day = str(evt.get("ts") or "")[:10]
         dslot = daily.setdefault(day, _empty_day())
         _add_day_parts(dslot, evt, src)
-        if day == today_key:
+        # 按日：只累加锚定日；按月：当月各日同时段累加
+        if grain == "month" or day == today_key:
             _add_day_parts(hourly[_hour_of(evt)], evt, src)
 
     day_rows = []
@@ -409,24 +509,39 @@ def summarize(*, days: int = 7, source: str = "", on: str = "") -> dict[str, Any
         cur += timedelta(days=1)
 
     hour_rows = [{"hour": h, **hourly[h]} for h in range(24)]
-    m_start, m_end = _month_span(focus)
-    monthly_map: dict[str, dict[str, Any]] = {}
-    for evt in _iter_events():
-        if source in {"llm", "cursor"} and evt.get("source") != source:
-            continue
-        if not _in_range(evt, m_start, m_end):
-            continue
-        src = evt.get("source") if evt.get("source") in {"llm", "cursor"} else "llm"
-        day = str(evt.get("ts") or "")[:10]
-        _add_day_parts(monthly_map.setdefault(day, _empty_day()), evt, src)
-    month_rows: list[dict[str, Any]] = []
-    cur_m = m_start
-    while cur_m < m_end:
-        key = cur_m.strftime("%Y-%m-%d")
-        month_rows.append({"date": key, **(monthly_map.get(key) or _empty_day())})
-        cur_m += timedelta(days=1)
 
-    today_row = daily.get(today_key) or monthly_map.get(today_key) or _empty_day()
+    if grain == "month":
+        month_rows = list(day_rows)
+        monthly_map = daily
+    else:
+        monthly_map = {}
+        for evt in _iter_events():
+            if uid is not None and not _match_user(evt, uid):
+                continue
+            if source in {"llm", "cursor"} and evt.get("source") != source:
+                continue
+            if not _in_range(evt, m_start, m_end):
+                continue
+            src = evt.get("source") if evt.get("source") in {"llm", "cursor"} else "llm"
+            day = str(evt.get("ts") or "")[:10]
+            _add_day_parts(monthly_map.setdefault(day, _empty_day()), evt, src)
+        month_rows = []
+        cur_m = m_start
+        while cur_m < m_end:
+            key = cur_m.strftime("%Y-%m-%d")
+            month_rows.append({"date": key, **(monthly_map.get(key) or _empty_day())})
+            cur_m += timedelta(days=1)
+
+    if grain == "month":
+        period = _empty_day()
+        for row in month_rows:
+            for k, v in row.items():
+                if k == "date":
+                    continue
+                period[k] = int(period.get(k) or 0) + int(v or 0)
+        today_row = period
+    else:
+        today_row = daily.get(today_key) or monthly_map.get(today_key) or _empty_day()
     today = {
         "llm_tokens": today_row["llm_tokens"],
         "cursor_tokens": today_row["cursor_tokens"],
@@ -461,7 +576,8 @@ def summarize(*, days: int = 7, source: str = "", on: str = "") -> dict[str, Any
     cursor["models"] = _model_list("cursor")
     return {
         "ok": True,
-        "days": days,
+        "days": days if grain == "day" else (m_end - m_start).days,
+        "grain": grain,
         "from": start.strftime("%Y-%m-%d"),
         "to": (end - timedelta(seconds=1)).strftime("%Y-%m-%d"),
         "tz": "Asia/Shanghai",
@@ -469,6 +585,7 @@ def summarize(*, days: int = 7, source: str = "", on: str = "") -> dict[str, Any
         "month": m_start.strftime("%Y-%m"),
         "month_from": m_start.strftime("%Y-%m-%d"),
         "month_to": (m_end - timedelta(seconds=1)).strftime("%Y-%m-%d"),
+        "user_id": uid or "",
         "today": today,
         "llm": llm,
         "cursor": cursor,
@@ -479,6 +596,7 @@ def summarize(*, days: int = 7, source: str = "", on: str = "") -> dict[str, Any
     }
 
 
+
 def list_events(
     *,
     limit: int = 10,
@@ -487,8 +605,12 @@ def list_events(
     page: int | None = None,
     page_size: int | None = None,
     on: str = "",
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     rows = _iter_events()
+    uid = None if user_id is None else str(user_id).strip()
+    if uid is not None:
+        rows = [e for e in rows if _match_user(e, uid)]
     if source in {"llm", "cursor"}:
         rows = [e for e in rows if e.get("source") == source]
     day = str(on or "").strip()[:10]
@@ -521,7 +643,60 @@ def list_events(
         "total": total,
         "page": pg,
         "page_size": ps,
+        "user_id": uid or "",
     }
+
+
+def pending_report_events(*, limit: int = 200) -> list[dict[str, Any]]:
+    """待上报：有 user_id 且尚未标 reported_at。按 id 升序，单批上限。"""
+    lim = max(1, min(int(limit or 200), 500))
+    out: list[dict[str, Any]] = []
+    for evt in _iter_events():
+        uid = str(evt.get("user_id") or "").strip()
+        if not uid:
+            continue
+        if evt.get("reported_at"):
+            continue
+        eid = str(evt.get("id") or "").strip()
+        if not eid:
+            continue
+        out.append(dict(evt))
+    out.sort(key=lambda e: str(e.get("id") or ""))
+    return out[:lim]
+
+
+def mark_reported(event_ids: list[str], *, when: str) -> int:
+    """把指定 id 标为已上报。返回实际改写条数。"""
+    want = {str(x).strip() for x in (event_ids or []) if str(x).strip()}
+    if not want:
+        return 0
+    path = events_path()
+    if not os.path.isfile(path):
+        return 0
+    changed = 0
+    lines: list[str] = []
+    for evt in _iter_events():
+        eid = str(evt.get("id") or "").strip()
+        if eid in want and not evt.get("reported_at"):
+            row = dict(evt)
+            row["reported_at"] = when
+            lines.append(json.dumps(row, ensure_ascii=False))
+            changed += 1
+        else:
+            lines.append(json.dumps(evt, ensure_ascii=False))
+    if not changed:
+        return 0
+    os.makedirs(_dir(), exist_ok=True)
+    with open(_lock_path(), "a+", encoding="utf-8") as lf:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + ("\n" if lines else ""))
+                f.flush()
+                os.fsync(f.fileno())
+        finally:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+    return changed
 
 
 def prune_old(*, keep_days: int = RETENTION_DAYS) -> int:

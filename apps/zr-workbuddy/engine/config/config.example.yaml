@@ -94,3 +94,10 @@ feature_install:
   max_zip_bytes: 5242880         # zip 最大字节
   max_files: 200
   allow_force: true              # 是否允许覆盖已有 features/<id>
+
+# 企业用量上报（默认关；report_token 与 API Key 同级保密）
+usage:
+  report_enabled: false
+  report_url: ""                 # P0 本机汇总：http://127.0.0.1:<引擎端口>/api/usage-hub/v1
+  report_token: ""               # 机器票据（必填才能 ingest）；不是 DeepSeek Key；日志禁止回显
+                                 # 为空时拒绝上报入库，防止伪造流水

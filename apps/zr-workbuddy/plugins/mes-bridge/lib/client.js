@@ -39,6 +39,63 @@ window.__ModuleLoader__.load({
       return "http://" + engineHost() + ":" + enginePort();
     }
 
+    /** 与引擎 SPA / simplified 对齐的本机会话（:3081 与 :8000 localStorage 不同源，各存一份） */
+    var AUTH_LS_KEY = "mes_auth_session";
+    var AUTH_ENTERPRISES = [
+      { key: "jsry", label: "江苏软云", code: "" },
+      { key: "jxzr", label: "江西中软", code: "" },
+      { key: "qhzr", label: "前海中软", code: "" },
+    ];
+    var AUTH_EVENT = "wb-auth-changed";
+
+    function readAuthSession() {
+      try {
+        var raw = localStorage.getItem(AUTH_LS_KEY);
+        if (!raw) return null;
+        var data = JSON.parse(raw);
+        if (!data || !data.access_token) return null;
+        if (data.expires_at && Date.now() / 1000 > Number(data.expires_at) - 30) {
+          try {
+            localStorage.removeItem(AUTH_LS_KEY);
+          } catch (e0) {}
+          return null;
+        }
+        return data;
+      } catch (e1) {
+        return null;
+      }
+    }
+    function writeAuthSession(session) {
+      try {
+        if (session && session.access_token) localStorage.setItem(AUTH_LS_KEY, JSON.stringify(session));
+        else localStorage.removeItem(AUTH_LS_KEY);
+      } catch (e2) {}
+      try {
+        window.dispatchEvent(new CustomEvent(AUTH_EVENT));
+      } catch (e3) {}
+    }
+    function authHeaders(extra) {
+      var headers = Object.assign({}, extra || {});
+      var s = readAuthSession();
+      if (s && s.access_token) headers.Authorization = "Bearer " + s.access_token;
+      return headers;
+    }
+    function notifyAuthChanged() {
+      try {
+        window.dispatchEvent(new CustomEvent(AUTH_EVENT));
+      } catch (e4) {}
+    }
+    function doAppLogout() {
+      return fetch(engineBase() + "/api/auth/logout", {
+        method: "POST",
+        headers: authHeaders(),
+      })
+        .catch(function () {})
+        .then(function () {
+          writeAuthSession(null);
+        });
+    }
+
     /** 一体包走 Electron 原生选目录，避免 osascript→Finder 报 -1743。 */
     function pickLocalFolder(prompt, signal) {
       var p = prompt || "选择工程目录";
@@ -103,7 +160,7 @@ window.__ModuleLoader__.load({
     var cssInjected = false;
     function ensureCss() {
       if (typeof document === "undefined") return;
-      var ver = "composer-28";
+      var ver = "composer-52";
       if (cssInjected && document.querySelector("style[data-wb-cd-css='" + ver + "']")) return;
       document.querySelectorAll("style[data-plugin='@dsh-external/dsh-mes-bridge']").forEach(function (el) {
         if (el.parentNode) el.parentNode.removeChild(el);
@@ -170,6 +227,13 @@ window.__ModuleLoader__.load({
         ".wb-usage-panel{z-index:1;background:var(--dsw-alias-bg-layer-2,#fff);width:920px;max-width:calc(100vw - 48px);height:min(800px,100vh - 48px);box-shadow:var(--dsw-shadow-lv3,0 16px 48px rgba(15,23,42,.18));border-radius:24px;display:flex;flex-direction:column;position:relative;overflow:hidden}" +
         ".wb-usage-panel-head{box-sizing:border-box;flex:none;display:flex;justify-content:space-between;align-items:center;padding:20px 16px 8px 24px}" +
         ".wb-usage-panel-head .t{font-size:16px;font-weight:500;color:var(--dsw-alias-label-primary,#111827)}" +
+        ".wb-usage-tabs{border-collapse:collapse;margin:0;padding:0;border:1px solid var(--ds-color-border-subtle,#e5e7eb);border-radius:10px;overflow:hidden;background:#fff}" +
+        ".wb-usage-tabs td{padding:0;margin:0;border:none;border-right:1px solid var(--ds-color-border-subtle,#e5e7eb)}" +
+        ".wb-usage-tabs td:last-child{border-right:none}" +
+        ".wb-usage-tabs button{cursor:pointer;border:none;background:transparent;padding:7px 14px;font:inherit;font-size:13px;font-weight:500;color:#64748b;line-height:1.2;min-width:88px}" +
+        ".wb-usage-tabs td.active{background:var(--dsw-alias-interactive-bg-hover,rgba(15,23,42,.06))}" +
+        ".wb-usage-tabs td.active button{color:var(--dsw-alias-label-primary,#111827);font-weight:600}" +
+        ".wb-usage-tabs button:hover{color:var(--dsw-alias-label-primary,#111827)}" +
         ".wb-usage-panel-x{cursor:pointer;width:28px;height:28px;color:var(--dsw-alias-label-primary,#111827);background:transparent;border:none;border-radius:28px;font-size:18px;line-height:1;display:inline-flex;align-items:center;justify-content:center}" +
         ".wb-usage-panel-x:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(15,23,42,.06))}" +
         ".wb-usage-panel-body{flex:1;min-height:0;overflow:auto;padding:0 24px 24px}" +
@@ -180,6 +244,43 @@ window.__ModuleLoader__.load({
         ".wb-usage-filter{display:flex;align-items:center;gap:8px;margin:0 0 12px;min-height:36px}" +
         ".wb-usage-filter label{font-size:12px;color:#64748b;font-weight:600}" +
         ".wb-usage-filter input[type=date]{border:1px solid #d1d5db;border-radius:8px;padding:6px 10px;font:13px inherit;color:#111827;background:#fff}" +
+        ".wb-usage-auth{margin:0 0 12px;padding:0;border:none;background:transparent}" +
+        ".wb-app-login-gate{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(1200px 600px at 10% -10%,#d8f3e4 0%,transparent 55%),radial-gradient(900px 500px at 100% 0%,#eef7f1 0%,transparent 50%),#f6faf7}" +
+        ".wb-login-page{--brand:#1B5E3B;--brand-hover:#164A2F;--brand-ring:rgba(27,94,59,.22);--brand-border:#2E8B57;--ent-accent:#4a9eff;--ent-accent-text:#3b82f6;--ent-accent-soft:#eef5ff;padding:12px 4px 24px;background:radial-gradient(900px 420px at 10% -10%,#d8f3e4 0%,transparent 55%),radial-gradient(700px 360px at 100% 0%,#eef7f1 0%,transparent 50%),#f6faf7;border-radius:12px}" +
+        ".wb-login-card{width:100%;max-width:400px;margin:0 auto;padding:28px 24px 20px;background:#fff;border:1px solid #dce8e0;border-radius:16px;box-shadow:0 12px 40px rgba(27,94,59,.08)}" +
+        ".wb-login-brand{text-align:center;margin-bottom:20px}" +
+        ".wb-login-brand .brand-icon{display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;padding:5px;margin-bottom:10px;border-radius:14px;background:#1B5E3B;border:1px solid #2E8B57;box-sizing:border-box}" +
+        ".wb-login-brand .brand-icon img{width:100%;height:100%;object-fit:contain}" +
+        ".wb-login-brand h1{margin:0;font-size:20px;font-weight:700;color:#0f172a}" +
+        ".wb-login-brand p{margin:8px 0 0;font-size:13px;color:#64748b}" +
+        ".wb-login-form{display:flex;flex-direction:column;gap:12px}" +
+        ".wb-login-form .field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#475569;font-weight:500}" +
+        ".wb-login-form .field input{height:40px;padding:0 12px;border:1px solid #dbe1ea;border-radius:10px;font:14px inherit;color:#0f172a;background:#fff;outline:none}" +
+        ".wb-login-form .field input:focus{border-color:#2E8B57;background:#f4fbf6;box-shadow:0 0 0 3px rgba(27,94,59,.22)}" +
+        ".wb-login-form .ent-select{position:relative}" +
+        ".wb-login-form .ent-trigger{display:flex;align-items:center;justify-content:space-between;width:100%;height:40px;padding:0 12px;border:1px solid #dbe1ea;border-radius:10px;background:#fff;font:14px inherit;color:#334155;cursor:pointer}" +
+        ".wb-login-form .ent-select.open .ent-trigger{border-color:#4a9eff;box-shadow:0 0 0 3px rgba(74,158,255,.18)}" +
+        ".wb-login-form .ent-menu{display:none;position:absolute;z-index:20;left:0;right:0;top:calc(100% + 8px);margin:0;padding:6px 0;list-style:none;background:#fff;border:1px solid #e8eef5;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.1)}" +
+        ".wb-login-form .ent-select.open .ent-menu{display:block}" +
+        ".wb-login-form .ent-option{padding:10px 14px;font-size:14px;color:#64748b;cursor:pointer}" +
+        ".wb-login-form .ent-option.active{background:#eef5ff;color:#3b82f6}" +
+        ".wb-login-form .error{margin:0;padding:8px 10px;border-radius:8px;background:#fff1f2;color:#e11d48;font-size:13px}" +
+        ".wb-login-form .submit{margin-top:4px;height:42px;border:none;border-radius:10px;background:#1B5E3B;color:#fff;font:600 15px inherit;cursor:pointer}" +
+        ".wb-login-form .submit:disabled{opacity:.7;cursor:not-allowed}" +
+        ".wb-login-hint{margin:14px 0 0;text-align:center;font-size:11px;color:#94a3b8;line-height:1.5}" +
+        ".wb-header-logout{position:relative;display:inline-flex;align-items:center;margin:0 4px;font:12px/1.3 -apple-system,'PingFang SC','Microsoft YaHei',sans-serif}" +
+        ".wb-header-logout .trigger{display:inline-flex;align-items:center;gap:8px;border:none;background:transparent;padding:4px 6px;border-radius:8px;cursor:pointer;color:inherit;font:inherit}" +
+        ".wb-header-logout .trigger:hover{background:rgba(15,23,42,.06)}" +
+        ".wb-header-logout .avatar{width:28px;height:28px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;flex:none;color:#fff;font-size:13px;font-weight:700;background:linear-gradient(135deg,#7c5cfc,#4d6bfe);letter-spacing:0}" +
+        ".wb-header-logout .name{max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--ds-color-text-primary,#0f172a);font-size:13px}" +
+        ".wb-header-logout .caret{width:10px;height:10px;flex:none;color:#94a3b8;transition:transform .15s}" +
+        ".wb-header-logout.open .caret{transform:rotate(180deg)}" +
+        ".wb-header-logout .menu{position:absolute;top:calc(100% + 10px);right:0;z-index:2147483002;min-width:148px;background:#fff;border:1px solid #e8eef5;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.12);padding:6px 0}" +
+        ".wb-header-logout .menu::before{content:'';position:absolute;top:-5px;right:18px;width:10px;height:10px;background:#fff;border-left:1px solid #e8eef5;border-top:1px solid #e8eef5;transform:rotate(45deg)}" +
+        ".wb-header-logout .menu-logout{position:relative;z-index:1;display:block;width:100%;border:none;background:transparent;text-align:left;padding:8px 14px;font:13px inherit;color:#0f172a;cursor:pointer}" +
+        ".wb-header-logout .menu-logout:hover{background:#f8fafc}" +
+        ".wb-header-logout .menu-logout:disabled{opacity:.6;cursor:not-allowed}" +
+        ".wb-header-logout-mask{position:fixed;inset:0;z-index:2147483001;background:transparent}" +
         ".wb-usage-kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 18px}" +
         ".wb-usage-kpi{border:1px solid var(--ds-color-border-subtle,#e5e7eb);border-radius:14px;padding:12px 14px;background:#fff;min-width:0}" +
         ".wb-usage-kpi .k{font-size:12px;font-weight:600;color:#64748b;margin:0 0 8px}" +
@@ -209,10 +310,32 @@ window.__ModuleLoader__.load({
         ".wb-usage-hour-plot svg{display:block;width:100%;height:200px}" +
         ".wb-usage-hour-guide{position:absolute;width:0;border-left:1px dashed #c5cad3;pointer-events:none;transform:translateX(-50%)}" +
         ".wb-usage-hour-tip{position:absolute;top:10px;transform:translateX(-50%);background:#fff;color:#111827;font-size:12px;line-height:1.3;border-radius:999px;padding:8px 14px;pointer-events:none;z-index:2;white-space:nowrap;box-shadow:0 8px 24px rgba(15,23,42,.12);display:flex;align-items:center;gap:14px}" +
+        ".wb-usage-hour-tip-dual{border-radius:12px;flex-wrap:wrap;max-width:min(420px,90%);gap:8px 12px;justify-content:center}" +
         ".wb-usage-hour-tip .r{color:#64748b}" +
         ".wb-usage-hour-tip .v{font-weight:700;font-variant-numeric:tabular-nums}" +
+        ".wb-usage-hour-tip .v.llm{color:#ea580c}" +
+        ".wb-usage-hour-tip .v.cur{color:#0f766e}" +
         ".wb-usage-hour-tip .c{color:#94a3b8;font-size:11px}" +
-        "@media (max-width:640px){.wb-set-grid{grid-template-columns:1fr}.wb-usage-meter-grid{grid-template-columns:1fr}.wb-usage-kpis{grid-template-columns:1fr}}" +
+        ".wb-usage-filter select{border:1px solid #d1d5db;border-radius:8px;padding:6px 10px;font:13px inherit;color:#111827;background:#fff}" +
+        ".wb-usage-people{margin:0 0 22px}" +
+        ".wb-usage-people-title{font-size:14px;font-weight:700;line-height:1.4;margin:0 0 2px}" +
+        ".wb-usage-people-sub{font-size:12px;color:#64748b;margin:4px 0 12px}" +
+        ".wb-usage-hbar{border:1px solid var(--ds-color-border-subtle,#e5e7eb);border-radius:14px;padding:12px 14px;background:#fff}" +
+        ".wb-usage-hbar-person{margin:0 0 14px;padding-bottom:12px;border-bottom:1px solid #f1f5f9}" +
+        ".wb-usage-hbar-person:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}" +
+        ".wb-usage-hbar-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:0 0 8px}" +
+        ".wb-usage-hbar-name{font-size:13px;font-weight:600;color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+        ".wb-usage-hbar-total{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:#111827;white-space:nowrap}" +
+        ".wb-usage-hbar-row{display:grid;grid-template-columns:72px 1fr 72px;gap:8px;align-items:center;margin:0 0 6px}" +
+        ".wb-usage-hbar-row:last-child{margin-bottom:0}" +
+        ".wb-usage-hbar-lab{font-size:11px;color:#64748b;font-weight:600}" +
+        ".wb-usage-hbar-track{height:14px;border-radius:7px;background:#f1f5f9;overflow:hidden;min-width:0}" +
+        ".wb-usage-hbar-fill.llm{height:100%;border-radius:7px;background:linear-gradient(90deg,#93c5fd,#3b82f6);min-width:2px}" +
+        ".wb-usage-hbar-fill.cursor{height:100%;border-radius:7px;background:linear-gradient(90deg,#99f6e4,#14b8a6);min-width:2px}" +
+        ".wb-usage-hbar-val{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:#111827;text-align:right}" +
+        ".wb-usage-hbar-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0 0 10px;font-size:11px;color:#64748b}" +
+        ".wb-usage-hbar-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}" +
+        "@media (max-width:640px){.wb-set-grid{grid-template-columns:1fr}.wb-usage-meter-grid{grid-template-columns:1fr}.wb-usage-kpis{grid-template-columns:1fr}.wb-usage-hbar-row{grid-template-columns:56px 1fr 64px}}" +
         ".wb-cr-progress{font-size:12px;color:#475569;white-space:pre-wrap;max-height:280px;overflow:auto;background:#f8fafc;border-radius:8px;padding:10px;margin-top:8px}" +
         ".wb-cd-plan{border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;padding:10px;margin:8px 0}" +
         ".wb-cd-plan-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 8px;font-size:12px}" +
@@ -7727,6 +7850,123 @@ window.__ModuleLoader__.load({
       });
     }
 
+    function WorkBuddyHeaderLogout() {
+      ensureCss();
+      var userState = useState(null);
+      var user = userState[0];
+      var setUser = userState[1];
+      var openState = useState(false);
+      var open = openState[0];
+      var setOpen = openState[1];
+      var busyState = useState(false);
+      var busy = busyState[0];
+      var setBusy = busyState[1];
+
+      function refresh() {
+        var sess = readAuthSession();
+        if (!sess) {
+          setUser(null);
+          return;
+        }
+        setUser({
+          username: sess.username || "",
+          display_name: sess.display_name || sess.username || "",
+        });
+        fetch(engineBase() + "/api/auth/me", { headers: authHeaders() })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d && d.ok && d.authenticated && d.user) setUser(d.user);
+            else setUser(null);
+          })
+          .catch(function () {});
+      }
+
+      useEffect(function () {
+        refresh();
+        function onAuth() { refresh(); }
+        window.addEventListener(AUTH_EVENT, onAuth);
+        return function () { window.removeEventListener(AUTH_EVENT, onAuth); };
+      }, []);
+
+      useEffect(
+        function () {
+          if (!open) return undefined;
+          function onKey(ev) {
+            if (ev.key === "Escape") setOpen(false);
+          }
+          document.addEventListener("keydown", onKey);
+          return function () { document.removeEventListener("keydown", onKey); };
+        },
+        [open],
+      );
+
+      if (!user) return null;
+      var label = user.display_name || user.username || "";
+      var initial = (label || "?").trim().charAt(0).toUpperCase() || "U";
+      return h(
+        React.Fragment,
+        null,
+        open
+          ? h("div", {
+              className: "wb-header-logout-mask",
+              onClick: function () { setOpen(false); },
+            })
+          : null,
+        h(
+          "div",
+          { className: "wb-header-logout" + (open ? " open" : "") },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "trigger",
+              "aria-haspopup": "menu",
+              "aria-expanded": open,
+              title: "账号",
+              onClick: function () { setOpen(!open); },
+            },
+            h("span", { className: "avatar", "aria-hidden": "true" }, initial),
+            h("span", { className: "name" }, label),
+            h(
+              "svg",
+              { className: "caret", viewBox: "0 0 12 8", width: 10, height: 8, "aria-hidden": "true" },
+              h("path", {
+                d: "M1 1.5L6 6.5L11 1.5",
+                fill: "none",
+                stroke: "currentColor",
+                strokeWidth: "1.5",
+                strokeLinecap: "round",
+                strokeLinejoin: "round",
+              }),
+            ),
+          ),
+          open
+            ? h(
+                "div",
+                { className: "menu", role: "menu" },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "menu-logout",
+                    role: "menuitem",
+                    disabled: busy,
+                    onClick: function () {
+                      setBusy(true);
+                      doAppLogout().finally(function () {
+                        setBusy(false);
+                        setOpen(false);
+                      });
+                    },
+                  },
+                  busy ? "退出中…" : "退出登录",
+                ),
+              )
+            : null,
+        ),
+      );
+    }
+
     function WorkBuddySettingsSection() {
       ensureCss();
       var draftState = useState(emptyDraft);
@@ -8604,7 +8844,11 @@ window.__ModuleLoader__.load({
       return "";
     }
 
-    function usageShowDayTick(i, n, label) {
+    function usageShowDayTick(i, n, label, axis) {
+      if (axis === "hour") {
+        if (n <= 8) return true;
+        return i === 0 || i === 8 || i === 15 || i === n - 1;
+      }
       if (n <= 8) return true;
       if (i === 0 || i === n - 1) return true;
       var d = String(label || "");
@@ -8643,17 +8887,41 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function usageAlignMonthScroll(el, idx, n) {
+    function usageAlignMonthScroll(el, idx, n, align) {
       if (!el || n < 1) return;
       var view = el.clientWidth;
       var total = el.scrollWidth;
       if (view < 8 || total <= view + 1) return;
       var i = Math.max(0, Math.min(n - 1, idx | 0));
-      var left = ((i + 1) / n) * total - view;
+      var left = align === "start" ? (i / n) * total : ((i + 1) / n) * total - view;
       if (left < 0) left = 0;
       var max = total - view;
       if (left > max) left = max;
       el.scrollLeft = left;
+    }
+
+    function usageHourScrollIndex(hourly) {
+      // 个人/企业按日一致：滚到工作时段。Token 高峰尽量落在视窗中部，但起点不低于 08:00（避开无意义的凌晨空窗）。
+      var byH = {};
+      (hourly || []).forEach(function (r) {
+        byH[Number(r.hour)] = r;
+      });
+      var peak = -1;
+      var peakTok = -1;
+      for (var hr = 0; hr < 24; hr++) {
+        var row = byH[hr] || {};
+        var tok = (Number(row.llm_tokens) || 0) + (Number(row.cursor_tokens) || 0);
+        if (tok > peakTok) {
+          peakTok = tok;
+          peak = hr;
+        }
+      }
+      var workStart = 8;
+      if (peak < 0 || peakTok <= 0) return workStart;
+      var start = peak - 4;
+      if (start < workStart) start = workStart;
+      if (start > 16) start = 16;
+      return start;
     }
 
     function usageScrollToFocus(root, dates, focusYmd) {
@@ -8673,6 +8941,27 @@ window.__ModuleLoader__.load({
       var nodes = root.querySelectorAll(".wb-usage-chart-scroll");
       for (var j = 0; j < nodes.length; j++) {
         usageAlignMonthScroll(nodes[j], idx, n);
+      }
+    }
+
+    function usageScrollToHour(root, hourly) {
+      if (!root) return;
+      var idx = usageHourScrollIndex(hourly);
+      function apply() {
+        var nodes = root.querySelectorAll(".wb-usage-chart-scroll");
+        for (var j = 0; j < nodes.length; j++) {
+          usageAlignMonthScroll(nodes[j], idx, 24, "start");
+        }
+      }
+      apply();
+      // 图表宽度可能在首帧后才算准，多刷一次保证个人/企业都滚到同一工作窗
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(function () {
+          apply();
+          requestAnimationFrame(apply);
+        });
+      } else {
+        setTimeout(apply, 0);
       }
     }
 
@@ -8721,7 +9010,7 @@ window.__ModuleLoader__.load({
       return d;
     }
 
-    function usageCurveSvg(values, labels, fill, stroke, gid) {
+    function usageCurveSvg(values, labels, fill, stroke, gid, axis) {
       var n = values.length || 1;
       var box = usagePlotBox(n);
       var W = box.W, H = box.H, L = box.L, R = box.R, T = box.T, iw = box.iw, ih = box.ih;
@@ -8742,7 +9031,7 @@ window.__ModuleLoader__.load({
           '<text x="' + (L - 6) + '" y="' + (yy + 3) + '" text-anchor="end" font-size="10" fill="#94a3b8">' + label + "</text>";
       }).join("");
       var xlabs = labels.map(function (lb, i) {
-        if (!usageShowDayTick(i, n, lb)) return "";
+        if (!usageShowDayTick(i, n, lb, axis)) return "";
         return '<text x="' + xAt(i) + '" y="' + (H - 8) + '" text-anchor="' + usageXTickAnchor(i, n) + '" font-size="10" fill="#94a3b8">' + String(lb) + "</text>";
       }).join("");
       return '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" height="150" preserveAspectRatio="none">' +
@@ -8764,6 +9053,7 @@ window.__ModuleLoader__.load({
       var setHover = hoverState[1];
       var values = props.values || [];
       var labels = props.labels || [];
+      var axis = props.axis === "hour" ? "hour" : "day";
       var n = values.length || 1;
       var box = usagePlotBox(n);
       var W = box.W, H = box.H, L = box.L, T = box.T, iw = box.iw, ih = box.ih;
@@ -8798,7 +9088,7 @@ window.__ModuleLoader__.load({
           onMouseMove: onMove,
           onMouseLeave: function () { setHover(-1); },
         },
-        h("div", { dangerouslySetInnerHTML: { __html: usageCurveSvg(values, labels, props.fill, props.stroke, props.gid) } }),
+        h("div", { dangerouslySetInnerHTML: { __html: usageCurveSvg(values, labels, props.fill, props.stroke, props.gid, axis) } }),
         tip
           ? h("div", { className: "wb-usage-guide", style: { left: tip.left + "%", top: tip.gTop + "%", height: tip.gH + "%" } })
           : null,
@@ -8816,7 +9106,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function usageStackSvg(rows, colors, hoverIdx) {
+    function usageStackSvg(rows, colors, hoverIdx, axis) {
       var n = rows.length || 1;
       var box = usagePlotBox(n);
       var W = box.W, H = box.H, L = box.L, R = box.R, T = box.T, iw = box.iw, ih = box.ih;
@@ -8852,7 +9142,7 @@ window.__ModuleLoader__.load({
           return '<rect x="' + x0.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) +
             '" height="' + hh.toFixed(1) + '" fill="' + c + '"/>';
         }).join("");
-        var showLab = usageShowDayTick(i, n, r.label);
+        var showLab = usageShowDayTick(i, n, r.label, axis);
         var lab = showLab
           ? '<text x="' + cx + '" y="' + (H - 8) + '" text-anchor="' + usageXTickAnchor(i, n) + '" font-size="10" fill="#94a3b8">' + r.label + "</text>"
           : "";
@@ -8867,6 +9157,7 @@ window.__ModuleLoader__.load({
       var hover = hoverState[0];
       var setHover = hoverState[1];
       var rows = props.rows || [];
+      var axis = props.axis === "hour" ? "hour" : "day";
       var n = rows.length || 1;
       var box = usagePlotBox(n);
       var W = box.W, H = box.H, L = box.L, T = box.T, iw = box.iw, ih = box.ih;
@@ -8897,7 +9188,7 @@ window.__ModuleLoader__.load({
           onMouseMove: onMove,
           onMouseLeave: function () { setHover(-1); },
         },
-        h("div", { dangerouslySetInnerHTML: { __html: usageStackSvg(rows, props.colors, hover) } }),
+        h("div", { dangerouslySetInnerHTML: { __html: usageStackSvg(rows, props.colors, hover, axis) } }),
         tip
           ? h("div", { className: "wb-usage-colhi", style: { left: tip.colL + "%", width: tip.colW + "%", top: tip.gTop + "%", height: tip.gH + "%" } })
           : null,
@@ -8922,7 +9213,7 @@ window.__ModuleLoader__.load({
       return a + "～" + (n < 10 ? "0" : "") + n + ":00";
     }
 
-    function usageHourRows(hourly, prefix) {
+    function usageHourCombinedRows(hourly) {
       var byH = {};
       (hourly || []).forEach(function (r) {
         byH[Number(r.hour)] = r;
@@ -8931,62 +9222,105 @@ window.__ModuleLoader__.load({
       for (var h = 0; h < 24; h++) {
         var r = byH[h] || {};
         out.push({
-          hour: h,
+          key: h,
           range: usageHourRange(h),
-          tokens: Number(r[prefix + "tokens"]) || 0,
-          calls: Number(r[prefix + "calls"]) || 0,
+          tick: null,
+          llm_tokens: Number(r.llm_tokens) || 0,
+          llm_calls: Number(r.llm_calls) || 0,
+          cursor_tokens: Number(r.cursor_tokens) || 0,
+          cursor_calls: Number(r.cursor_calls) || 0,
         });
       }
       return out;
     }
 
+    function usageDayCombinedRows(daily) {
+      return (daily || []).map(function (r) {
+        var date = String(r.date || "").slice(0, 10);
+        var md = usageMd(date) || date;
+        return {
+          key: date,
+          range: md,
+          tick: md,
+          llm_tokens: Number(r.llm_tokens) || 0,
+          llm_calls: Number(r.llm_calls) || 0,
+          cursor_tokens: Number(r.cursor_tokens) || 0,
+          cursor_calls: Number(r.cursor_calls) || 0,
+        };
+      });
+    }
+
     var USAGE_HOUR_GEO = { W: 560, H: 200, L: 48, R: 14, T: 16, B: 30 };
 
-    function usageHourSvg(rows, color, hoverIdx) {
+    function usageDualCombinedSvg(rows, hoverIdx, axis) {
       var g = USAGE_HOUR_GEO;
       var W = g.W, H = g.H, L = g.L, R = g.R, T = g.T, B = g.B;
       var iw = W - L - R, ih = H - T - B;
-      var n = 24;
-      var values = [];
-      for (var i = 0; i < n; i++) values.push((rows[i] && rows[i].tokens) || 0);
-      var max = usageNiceMax(Math.max.apply(null, [0].concat(values)));
+      var n = Math.max(1, (rows || []).length);
+      var llmVals = [];
+      var curVals = [];
+      for (var i = 0; i < n; i++) {
+        llmVals.push((rows[i] && rows[i].llm_tokens) || 0);
+        curVals.push((rows[i] && rows[i].cursor_tokens) || 0);
+      }
+      var max = usageNiceMax(Math.max.apply(null, [0].concat(llmVals, curVals)));
       var slot = iw / n;
-      var bw = Math.max(4, slot * 0.55);
+      // 同日/同时段双柱贴合无间隙；组间留一点空隙区分相邻日
+      var outer = Math.max(1.5, slot * 0.18);
+      var pairW = Math.max(4, slot - outer);
+      var bw = pairW / 2;
       var hi = hoverIdx == null ? -1 : hoverIdx;
+      var cLlm = "#ff5a1f";
+      var cCur = "#14b8a6";
       var grid = [0, 0.5, 1].map(function (f) {
         var yy = T + ih - f * ih;
         var label = f === 0 ? "0" : fmtUsageTokens(max * f);
         return '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + yy + '" y2="' + yy + '" stroke="#eceef2"/>' +
           '<text x="' + (L - 8) + '" y="' + (yy + 3) + '" text-anchor="end" font-size="10" fill="#94a3b8">' + label + "</text>";
       }).join("");
-      var xMarks = { 0: "00:00", 8: "08:00", 15: "15:00", 23: "23:00" };
+      var hourMarks = { 0: "00:00", 8: "08:00", 15: "15:00", 23: "23:00" };
       var bars = "";
       for (var j = 0; j < n; j++) {
-        var cx = L + (j + 0.5) * slot;
-        var x0 = cx - bw / 2;
-        var hh = max ? (values[j] / max) * ih : 0;
-        var y = T + ih - hh;
+        var slotX = L + j * slot;
+        var cx = slotX + slot / 2;
         if (j === hi) {
-          bars += '<rect x="' + (L + j * slot).toFixed(1) + '" y="' + T + '" width="' + slot.toFixed(1) +
+          bars += '<rect x="' + slotX.toFixed(1) + '" y="' + T + '" width="' + slot.toFixed(1) +
             '" height="' + ih + '" fill="rgba(15,23,42,0.04)"/>';
         }
-        if (hh > 0.6) {
-          bars += '<rect x="' + x0.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) +
-            '" height="' + hh.toFixed(1) + '" rx="2.5" fill="' + color + '"/>';
+        var xL = cx - pairW / 2;
+        var xC = xL + bw;
+        var hL = max ? (llmVals[j] / max) * ih : 0;
+        var hC = max ? (curVals[j] / max) * ih : 0;
+        if (hL > 0.6) {
+          bars += '<rect x="' + xL.toFixed(1) + '" y="' + (T + ih - hL).toFixed(1) + '" width="' + bw.toFixed(1) +
+            '" height="' + hL.toFixed(1) + '" fill="' + cLlm + '"/>';
         }
-        if (xMarks[j]) {
-          bars += '<text x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="#94a3b8">' + xMarks[j] + "</text>";
+        if (hC > 0.6) {
+          bars += '<rect x="' + xC.toFixed(1) + '" y="' + (T + ih - hC).toFixed(1) + '" width="' + bw.toFixed(1) +
+            '" height="' + hC.toFixed(1) + '" fill="' + cCur + '"/>';
+        }
+        var tick = "";
+        if (axis === "day") {
+          if (usageShowDayTick(j, n, rows[j] && rows[j].tick)) {
+            tick = String((rows[j] && rows[j].tick) || "");
+          }
+        } else if (hourMarks[j]) {
+          tick = hourMarks[j];
+        }
+        if (tick) {
+          bars += '<text x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="#94a3b8">' + tick + "</text>";
         }
       }
       return '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" height="200" preserveAspectRatio="none">' + grid + bars + "</svg>";
     }
 
-    function UsageHourChart(props) {
+    function UsageDualCombinedChart(props) {
       var hoverState = useState(-1);
       var hover = hoverState[0];
       var setHover = hoverState[1];
       var rows = props.rows || [];
-      var n = 24;
+      var axis = props.axis === "day" ? "day" : "hour";
+      var n = Math.max(1, rows.length);
       var g = USAGE_HOUR_GEO;
       var W = g.W, H = g.H, L = g.L, R = g.R, T = g.T, B = g.B;
       var iw = W - L - R, ih = H - T - B;
@@ -8998,7 +9332,7 @@ window.__ModuleLoader__.load({
         var i = Math.floor(Math.max(0, Math.min(0.999, t)) * n);
         setHover(i);
       }
-      var row = hover >= 0 && hover < n ? rows[hover] : null;
+      var row = hover >= 0 && hover < rows.length ? rows[hover] : null;
       var tip = row
         ? {
           left: Math.max(14, Math.min(86, ((L + (hover + 0.5) * (iw / n)) / W) * 100)),
@@ -9013,27 +9347,38 @@ window.__ModuleLoader__.load({
           onMouseMove: onMove,
           onMouseLeave: function () { setHover(-1); },
         },
-        h("div", { dangerouslySetInnerHTML: { __html: usageHourSvg(rows, props.color || "#ff5a1f", hover) } }),
+        h("div", { dangerouslySetInnerHTML: { __html: usageDualCombinedSvg(rows, hover, axis) } }),
         tip
           ? h("div", { className: "wb-usage-hour-guide", style: { left: tip.left + "%", top: tip.gTop + "%", height: tip.gH + "%" } })
           : null,
         row
           ? h(
             "div",
-            { className: "wb-usage-hour-tip", style: { left: tip.left + "%" } },
+            { className: "wb-usage-hour-tip wb-usage-hour-tip-dual", style: { left: tip.left + "%" } },
             h("span", { className: "r" }, String(row.range || "")),
-            h("span", { className: "v" }, fmtUsageTokens(row.tokens)),
-            h("span", { className: "c" }, "请求 " + String(row.calls || 0)),
+            h("span", { className: "v llm" }, "LLM " + fmtUsageTokens(row.llm_tokens)),
+            h("span", { className: "c" }, String(row.llm_calls || 0) + " 次"),
+            h("span", { className: "v cur" }, "Cursor " + fmtUsageTokens(row.cursor_tokens)),
+            h("span", { className: "c" }, String(row.cursor_calls || 0) + " 次"),
           )
           : null,
       );
     }
 
-    function usageHourCard(title, hourly, prefix, color, day) {
-      var rows = usageHourRows(hourly, prefix);
-      var sumTok = rows.reduce(function (a, r) { return a + r.tokens; }, 0);
-      var sumCalls = rows.reduce(function (a, r) { return a + r.calls; }, 0);
+    function usageHourCombinedCard(title, series, day, opts) {
+      var monthMode = !!(opts && opts.monthMode);
+      var rows = monthMode
+        ? usageDayCombinedRows(series)
+        : usageHourCombinedRows(series);
+      var sumLlmTok = rows.reduce(function (a, r) { return a + r.llm_tokens; }, 0);
+      var sumCurTok = rows.reduce(function (a, r) { return a + r.cursor_tokens; }, 0);
+      var sumLlmCalls = rows.reduce(function (a, r) { return a + r.llm_calls; }, 0);
+      var sumCurCalls = rows.reduce(function (a, r) { return a + r.cursor_calls; }, 0);
       var when = String(day || "").slice(0, 10) || "所选日期";
+      var monthLab = usageMonthLabel((opts && opts.monthLabel) || when) || String((opts && opts.monthLabel) || when).slice(0, 7);
+      var rangeLab = monthMode
+        ? (monthLab + " 逐日")
+        : (when + " 00:00–24:00");
       return h(
         "div",
         { className: "wb-set-card" },
@@ -9041,8 +9386,26 @@ window.__ModuleLoader__.load({
         h(
           "div",
           { className: "body" },
-          h("div", { className: "wb-usage-hour-sub" }, when + " 00:00–24:00 · 请求 " + sumCalls + " · Token " + fmtUsageTokens(sumTok)),
-          h(UsageHourChart, { rows: rows, color: color }),
+          h(
+            "div",
+            { className: "wb-usage-hour-sub" },
+            rangeLab +
+              " · LLM " +
+              sumLlmCalls +
+              " 次 / " +
+              fmtUsageTokens(sumLlmTok) +
+              " · Cursor " +
+              sumCurCalls +
+              " 次 / " +
+              fmtUsageTokens(sumCurTok),
+          ),
+          h(
+            "div",
+            { className: "wb-usage-legend", style: { marginBottom: "8px" } },
+            h("span", null, h("i", { style: { background: "#ff5a1f" } }), "LLM"),
+            h("span", null, h("i", { style: { background: "#14b8a6" } }), "Cursor 写码"),
+          ),
+          h(UsageDualCombinedChart, { rows: rows, axis: monthMode ? "day" : "hour" }),
         ),
       );
     }
@@ -9070,19 +9433,37 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function usageMeterNode(title, subtitle, daily, prefix, palette, extraNote) {
-      var calls = daily.map(function (d) { return Number(d[prefix + "calls"]) || 0; });
-      var labels = daily.map(function (d) { return usageMd(d.date); });
-      var stacks = daily.map(function (d) {
+    function usageMeterNode(title, subtitle, series, prefix, palette, extraNote, axis) {
+      var axisMode = axis === "hour" ? "hour" : "day";
+      var rows = series || [];
+      if (axisMode === "hour") {
+        var byH = {};
+        rows.forEach(function (r) {
+          byH[Number(r.hour)] = r;
+        });
+        rows = [];
+        for (var hr = 0; hr < 24; hr++) {
+          rows.push(byH[hr] || { hour: hr });
+        }
+      }
+      var calls = rows.map(function (d) { return Number(d[prefix + "calls"]) || 0; });
+      var labels = rows.map(function (d, i) {
+        if (axisMode === "hour") {
+          var hh = d.hour != null ? Number(d.hour) : i;
+          return (hh < 10 ? "0" : "") + hh + ":00";
+        }
+        return usageMd(d.date);
+      });
+      var stacks = rows.map(function (d, i) {
         return {
-          label: usageMd(d.date),
+          label: labels[i],
           hit: Number(d[prefix + "cache_hit"]) || 0,
           miss: Number(d[prefix + "cache_miss"]) || 0,
           out: Number(d[prefix + "output"]) || 0,
         };
       });
       var sumCalls = calls.reduce(function (a, b) { return a + b; }, 0);
-      var sumTok = daily.reduce(function (a, d) { return a + (Number(d[prefix + "tokens"]) || 0); }, 0);
+      var sumTok = rows.reduce(function (a, d) { return a + (Number(d[prefix + "tokens"]) || 0); }, 0);
       return h(
         "section",
         { className: "wb-usage-meter" },
@@ -9095,13 +9476,13 @@ window.__ModuleLoader__.load({
             "div",
             { className: "wb-usage-chart" },
             h("div", { className: "wb-usage-chart-head" }, h("span", { className: "t" }, "API 请求次数"), h("span", { className: "n" }, String(sumCalls))),
-            usageChartScroll(calls.length, h(UsageCurveChart, { values: calls, labels: labels, fill: palette.fill, stroke: palette.stroke, gid: prefix })),
+            usageChartScroll(calls.length, h(UsageCurveChart, { values: calls, labels: labels, fill: palette.fill, stroke: palette.stroke, gid: prefix, axis: axisMode })),
           ),
           h(
             "div",
             { className: "wb-usage-chart" },
             h("div", { className: "wb-usage-chart-head" }, h("span", { className: "t" }, "Tokens"), h("span", { className: "n", title: fmtUsageTokensTitle(sumTok) }, fmtUsageTokens(sumTok))),
-            usageChartScroll(stacks.length, h(UsageStackChart, { rows: stacks, colors: palette })),
+            usageChartScroll(stacks.length, h(UsageStackChart, { rows: stacks, colors: palette, axis: axisMode })),
             h(
               "div",
               { className: "wb-usage-legend" },
@@ -9114,8 +9495,510 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function WorkBuddyUsageSection() {
+    function usageMonthRangeFromDay(ymd) {
+      var s = String(ymd || usageTodayYmd());
+      var y = Number(s.slice(0, 4));
+      var m = Number(s.slice(5, 7));
+      if (!y || !m) {
+        s = usageTodayYmd();
+        y = Number(s.slice(0, 4));
+        m = Number(s.slice(5, 7));
+      }
+      var from = s.slice(0, 7) + "-01";
+      var last = new Date(y, m, 0).getDate();
+      var to = s.slice(0, 7) + "-" + String(last).padStart(2, "0");
+      var today = usageTodayYmd();
+      if (to > today) to = today;
+      return { from: from, to: to, label: s.slice(0, 7) };
+    }
+
+    function usagePeopleHBars(rows) {
+      var list = (rows || []).slice().sort(function (a, b) {
+        var ta = (Number(a.llm_tokens) || 0) + (Number(a.cursor_tokens) || 0);
+        var tb = (Number(b.llm_tokens) || 0) + (Number(b.cursor_tokens) || 0);
+        if (tb !== ta) return tb - ta;
+        return String(a.display_name || a.username || "").localeCompare(
+          String(b.display_name || b.username || ""),
+          "zh",
+        );
+      });
+      var maxTok = 0;
+      list.forEach(function (r) {
+        var llm = Number(r.llm_tokens) || 0;
+        var cur = Number(r.cursor_tokens) || 0;
+        if (llm > maxTok) maxTok = llm;
+        if (cur > maxTok) maxTok = cur;
+      });
+      if (!list.length) {
+        return h("p", { className: "wb-usage-people-sub" }, "暂无员工账号。");
+      }
+      function barPct(n) {
+        if (maxTok <= 0) return 0;
+        var v = Number(n) || 0;
+        if (v <= 0) return 0;
+        return Math.max(2, Math.round((v / maxTok) * 100));
+      }
+      return h(
+        "div",
+        { className: "wb-usage-hbar" },
+        h(
+          "div",
+          { className: "wb-usage-hbar-legend" },
+          h("span", null, h("i", { style: { background: "#3b82f6" } }), "LLM Token"),
+          h("span", null, h("i", { style: { background: "#14b8a6" } }), "Cursor 写码 Token"),
+        ),
+        list.map(function (r, idx) {
+          var name = r.display_name || r.username || r.user_id || "—";
+          var llmTok = Number(r.llm_tokens) || 0;
+          var curTok = Number(r.cursor_tokens) || 0;
+          var llmCalls = Number(r.llm_calls) || 0;
+          var curCalls = Number(r.cursor_calls) || 0;
+          var total = llmTok + curTok;
+          return h(
+            "div",
+            { className: "wb-usage-hbar-person", key: String(r.user_id || name) + "|" + idx },
+            h(
+              "div",
+              { className: "wb-usage-hbar-head" },
+              h("div", { className: "wb-usage-hbar-name", title: name }, name),
+              h(
+                "div",
+                {
+                  className: "wb-usage-hbar-total",
+                  title: "LLM+Cursor 合计 " + fmtUsageTokensTitle(total),
+                },
+                "合计 " + fmtUsageTokens(total),
+              ),
+            ),
+            h(
+              "div",
+              { className: "wb-usage-hbar-row" },
+              h("div", { className: "wb-usage-hbar-lab" }, "LLM"),
+              h(
+                "div",
+                { className: "wb-usage-hbar-track" },
+                h("div", {
+                  className: "wb-usage-hbar-fill llm",
+                  style: { width: barPct(llmTok) + "%" },
+                  title: fmtUsageTokensTitle(llmTok) + " · " + llmCalls + " 次",
+                }),
+              ),
+              h(
+                "div",
+                { className: "wb-usage-hbar-val", title: fmtUsageTokensTitle(llmTok) + " · API " + llmCalls + " 次" },
+                fmtUsageTokens(llmTok),
+              ),
+            ),
+            h(
+              "div",
+              { className: "wb-usage-hbar-row" },
+              h("div", { className: "wb-usage-hbar-lab" }, "Cursor"),
+              h(
+                "div",
+                { className: "wb-usage-hbar-track" },
+                h("div", {
+                  className: "wb-usage-hbar-fill cursor",
+                  style: { width: barPct(curTok) + "%" },
+                  title: fmtUsageTokensTitle(curTok) + " · " + curCalls + " 次",
+                }),
+              ),
+              h(
+                "div",
+                {
+                  className: "wb-usage-hbar-val",
+                  title: fmtUsageTokensTitle(curTok) + " · " + curCalls + " 次",
+                },
+                fmtUsageTokens(curTok),
+              ),
+            ),
+          );
+        }),
+      );
+    }
+
+    function usagePeopleBarsNode(title, subtitle, rows) {
+      return h(
+        "section",
+        { className: "wb-usage-people" },
+        h("div", { className: "wb-usage-people-title" }, title),
+        h("div", { className: "wb-usage-people-sub" }, subtitle),
+        usagePeopleHBars(rows),
+      );
+    }
+
+    function WorkBuddyLoginForm(props) {
       ensureCss();
+      var onSuccess = props && props.onSuccess;
+      var busyState = useState(false);
+      var busy = busyState[0];
+      var setBusy = busyState[1];
+      var authErrState = useState((props && props.initialError) || "");
+      var authErr = authErrState[0];
+      var setAuthErr = authErrState[1];
+      var loginUserState = useState("");
+      var loginUser = loginUserState[0];
+      var setLoginUser = loginUserState[1];
+      var loginPassState = useState("");
+      var loginPass = loginPassState[0];
+      var setLoginPass = loginPassState[1];
+      var entKeyState = useState("jxzr");
+      var entKey = entKeyState[0];
+      var setEntKey = entKeyState[1];
+      var entOpenState = useState(false);
+      var entOpen = entOpenState[0];
+      var setEntOpen = entOpenState[1];
+      function selectedEnt() {
+        return AUTH_ENTERPRISES.find(function (e) { return e.key === entKey; }) || AUTH_ENTERPRISES[1];
+      }
+      function doLogin() {
+        var u = (loginUser || "").trim();
+        var p = loginPass || "";
+        if (!u || !p) {
+          setAuthErr("请输入账号和密码");
+          return;
+        }
+        setAuthErr("");
+        setBusy(true);
+        fetch(engineBase() + "/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: u,
+            password: p,
+            enterprise_code: String(selectedEnt().code || "").trim(),
+          }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d || !d.ok || !d.token) throw new Error((d && d.detail) || "登录失败");
+            writeAuthSession({
+              access_token: d.token,
+              token_type: d.token_type || "Bearer",
+              username: (d.user && d.user.username) || u,
+              display_name: (d.user && d.user.display_name) || u,
+              user_id: (d.user && d.user.id) || "",
+              enterprise_code: String(selectedEnt().code || "").trim(),
+              expires_at: d.expires_at,
+            });
+            setLoginPass("");
+            if (typeof onSuccess === "function") onSuccess(d.user || null);
+          })
+          .catch(function (err) {
+            writeAuthSession(null);
+            setAuthErr(err && err.message ? err.message : String(err));
+          })
+          .finally(function () {
+            setBusy(false);
+          });
+      }
+      var logoUrl = engineBase() + "/zr-logo.svg";
+      return h(
+        "div",
+        { className: "wb-login-card" },
+        h(
+          "div",
+          { className: "wb-login-brand" },
+          h("div", { className: "brand-icon", "aria-hidden": "true" }, h("img", { src: logoUrl, alt: "" })),
+          h("h1", null, "ZR WorkBuddy"),
+          h("p", null, "你的工作搭档 · 登录 ZR WorkBuddy"),
+        ),
+        h(
+          "form",
+          {
+            className: "wb-login-form",
+            onSubmit: function (ev) {
+              ev.preventDefault();
+              doLogin();
+            },
+          },
+          h(
+            "div",
+            { className: "field" },
+            h("span", null, "企业编码"),
+            h(
+              "div",
+              { className: "ent-select" + (entOpen ? " open" : "") },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "ent-trigger",
+                  "aria-expanded": entOpen,
+                  onClick: function () {
+                    setEntOpen(!entOpen);
+                  },
+                },
+                h("span", null, selectedEnt().label),
+              ),
+              h(
+                "ul",
+                { className: "ent-menu", role: "listbox" },
+                AUTH_ENTERPRISES.map(function (item) {
+                  return h(
+                    "li",
+                    {
+                      key: item.key,
+                      role: "option",
+                      className: "ent-option" + (item.key === entKey ? " active" : ""),
+                      onMouseDown: function (ev) {
+                        ev.preventDefault();
+                        setEntKey(item.key);
+                        setEntOpen(false);
+                      },
+                    },
+                    item.label,
+                  );
+                }),
+              ),
+            ),
+          ),
+          h(
+            "label",
+            { className: "field" },
+            h("span", null, "账号"),
+            h("input", {
+              type: "text",
+              autoComplete: "username",
+              placeholder: "账号",
+              required: true,
+              value: loginUser,
+              onChange: function (ev) {
+                setLoginUser(ev.target.value);
+              },
+            }),
+          ),
+          h(
+            "label",
+            { className: "field" },
+            h("span", null, "密码"),
+            h("input", {
+              type: "password",
+              autoComplete: "current-password",
+              placeholder: "密码",
+              required: true,
+              value: loginPass,
+              onChange: function (ev) {
+                setLoginPass(ev.target.value);
+              },
+            }),
+          ),
+          authErr ? h("p", { className: "error" }, authErr) : null,
+          h("button", { className: "submit", type: "submit", disabled: busy }, busy ? "登录中…" : "登录"),
+        ),
+        h("p", { className: "wb-login-hint" }, "本页是 ZR WorkBuddy 登录，与系统配置里上传的 MES 接口文档无关。"),
+      );
+    }
+
+    /** :3081 进应用全屏登录挡板（对齐 simplified；不改 DSH 内核） */
+    function WorkBuddyAppLoginGate() {
+      ensureCss();
+      var readyState = useState(false);
+      var ready = readyState[0];
+      var setReady = readyState[1];
+      var authedState = useState(false);
+      var authed = authedState[0];
+      var setAuthed = authedState[1];
+      var errState = useState("");
+      var errMsg = errState[0];
+      var setErrMsg = errState[1];
+
+      function refresh() {
+        var sess = readAuthSession();
+        if (!sess) {
+          setAuthed(false);
+          setReady(true);
+          return;
+        }
+        fetch(engineBase() + "/api/auth/me", { headers: authHeaders() })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d && d.ok && d.authenticated && d.user) {
+              setAuthed(true);
+              setErrMsg("");
+            } else {
+              writeAuthSession(null);
+              setAuthed(false);
+              setErrMsg("登录已失效，请重新登录");
+            }
+          })
+          .catch(function () {
+            setAuthed(false);
+            setErrMsg("无法连接引擎，请确认 scripts/engine.sh zr-workbuddy ensure");
+          })
+          .finally(function () {
+            setReady(true);
+          });
+      }
+
+      useEffect(function () {
+        refresh();
+        function onAuth() {
+          refresh();
+        }
+        window.addEventListener(AUTH_EVENT, onAuth);
+        return function () {
+          window.removeEventListener(AUTH_EVENT, onAuth);
+        };
+      }, []);
+
+      if (!ready) {
+        return h(
+          "div",
+          { className: "wb-app-login-gate", role: "dialog", "aria-modal": "true", "aria-label": "登录" },
+          h("div", { className: "wb-login-card" }, h("p", { className: "wb-login-hint" }, "检查登录状态…")),
+        );
+      }
+      if (authed) return null;
+      return h(
+        "div",
+        { className: "wb-app-login-gate", role: "dialog", "aria-modal": "true", "aria-label": "登录" },
+        h(WorkBuddyLoginForm, {
+          initialError: errMsg,
+          onSuccess: function () {
+            setAuthed(true);
+            setErrMsg("");
+          },
+        }),
+      );
+    }
+
+    function mountAppLoginGate() {
+      if (typeof document === "undefined") return function () {};
+      var disposed = false;
+      var cleanupInner = function () {};
+
+      function start() {
+        if (disposed) return;
+        ensureCss();
+        var host = document.getElementById("wb-app-login-gate-root");
+        if (!host) {
+          host = document.createElement("div");
+          host.id = "wb-app-login-gate-root";
+          (document.body || document.documentElement).appendChild(host);
+        }
+
+        function paintDomFallback(errMsg) {
+          var logoUrl = engineBase() + "/zr-logo.svg";
+          host.innerHTML =
+            '<div class="wb-app-login-gate" role="dialog" aria-modal="true" aria-label="登录">' +
+            '<div class="wb-login-card">' +
+            '<div class="wb-login-brand"><div class="brand-icon" aria-hidden="true">' +
+            '<img src="' + logoUrl + '" alt="" /></div>' +
+            "<h1>ZR WorkBuddy</h1><p>你的工作搭档 · 登录 ZR WorkBuddy</p></div>" +
+            '<form class="wb-login-form" id="wbDomLoginForm">' +
+            '<div class="field"><span>企业编码</span>' +
+            '<select id="wbDomEnt" style="height:40px;border:1px solid #dbe1ea;border-radius:10px;padding:0 12px;font:14px inherit">' +
+            AUTH_ENTERPRISES.map(function (e) {
+              return '<option value="' + e.key + '"' + (e.key === "jxzr" ? " selected" : "") + ">" + e.label + "</option>";
+            }).join("") +
+            "</select></div>" +
+            '<label class="field"><span>账号</span><input id="wbDomUser" type="text" autocomplete="username" placeholder="账号" required /></label>' +
+            '<label class="field"><span>密码</span><input id="wbDomPass" type="password" autocomplete="current-password" placeholder="密码" required /></label>' +
+            (errMsg ? '<p class="error">' + String(errMsg).replace(/</g, "&lt;") + "</p>" : "") +
+            '<button class="submit" type="submit" id="wbDomSubmit">登录</button></form>' +
+            '<p class="wb-login-hint">本页是 ZR WorkBuddy 登录，与系统配置里上传的 MES 接口文档无关。</p>' +
+            "</div></div>";
+          var form = document.getElementById("wbDomLoginForm");
+          if (form) {
+            form.onsubmit = function (ev) {
+              ev.preventDefault();
+              var u = (document.getElementById("wbDomUser").value || "").trim();
+              var p = document.getElementById("wbDomPass").value || "";
+              var ek = (document.getElementById("wbDomEnt") && document.getElementById("wbDomEnt").value) || "jxzr";
+              var ent = AUTH_ENTERPRISES.find(function (e) { return e.key === ek; }) || AUTH_ENTERPRISES[1];
+              var btn = document.getElementById("wbDomSubmit");
+              if (!u || !p) {
+                paintDomFallback("请输入账号和密码");
+                return;
+              }
+              if (btn) {
+                btn.disabled = true;
+                btn.textContent = "登录中…";
+              }
+              fetch(engineBase() + "/api/auth/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  username: u,
+                  password: p,
+                  enterprise_code: String(ent.code || "").trim(),
+                }),
+              })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                  if (!d || !d.ok || !d.token) throw new Error((d && d.detail) || "登录失败");
+                  writeAuthSession({
+                    access_token: d.token,
+                    token_type: d.token_type || "Bearer",
+                    username: (d.user && d.user.username) || u,
+                    display_name: (d.user && d.user.display_name) || u,
+                    user_id: (d.user && d.user.id) || "",
+                    enterprise_code: String(ent.code || "").trim(),
+                    expires_at: d.expires_at,
+                  });
+                  host.innerHTML = "";
+                })
+                .catch(function (err) {
+                  writeAuthSession(null);
+                  paintDomFallback(err && err.message ? err.message : String(err));
+                });
+            };
+          }
+        }
+
+        function syncDomGate() {
+          var sess = readAuthSession();
+          if (!sess) {
+            paintDomFallback("");
+            return;
+          }
+          fetch(engineBase() + "/api/auth/me", { headers: authHeaders() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (d && d.ok && d.authenticated && d.user) {
+                host.innerHTML = "";
+              } else {
+                writeAuthSession(null);
+                paintDomFallback("登录已失效，请重新登录");
+              }
+            })
+            .catch(function () {
+              paintDomFallback("无法连接引擎，请确认 scripts/engine.sh zr-workbuddy ensure");
+            });
+        }
+
+        // 优先纯 DOM 挡板：不依赖 react-dom，保证 :3081 进应用必见登录
+        syncDomGate();
+        window.addEventListener(AUTH_EVENT, syncDomGate);
+        cleanupInner = function () {
+          try {
+            window.removeEventListener(AUTH_EVENT, syncDomGate);
+          } catch (e4) {}
+          if (host && host.parentNode) host.parentNode.removeChild(host);
+        };
+        console.log("[dsh-mes-bridge] 已挂载 :3081 登录挡板");
+      }
+
+      if (document.body) start();
+      else document.addEventListener("DOMContentLoaded", start);
+
+      return function () {
+        disposed = true;
+        cleanupInner();
+      };
+    }
+
+    function WorkBuddyUsageSection(props) {
+      ensureCss();
+      var AUTH_LS = "mes_auth_session";
+      var ENTERPRISES = [
+        { key: "jsry", label: "江苏软云", code: "" },
+        { key: "jxzr", label: "江西中软", code: "" },
+        { key: "qhzr", label: "前海中软", code: "" },
+      ];
+      var scope = props && props.scope === "enterprise" ? "enterprise" : "personal";
+      var onScopeChange = props && typeof props.onScopeChange === "function" ? props.onScopeChange : null;
+      var onAdminChange = props && typeof props.onAdminChange === "function" ? props.onAdminChange : null;
       var busyState = useState(false);
       var busy = busyState[0];
       var setBusy = busyState[1];
@@ -9132,21 +10015,119 @@ window.__ModuleLoader__.load({
       var onDate = onDateState[0];
       var setOnDate = onDateState[1];
       var pageRef = useRef(null);
+      var userState = useState(null);
+      var authUser = userState[0];
+      var setAuthUser = userState[1];
+      var authReadyState = useState(false);
+      var authReady = authReadyState[0];
+      var setAuthReady = authReadyState[1];
+      var authErrState = useState("");
+      var authErr = authErrState[0];
+      var setAuthErr = authErrState[1];
+      var loginUserState = useState("");
+      var loginUser = loginUserState[0];
+      var setLoginUser = loginUserState[1];
+      var loginPassState = useState("");
+      var loginPass = loginPassState[0];
+      var setLoginPass = loginPassState[1];
+      var entKeyState = useState("jxzr");
+      var entKey = entKeyState[0];
+      var setEntKey = entKeyState[1];
+      var entOpenState = useState(false);
+      var entOpen = entOpenState[0];
+      var setEntOpen = entOpenState[1];
+      var peopleGrainState = useState("day");
+      var peopleGrain = peopleGrainState[0];
+      var setPeopleGrain = peopleGrainState[1];
+      var peopleRowsState = useState([]);
+      var peopleRows = peopleRowsState[0];
+      var setPeopleRows = peopleRowsState[1];
+      var peoplePeriodState = useState("");
+      var peoplePeriod = peoplePeriodState[0];
+      var setPeoplePeriod = peoplePeriodState[1];
 
-      function loadUsage(day) {
+      function readSession() {
+        try {
+          var raw = localStorage.getItem(AUTH_LS);
+          if (!raw) return null;
+          var data0 = JSON.parse(raw);
+          if (!data0 || !data0.access_token) return null;
+          if (data0.expires_at && Date.now() / 1000 > Number(data0.expires_at) - 30) {
+            try {
+              localStorage.removeItem(AUTH_LS);
+            } catch (e) {}
+            return null;
+          }
+          return data0;
+        } catch (e) {
+          return null;
+        }
+      }
+      function writeSession(session) {
+        try {
+          if (session && session.access_token) localStorage.setItem(AUTH_LS, JSON.stringify(session));
+          else localStorage.removeItem(AUTH_LS);
+        } catch (e) {}
+      }
+      function authHeaders() {
+        var s = readSession();
+        return s && s.access_token ? { Authorization: "Bearer " + s.access_token } : {};
+      }
+      function selectedEnt() {
+        return ENTERPRISES.find(function (e) { return e.key === entKey; }) || ENTERPRISES[1];
+      }
+
+      function loadUsage(day, scopeOverride, grainOverride) {
+        if (!authUser) return;
         var d = day || onDate || usageTodayYmd();
+        var sc = scopeOverride || scope;
+        var isEnt = sc === "enterprise" && String(authUser.role || "") === "admin";
+        var grain = grainOverride || peopleGrain || "day";
+        if (grain !== "month") grain = "day";
+        var path = isEnt
+          ? "/api/usage/enterprise/summary?days=7&grain=" +
+            encodeURIComponent(grain) +
+            "&on="
+          : "/api/usage/summary?days=7&grain=" +
+            encodeURIComponent(grain) +
+            "&on=";
         setBusy(true);
         setMsg("加载中…");
         setMsgOk(false);
-        fetch(engineBase() + "/api/usage/summary?days=7&on=" + encodeURIComponent(d))
-          .then(function (r) { return r.json(); })
+        fetch(engineBase() + path + encodeURIComponent(d), {
+          headers: authHeaders(),
+        })
+          .then(function (r) {
+            if (r.status === 401) {
+              writeSession(null);
+              setAuthUser(null);
+              throw new Error("登录已失效，请重新登录");
+            }
+            if (r.status === 403) {
+              throw new Error("仅管理员可查看企业用量");
+            }
+            return r.json();
+          })
           .then(function (s) {
             if (!s || !s.ok) {
               throw new Error((s && (s.detail || s.message)) || "引擎未响应");
             }
             setData(s);
-            if (s.on && s.on !== d) setOnDate(s.on);
-            setMsg("已从引擎加载");
+            // 按月模式保留月份锚点（用 month_from），避免被单日 on 冲掉
+            if (s.grain === "month" && s.month_from) {
+              setOnDate(String(s.month_from).slice(0, 10));
+            } else if (s.on && s.on !== d && grain === "day") {
+              setOnDate(s.on);
+            }
+            setMsg(
+              isEnt
+                ? grain === "month"
+                  ? "已加载企业整月用量"
+                  : "已加载企业总用量"
+                : grain === "month"
+                  ? "已加载个人整月用量"
+                  : "已从引擎加载",
+            );
             setMsgOk(true);
           })
           .catch(function (err) {
@@ -9162,14 +10143,189 @@ window.__ModuleLoader__.load({
           });
       }
 
+      function loadPeople(day, grainOverride) {
+        if (!authUser || String(authUser.role || "") !== "admin") {
+          setPeopleRows([]);
+          setPeoplePeriod("");
+          return;
+        }
+        var d = day || onDate || usageTodayYmd();
+        var grain = grainOverride || peopleGrain || "day";
+        var from = d;
+        var to = d;
+        var periodLabel = d;
+        if (grain === "month") {
+          var mr = usageMonthRangeFromDay(d);
+          from = mr.from;
+          to = mr.to;
+          periodLabel = mr.label;
+        }
+        var q =
+          "from=" +
+          encodeURIComponent(from) +
+          "&to=" +
+          encodeURIComponent(to) +
+          "&grain=" +
+          encodeURIComponent(grain);
+        fetch(engineBase() + "/api/usage/enterprise/people?" + q, { headers: authHeaders() })
+          .then(function (r) {
+            if (r.status === 401) {
+              writeSession(null);
+              setAuthUser(null);
+              throw new Error("登录已失效");
+            }
+            if (r.status === 403) throw new Error("仅管理员可查看");
+            return r.json();
+          })
+          .then(function (p) {
+            if (!p || !p.ok) throw new Error((p && p.detail) || "按人汇总失败");
+            var rows = p.rows || [];
+            // 同人多 period 时按人聚合（容错）
+            var by = {};
+            rows.forEach(function (r) {
+              var uid = String(r.user_id || "");
+              if (!uid) return;
+              if (!by[uid]) {
+                by[uid] = {
+                  user_id: uid,
+                  username: r.username || "",
+                  display_name: r.display_name || "",
+                  period: r.period || periodLabel,
+                  llm_tokens: 0,
+                  llm_calls: 0,
+                  cursor_tokens: 0,
+                  cursor_calls: 0,
+                };
+              }
+              by[uid].llm_tokens += Number(r.llm_tokens) || 0;
+              by[uid].llm_calls += Number(r.llm_calls) || 0;
+              by[uid].cursor_tokens += Number(r.cursor_tokens) || 0;
+              by[uid].cursor_calls += Number(r.cursor_calls) || 0;
+              if (r.display_name) by[uid].display_name = r.display_name;
+              if (r.username) by[uid].username = r.username;
+            });
+            setPeopleRows(Object.keys(by).map(function (k) { return by[k]; }));
+            setPeoplePeriod(periodLabel);
+          })
+          .catch(function () {
+            setPeopleRows([]);
+            setPeoplePeriod(periodLabel);
+          });
+      }
+
+      function refreshAuth() {
+        var sess = readSession();
+        if (!sess) {
+          setAuthUser(null);
+          setAuthReady(true);
+          if (onAdminChange) onAdminChange(false);
+          return;
+        }
+        fetch(engineBase() + "/api/auth/me", { headers: authHeaders() })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d && d.ok && d.authenticated && d.user) {
+              setAuthUser(d.user);
+              if (onAdminChange) onAdminChange(String(d.user.role || "") === "admin");
+            } else {
+              writeSession(null);
+              setAuthUser(null);
+              if (onAdminChange) onAdminChange(false);
+            }
+          })
+          .catch(function () {
+            setAuthUser(null);
+            if (onAdminChange) onAdminChange(false);
+          })
+          .finally(function () {
+            setAuthReady(true);
+          });
+      }
+
+      function doLogin() {
+        var u = (loginUser || "").trim();
+        var p = loginPass || "";
+        if (!u || !p) {
+          setAuthErr("请输入账号和密码");
+          return;
+        }
+        setAuthErr("");
+        setBusy(true);
+        fetch(engineBase() + "/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: u,
+            password: p,
+            enterprise_code: String(selectedEnt().code || "").trim(),
+          }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d || !d.ok || !d.token) throw new Error((d && d.detail) || "登录失败");
+            writeSession({
+              access_token: d.token,
+              token_type: d.token_type || "Bearer",
+              username: (d.user && d.user.username) || u,
+              display_name: (d.user && d.user.display_name) || u,
+              user_id: (d.user && d.user.id) || "",
+              enterprise_code: String(selectedEnt().code || "").trim(),
+              expires_at: d.expires_at,
+            });
+            setAuthUser(d.user || null);
+            setLoginPass("");
+            setAuthErr("");
+            if (onAdminChange) onAdminChange(String((d.user && d.user.role) || "") === "admin");
+          })
+          .catch(function (err) {
+            writeSession(null);
+            setAuthUser(null);
+            setAuthErr(err && err.message ? err.message : String(err));
+            if (onAdminChange) onAdminChange(false);
+          })
+          .finally(function () {
+            setBusy(false);
+          });
+      }
+
       useEffect(function () {
-        loadUsage();
+        refreshAuth();
+        function onAuth() {
+          refreshAuth();
+        }
+        window.addEventListener(AUTH_EVENT, onAuth);
+        return function () {
+          window.removeEventListener(AUTH_EVENT, onAuth);
+        };
       }, []);
 
+      useEffect(
+        function () {
+          if (authReady && authUser) {
+            var isAdmin = String(authUser.role || "") === "admin";
+            if (scope === "enterprise" && !isAdmin && onScopeChange) {
+              onScopeChange("personal");
+              return;
+            }
+            loadUsage(onDate, scope, peopleGrain);
+            if (scope === "enterprise" && isAdmin) loadPeople(onDate, peopleGrain);
+            else {
+              setPeopleRows([]);
+              setPeoplePeriod("");
+            }
+          }
+        },
+        [authReady, authUser, scope, peopleGrain],
+      );
+
       useLayoutEffect(function () {
-        if (!data) return;
-        usageScrollToFocus(pageRef.current, data.monthly || data.daily || [], data.on || onDate);
-      }, [data, onDate]);
+        if (!data || !pageRef.current) return;
+        if (peopleGrain === "month") {
+          usageScrollToFocus(pageRef.current, data.monthly || data.daily || [], data.on || onDate);
+          return;
+        }
+        usageScrollToHour(pageRef.current, data.hourly || []);
+      }, [data, onDate, peopleGrain]);
 
       var llm = (data && data.llm) || {};
       var cursor = (data && data.cursor) || {};
@@ -9180,52 +10336,153 @@ window.__ModuleLoader__.load({
       var llmPal = { fill: "#93c5fd", stroke: "#3b82f6", hit: "#93c5fd", miss: "#3b82f6", out: "#1d4ed8" };
       var curPal = { fill: "#99f6e4", stroke: "#14b8a6", hit: "#99f6e4", miss: "#14b8a6", out: "#0f766e" };
       var hourly = (data && data.hourly) || [];
+      var isEnt = scope === "enterprise";
+      var monthMode = peopleGrain === "month";
+      var meterAxis = monthMode ? "day" : "hour";
+      var meterSeries = monthMode ? daily : hourly;
+      var dayLab = monthMode
+        ? ((isEnt ? "全员 · " : "") + (usageMonthLabel((data && data.month) || onDate) || String(onDate || "").slice(0, 7)))
+        : usageKpiDayLabel((data && data.on) || onDate);
+      if (isEnt && !monthMode && dayLab) dayLab = "全员 · " + dayLab;
+
+      if (!authReady) {
+        return h("div", { className: "wb-set wb-usage-page" }, h("p", { className: "wb-set-lead" }, "检查登录状态…"));
+      }
+
+      if (!authUser) {
+        return h(
+          "div",
+          { className: "wb-set wb-usage-page wb-login-page", ref: pageRef },
+          h(WorkBuddyLoginForm, {
+            onSuccess: function (user) {
+              setAuthUser(user);
+              if (onAdminChange) onAdminChange(String((user && user.role) || "") === "admin");
+            },
+          }),
+        );
+      }
 
       return h(
         "div",
         { className: "wb-set wb-usage-page", ref: pageRef },
-        h("div", { className: "wb-usage-page-title" }, "用量统计"),
+        h("div", { className: "wb-usage-page-title" }, isEnt ? "企业用量" : "用量统计"),
         h(
           "p",
           { className: "wb-set-lead" },
-          "LLM 含引擎聊天/审码，以及 DSH 宿主会话（DeepSeek 等）。Cursor 含本机写码与 DSH「Cursor 写码」。两条账不能加总成一笔钱。",
+          isEnt
+            ? "企业总用量：全部账号合计的 API 请求次数与 Token。LLM 与 Cursor 分列，不能加总成一笔钱。"
+            : "LLM 含引擎聊天/审码，以及 DSH 宿主会话（DeepSeek 等）。Cursor 含本机写码与 DSH「Cursor 写码」。两条账不能加总成一笔钱。",
         ),
         h(
           "div",
           { className: "wb-usage-filter" },
-          h("label", { htmlFor: "wb-usage-on" }, "日期"),
+          h("label", { htmlFor: "wb-usage-on" }, monthMode ? "月份" : "日期"),
           h("input", {
             id: "wb-usage-on",
-            type: "date",
-            value: onDate,
-            min: usageAddDays(usageTodayYmd(), -89),
-            max: usageTodayYmd(),
+            type: monthMode ? "month" : "date",
+            value: monthMode ? String(onDate || "").slice(0, 7) : onDate,
+            min: monthMode
+              ? usageAddDays(usageTodayYmd(), -89).slice(0, 7)
+              : usageAddDays(usageTodayYmd(), -89),
+            max: monthMode ? usageTodayYmd().slice(0, 7) : usageTodayYmd(),
             onChange: function (ev) {
               var v = ev.target.value;
               if (!v) return;
-              setOnDate(v);
-              loadUsage(v);
+              var day = v;
+              if (v.length === 7) day = v + "-01";
+              setOnDate(day);
+              loadUsage(day, scope, peopleGrain);
+              if (scope === "enterprise") loadPeople(day, peopleGrain);
             },
           }),
+          h(
+            "label",
+            { htmlFor: "wb-people-grain", style: { marginLeft: "4px" } },
+            "统计粒度",
+          ),
+          h(
+            "select",
+            {
+              id: "wb-people-grain",
+              value: peopleGrain,
+              onChange: function (ev) {
+                var g = ev.target.value === "month" ? "month" : "day";
+                setPeopleGrain(g);
+                loadUsage(onDate, scope, g);
+                if (scope === "enterprise") loadPeople(onDate, g);
+              },
+            },
+            h("option", { value: "day" }, "按日"),
+            h("option", { value: "month" }, "按月"),
+          ),
         ),
-        usageTodayKpis(data && data.today, usageKpiDayLabel((data && data.on) || onDate)),
-        usageHourCard("LLM 各时段", hourly, "llm_", "#ff5a1f", (data && data.on) || onDate),
-        usageHourCard("Cursor 各时段", hourly, "cursor_", "#14b8a6", (data && data.on) || onDate),
-        usageMeterNode("LLM", llmModel + (monthLab ? " · " + monthLab : ""), daily, "llm_", llmPal, llm.missing_calls ? "未回传 " + llm.missing_calls + " 次" : ""),
+        usageTodayKpis(data && data.today, dayLab),
+        usageHourCombinedCard(
+          monthMode
+            ? isEnt
+              ? "各日用量（全员）"
+              : "各日用量"
+            : isEnt
+              ? "各时段用量（全员）"
+              : "各时段用量",
+          monthMode ? daily : hourly,
+          (data && data.on) || onDate,
+          { monthMode: monthMode, monthLabel: (data && data.month) || onDate },
+        ),
         usageMeterNode(
-          "Cursor 写码",
-          curModel + (monthLab ? " · " + monthLab : ""),
-          daily,
+          isEnt ? "LLM（全员）" : "LLM",
+          llmModel +
+            (monthMode
+              ? monthLab
+                ? " · " + monthLab
+                : ""
+              : " · " + ((data && data.on) || onDate || "")),
+          meterSeries,
+          "llm_",
+          llmPal,
+          llm.missing_calls ? "未回传 " + llm.missing_calls + " 次" : "",
+          meterAxis,
+        ),
+        usageMeterNode(
+          isEnt ? "Cursor 写码（全员）" : "Cursor 写码",
+          curModel +
+            (monthMode
+              ? monthLab
+                ? " · " + monthLab
+                : ""
+              : " · " + ((data && data.on) || onDate || "")),
+          meterSeries,
           "cursor_",
           curPal,
           cursor.missing_calls ? "未回传 " + cursor.missing_calls + " 次（不代表没消耗）" : "",
+          meterAxis,
         ),
+        isEnt
+          ? usagePeopleBarsNode(
+              "员工用量（LLM + Cursor）",
+              (peopleGrain === "month" ? "按月" : "按日") +
+                " · " +
+                (peoplePeriod || onDate || "") +
+                " · 按合计 Token 从高到低 · 含全部账号（含管理员）· 共 " +
+                String(peopleRows.length) +
+                " 人",
+              peopleRows,
+            )
+          : null,
         h(
           "div",
           { className: "wb-set-bar" },
           h(
             "button",
-            { type: "button", className: "wb-set-btn", disabled: busy, onClick: loadUsage },
+            {
+              type: "button",
+              className: "wb-set-btn",
+              disabled: busy,
+              onClick: function () {
+                loadUsage(onDate, scope, peopleGrain);
+                if (scope === "enterprise") loadPeople(onDate, peopleGrain);
+              },
+            },
             busy ? "刷新中…" : "刷新",
           ),
           msg ? h("span", { className: "wb-set-msg" + (msgOk ? " ok" : " err") }, msg) : null,
@@ -9249,6 +10506,12 @@ window.__ModuleLoader__.load({
       var openState = useState(false);
       var open = openState[0];
       var setOpen = openState[1];
+      var scopeState = useState("personal");
+      var scope = scopeState[0];
+      var setScope = scopeState[1];
+      var isAdminState = useState(false);
+      var isAdmin = isAdminState[0];
+      var setIsAdmin = isAdminState[1];
       useEffect(
         function () {
           if (!open) return undefined;
@@ -9296,7 +10559,58 @@ window.__ModuleLoader__.load({
                 h(
                   "div",
                   { className: "wb-usage-panel-head" },
-                  h("span", { className: "t" }, "用量"),
+                  isAdmin
+                    ? h(
+                        "table",
+                        { className: "wb-usage-tabs", role: "tablist", "aria-label": "用量范围" },
+                        h(
+                          "tbody",
+                          null,
+                          h(
+                            "tr",
+                            null,
+                            h(
+                              "td",
+                              {
+                                className: scope === "personal" ? "active" : "",
+                                role: "presentation",
+                              },
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  role: "tab",
+                                  "aria-selected": scope === "personal",
+                                  onClick: function () {
+                                    setScope("personal");
+                                  },
+                                },
+                                "个人用量",
+                              ),
+                            ),
+                            h(
+                              "td",
+                              {
+                                className: scope === "enterprise" ? "active" : "",
+                                role: "presentation",
+                              },
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  role: "tab",
+                                  "aria-selected": scope === "enterprise",
+                                  onClick: function () {
+                                    setScope("enterprise");
+                                  },
+                                },
+                                "企业用量",
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
+                    : h("span", { className: "t" }, "用量"),
                   h(
                     "button",
                     {
@@ -9310,18 +10624,86 @@ window.__ModuleLoader__.load({
                     "×",
                   ),
                 ),
-                h("div", { className: "wb-usage-panel-body" }, h(WorkBuddyUsageSection)),
+                h(
+                  "div",
+                  { className: "wb-usage-panel-body" },
+                  h(WorkBuddyUsageSection, {
+                    scope: isAdmin ? scope : "personal",
+                    onScopeChange: function (next) {
+                      setScope(next === "enterprise" ? "enterprise" : "personal");
+                    },
+                    onAdminChange: function (admin) {
+                      setIsAdmin(!!admin);
+                      if (!admin) setScope("personal");
+                    },
+                  }),
+                ),
               ),
             )
           : null,
       );
     }
 
+    var _loginGateUnmount = null;
+    function ensureLoginGateMounted() {
+      if (_loginGateUnmount) return;
+      try {
+        _loginGateUnmount = mountAppLoginGate();
+      } catch (err) {
+        console.error("[dsh-mes-bridge] 登录挡板挂载失败", err);
+      }
+    }
+
     function apply(ctx) {
       discoverEngine();
+      ensureLoginGateMounted();
+      if (ctx && typeof ctx.effect === "function" && _loginGateUnmount) {
+        ctx.effect(function () {
+          return function () {
+            if (_loginGateUnmount) {
+              try {
+                _loginGateUnmount();
+              } catch (e0) {}
+              _loginGateUnmount = null;
+            }
+          };
+        }, "workbuddy-app-login-gate");
+      }
       if (!ctx || !ctx.slots || typeof ctx.slots.inject !== "function") {
         console.error("[dsh-mes-bridge] 无 slots 服务：无法注册 WorkBuddy 客户端能力");
         return;
+      }
+      // 宿主官方 overlay 槽（若本版 DSH 有声明则双保险）
+      try {
+        ctx.slots.inject("shell.overlay", function () {
+          return ctx.slots.register(
+            {
+              name: "shell.overlay",
+              id: "workbuddy-login",
+              order: 1,
+              priority: 1,
+            },
+            WorkBuddyAppLoginGate,
+          );
+        });
+      } catch (eOverlay) {
+        console.warn("[dsh-mes-bridge] shell.overlay 不可用，仅用 DOM 登录挡板", eOverlay);
+      }
+      // 聊天顶栏右上角（session header utilities）
+      try {
+        ctx.slots.inject("conversation.session.header.utilities", function () {
+          return ctx.slots.register(
+            {
+              name: "conversation.session.header.utilities",
+              id: "workbuddy-logout",
+              order: 1,
+              label: "退出登录",
+            },
+            WorkBuddyHeaderLogout,
+          );
+        });
+      } catch (eHeader) {
+        console.warn("[dsh-mes-bridge] header.utilities 不可用", eHeader);
       }
       ctx.slots.inject("settings.section", function () {
         return ctx.slots.register(
@@ -9382,13 +10764,20 @@ window.__ModuleLoader__.load({
         );
       });
       console.log(
-        "[dsh-mes-bridge] settings.section=WorkBuddy + sidebar.footer.action=用量 + toolview review/commit/code_dev/deploy",
+        "[dsh-mes-bridge] app-login-gate + settings.section=WorkBuddy + sidebar.footer.action=用量 + toolview review/commit/code_dev/deploy",
       );
       try {
         if (document && document.title && document.title.indexOf("WorkBuddy") < 0) {
           document.title = "WorkBuddy · " + document.title;
         }
       } catch (_eTitle) {}
+    }
+
+    // 模块一加载就挂登录挡板（不等 slots / apply），保证打开 :3081 就能看到
+    try {
+      ensureLoginGateMounted();
+    } catch (eEager) {
+      console.error("[dsh-mes-bridge] 登录挡板预挂载失败", eEager);
     }
 
     module.exports = { inject: ["slots"], apply: apply };

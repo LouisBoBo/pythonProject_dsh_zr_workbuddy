@@ -17,6 +17,7 @@ SECRET_PATHS: List[Tuple[str, ...]] = [
     ("mes", "token"),
     ("deepseek", "api_key"),
     ("code_dev", "cursor_api_key"),
+    ("usage", "report_token"),
 ]
 
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -109,6 +110,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "use_skill_review": True,
         "allow_blocked": False,
         "max_files": 80,
+    },
+    # 企业用量上报（默认关；失败不得影响聊天/写码）
+    "usage": {
+        "report_enabled": False,
+        "report_url": "",  # 如 http://127.0.0.1:8000/api/usage-hub/v1
+        "report_token": "",
     },
 }
 

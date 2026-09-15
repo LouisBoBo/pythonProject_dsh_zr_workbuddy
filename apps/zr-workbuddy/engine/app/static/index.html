@@ -371,6 +371,24 @@
     border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
     font: 13px inherit; color: var(--text); background: var(--bg);
   }
+  .usage-filter select {
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
+    font: 13px inherit; color: var(--text); background: var(--bg);
+  }
+  .usage-ent-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 16px; }
+  .usage-ent-card {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 16px;
+    padding: 14px 16px; box-shadow: var(--shadow); min-width: 0;
+  }
+  .usage-ent-card .k { font-size: 13px; font-weight: 600; color: var(--text-2); margin: 0 0 6px; }
+  .usage-ent-card .v { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); }
+  .usage-ent-card .s { font-size: 12px; color: var(--text-2); margin-top: 6px; }
+  .usage-ent-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .usage-ent-table th, .usage-ent-table td {
+    border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left;
+    font-variant-numeric: tabular-nums;
+  }
+  .usage-ent-table th { color: var(--text-2); font-weight: 600; }
   .usage-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 22px; }
   .usage-kpi { background: var(--bg); border: 1px solid var(--border); border-radius: 16px; padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; }
   .usage-kpi .k { font-size: 13px; font-weight: 600; color: var(--text-2); margin: 0 0 8px; }
@@ -438,11 +456,167 @@
   .plugins-toast.show { display: block; }
   .plugins-toast.ok { color: #059669; }
   .plugins-toast.fail { color: #dc2626; }
+
+  /* ============ 登录页（对齐 simplified-workbuddy LoginView） ============ */
+  #loginShell {
+    --brand: #1B5E3B;
+    --brand-hover: #164A2F;
+    --brand-soft: rgba(27, 94, 59, 0.12);
+    --brand-ring: rgba(27, 94, 59, 0.22);
+    --brand-border: #2E8B57;
+    --ent-accent: #4a9eff;
+    --ent-accent-text: #3b82f6;
+    --ent-accent-soft: #eef5ff;
+    --ent-border: #b7d4f8;
+    min-height: 100%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background:
+      radial-gradient(1200px 600px at 10% -10%, #d8f3e4 0%, transparent 55%),
+      radial-gradient(900px 500px at 100% 0%, #eef7f1 0%, transparent 50%),
+      #f6faf7;
+  }
+  #loginShell.show { display: flex; }
+  #loginShell .login-card {
+    width: 100%; max-width: 400px; padding: 32px 28px 24px;
+    background: #fff; border: 1px solid #dce8e0; border-radius: 16px;
+    box-shadow: 0 12px 40px rgba(27, 94, 59, 0.08);
+  }
+  #loginShell .login-brand { text-align: center; margin-bottom: 24px; }
+  #loginShell .brand-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 64px; height: 64px; padding: 6px; margin-bottom: 12px;
+    border-radius: 14px; background: var(--brand); border: 1px solid var(--brand-border);
+    box-sizing: border-box;
+  }
+  #loginShell .brand-logo {
+    display: block; width: 100%; height: 100%; object-fit: contain;
+  }
+  #loginShell .login-brand h1 {
+    margin: 0; font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em;
+  }
+  #loginShell .login-brand p { margin: 8px 0 0; font-size: 13px; color: #64748b; }
+  #loginShell .login-form { display: flex; flex-direction: column; gap: 14px; }
+  #loginShell .field {
+    display: flex; flex-direction: column; gap: 6px;
+    font-size: 13px; color: #475569; font-weight: 500;
+  }
+  #loginShell .field input {
+    height: 42px; padding: 0 12px; border: 1px solid #dbe1ea; border-radius: 10px;
+    font-size: 14px; font-family: inherit; color: #0f172a; background: #fff;
+    outline: none; transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  }
+  #loginShell .field input:focus {
+    border-color: var(--brand-border); background: #f4fbf6;
+    box-shadow: 0 0 0 3px var(--brand-ring);
+  }
+  #loginShell .ent-select { position: relative; }
+  #loginShell .ent-trigger {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; height: 42px; padding: 0 12px; border: 1px solid #dbe1ea;
+    border-radius: 10px; background: #fff; font-size: 14px; font-family: inherit;
+    color: #334155; cursor: pointer; outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  #loginShell .ent-select.open .ent-trigger,
+  #loginShell .ent-trigger:focus-visible {
+    border-color: var(--ent-accent);
+    box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.18);
+  }
+  #loginShell .ent-trigger-label {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #loginShell .ent-caret {
+    flex-shrink: 0; margin-left: 8px; color: #94a3b8; transition: transform 0.15s;
+  }
+  #loginShell .ent-select.open .ent-caret { transform: rotate(180deg); }
+  #loginShell .ent-menu {
+    display: none; position: absolute; z-index: 20; left: 0; right: 0;
+    top: calc(100% + 10px); margin: 0; padding: 6px 0; list-style: none;
+    background: #fff; border: 1px solid #e8eef5; border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+  }
+  #loginShell .ent-select.open .ent-menu { display: block; }
+  #loginShell .ent-menu::before {
+    content: ''; position: absolute; top: -6px; left: 50%; width: 12px; height: 12px;
+    background: #fff; border-left: 1px solid #e8eef5; border-top: 1px solid #e8eef5;
+    transform: translateX(-50%) rotate(45deg);
+  }
+  #loginShell .ent-option {
+    position: relative; z-index: 1; padding: 10px 14px; font-size: 14px;
+    font-weight: 400; color: #64748b; cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+  }
+  #loginShell .ent-option:hover { background: #f8fafc; color: #475569; }
+  #loginShell .ent-option.active {
+    background: var(--ent-accent-soft); color: var(--ent-accent-text);
+  }
+  #loginShell .error {
+    margin: 0; padding: 8px 10px; border-radius: 8px;
+    background: #fff1f2; color: #e11d48; font-size: 13px;
+  }
+  #loginShell .error[hidden] { display: none; }
+  #loginShell .submit {
+    margin-top: 4px; height: 44px; border: none; border-radius: 10px;
+    background: var(--brand); color: #fff; font-size: 15px; font-weight: 600;
+    font-family: inherit; cursor: pointer; transition: background 0.15s, opacity 0.15s;
+  }
+  #loginShell .submit:hover:not(:disabled) { background: var(--brand-hover); }
+  #loginShell .submit:disabled { opacity: 0.7; cursor: not-allowed; }
+  #loginShell .hint {
+    margin: 16px 0 0; text-align: center; font-size: 11px; color: #94a3b8; line-height: 1.5;
+  }
+  #appShell { display: none; height: 100%; }
+  #appShell.show { display: flex; }
+  .side-user {
+    font-size: 11px; color: var(--text-2); padding: 4px 10px 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
 </style>
 </head>
 <body>
 
-<div class="layout">
+<!-- 登录（进应用前挡板，版式对齐 simplified-workbuddy） -->
+<div id="loginShell" class="show" aria-label="登录">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="brand-icon" aria-hidden="true">
+        <img src="/zr-logo.svg" alt="" class="brand-logo" />
+      </div>
+      <h1>ZR WorkBuddy</h1>
+      <p>你的工作搭档 · 登录 ZR WorkBuddy</p>
+    </div>
+    <form class="login-form" id="loginForm">
+      <div class="field">
+        <span>企业编码</span>
+        <div class="ent-select" id="entSelect">
+          <button type="button" class="ent-trigger" id="entTrigger" aria-expanded="false" aria-haspopup="listbox">
+            <span class="ent-trigger-label" id="entLabel">江西中软</span>
+            <svg class="ent-caret" viewBox="0 0 12 8" width="12" height="8" aria-hidden="true">
+              <path d="M1 1.5L6 6.5L11 1.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <ul class="ent-menu" id="entMenu" role="listbox"></ul>
+        </div>
+      </div>
+      <label class="field">
+        <span>账号</span>
+        <input id="loginUsername" type="text" autocomplete="username" placeholder="账号" required />
+      </label>
+      <label class="field">
+        <span>密码</span>
+        <input id="loginPassword" type="password" autocomplete="current-password" placeholder="密码" required />
+      </label>
+      <p class="error" id="loginError" hidden></p>
+      <button class="submit" type="submit" id="loginSubmit">登录</button>
+    </form>
+    <p class="hint">本页是 ZR WorkBuddy 登录，与系统配置里上传的 MES 接口文档无关。</p>
+  </div>
+</div>
+
+<div class="layout" id="appShell">
 
   <!-- ============ 侧边栏 ============ -->
   <aside class="side">
@@ -460,8 +634,11 @@
     <div class="side-bottom">
       <button class="side-btn" id="navPlugins" onclick="switchView('plugins')">🧩 功能插件</button>
       <button class="side-btn" id="navUsage" onclick="switchView('usage')">📈 用量</button>
+      <button class="side-btn" id="navEntUsage" onclick="switchView('ent-usage')" hidden>🏢 企业用量</button>
       <button class="side-btn" id="navCfg" onclick="switchView('config')">⚙️ 配置中心</button>
       <button class="side-btn" id="btnTheme">🌙 深色模式</button>
+      <div class="side-user" id="sideUser" hidden></div>
+      <button class="side-btn" id="btnLogout" type="button" hidden>退出登录</button>
       <div class="side-status" id="sideStatus">检测环境…</div>
     </div>
   </aside>
@@ -869,6 +1046,31 @@
       </div>
     </div>
 
+    <!-- ============ 企业用量（管理员） ============ -->
+    <div class="view" id="view-ent-usage">
+      <div class="plugins-scroll">
+        <div class="plugins-wrap">
+          <div class="plugins-head">
+            <h2>企业用量</h2>
+            <p>公司 Key 总额只统计 LLM；Cursor 单独一列，不能加总成一笔钱。可与 DeepSeek 控制台对照。数据来自本机汇总库（各机上报）。</p>
+          </div>
+          <div class="usage-filter">
+            <label for="entFrom">从</label>
+            <input type="date" id="entFrom" />
+            <label for="entTo">到</label>
+            <input type="date" id="entTo" />
+            <label for="entGrain">粒度</label>
+            <select id="entGrain">
+              <option value="month">按月</option>
+              <option value="day">按日</option>
+            </select>
+            <button type="button" class="btn ghost" id="entRefresh">刷新</button>
+          </div>
+          <div id="entUsageBody">加载中…</div>
+        </div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -1046,9 +1248,12 @@ function switchView(name) {
   $("navPlugins").classList.toggle("active", name === "plugins");
   $("navCfg").classList.toggle("active", name === "config");
   $("navUsage").classList.toggle("active", name === "usage");
+  const navEnt = $("navEntUsage");
+  if (navEnt) navEnt.classList.toggle("active", name === "ent-usage");
   if (name === "plugins") loadPlugins();
   else stopPluginsPoll();
   if (name === "usage") loadUsage();
+  if (name === "ent-usage") loadEntUsage();
 }
 
 function fmtUsageTokens(n) {
@@ -1362,7 +1567,7 @@ function usageBindCurves(root) {
       const scale = rect.width / W;
       const t = (x / scale - L) / Math.max(1, iw);
       const i = Math.floor(Math.max(0, Math.min(0.999, t)) * n);
-      const row = rows[i] || { range: "", tokens: 0, calls: 0 };
+      const row = rows[i] || { range: "", llm_tokens: 0, llm_calls: 0, cursor_tokens: 0, cursor_calls: 0 };
       const left = Math.max(14, Math.min(86, ((L + (i + 0.5) * (iw / n)) / W) * 100));
       if (guide) {
         guide.hidden = false;
@@ -1375,8 +1580,10 @@ function usageBindCurves(root) {
         tip.style.left = left + "%";
         tip.innerHTML =
           '<span class="r">' + esc(String(row.range || "")) + "</span>" +
-          '<span class="v">' + fmtUsageTokens(row.tokens) + "</span>" +
-          '<span class="c">请求 ' + (row.calls || 0) + "</span>";
+          '<span class="v" style="color:#ea580c">LLM ' + fmtUsageTokens(row.llm_tokens) + "</span>" +
+          '<span class="c">' + (row.llm_calls || 0) + " 次</span>" +
+          '<span class="v" style="color:#0f766e">Cursor ' + fmtUsageTokens(row.cursor_tokens) + "</span>" +
+          '<span class="c">' + (row.cursor_calls || 0) + " 次</span>";
       }
     };
   });
@@ -1441,7 +1648,7 @@ function usageHourRange(h) {
   return a + "～" + (n < 10 ? "0" : "") + n + ":00";
 }
 
-function usageHourRows(hourly, prefix) {
+function usageHourCombinedRows(hourly) {
   const byH = {};
   (hourly || []).forEach((r) => { byH[Number(r.hour)] = r; });
   const out = [];
@@ -1450,8 +1657,10 @@ function usageHourRows(hourly, prefix) {
     out.push({
       hour: h,
       range: usageHourRange(h),
-      tokens: Number(r[prefix + "tokens"]) || 0,
-      calls: Number(r[prefix + "calls"]) || 0,
+      llm_tokens: Number(r.llm_tokens) || 0,
+      llm_calls: Number(r.llm_calls) || 0,
+      cursor_tokens: Number(r.cursor_tokens) || 0,
+      cursor_calls: Number(r.cursor_calls) || 0,
     });
   }
   return out;
@@ -1459,15 +1668,22 @@ function usageHourRows(hourly, prefix) {
 
 const USAGE_HOUR_GEO = { W: 560, H: 200, L: 48, R: 14, T: 16, B: 30 };
 
-function usageHourSvg(rows, color) {
+function usageHourCombinedSvg(rows) {
   const { W, H, L, R, T, B } = USAGE_HOUR_GEO;
   const iw = W - L - R, ih = H - T - B;
   const n = 24;
-  const values = [];
-  for (let i = 0; i < n; i++) values.push((rows[i] && rows[i].tokens) || 0);
-  const max = usageNiceMax(Math.max(0, ...values));
+  const llmVals = [];
+  const curVals = [];
+  for (let i = 0; i < n; i++) {
+    llmVals.push((rows[i] && rows[i].llm_tokens) || 0);
+    curVals.push((rows[i] && rows[i].cursor_tokens) || 0);
+  }
+  const max = usageNiceMax(Math.max(0, ...llmVals, ...curVals));
   const slot = iw / n;
-  const bw = Math.max(4, slot * 0.55);
+  const gap = Math.max(1, slot * 0.08);
+  const bw = Math.max(3, (slot - gap * 3) / 2);
+  const cLlm = "#ff5a1f";
+  const cCur = "#14b8a6";
   const grid = [0, 0.5, 1].map((f) => {
     const yy = T + ih - f * ih;
     const label = f === 0 ? "0" : fmtUsageTokens(max * f);
@@ -1478,12 +1694,18 @@ function usageHourSvg(rows, color) {
   let bars = "";
   for (let j = 0; j < n; j++) {
     const cx = L + (j + 0.5) * slot;
-    const x0 = cx - bw / 2;
-    const hh = max ? (values[j] / max) * ih : 0;
-    const y = T + ih - hh;
-    if (hh > 0.6) {
-      bars += '<rect x="' + x0.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) +
-        '" height="' + hh.toFixed(1) + '" rx="2.5" fill="' + color + '"/>';
+    const pairW = bw * 2 + gap;
+    const xL = cx - pairW / 2;
+    const xC = xL + bw + gap;
+    const hL = max ? (llmVals[j] / max) * ih : 0;
+    const hC = max ? (curVals[j] / max) * ih : 0;
+    if (hL > 0.6) {
+      bars += '<rect x="' + xL.toFixed(1) + '" y="' + (T + ih - hL).toFixed(1) + '" width="' + bw.toFixed(1) +
+        '" height="' + hL.toFixed(1) + '" rx="2" fill="' + cLlm + '"/>';
+    }
+    if (hC > 0.6) {
+      bars += '<rect x="' + xC.toFixed(1) + '" y="' + (T + ih - hC).toFixed(1) + '" width="' + bw.toFixed(1) +
+        '" height="' + hC.toFixed(1) + '" rx="2" fill="' + cCur + '"/>';
     }
     if (xMarks[j]) {
       bars += '<text x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="#94a3b8">' + xMarks[j] + "</text>";
@@ -1493,16 +1715,21 @@ function usageHourSvg(rows, color) {
     grid + bars + "</svg>";
 }
 
-function usageHourPlotHtml(hourly, prefix, color, day) {
-  const rows = usageHourRows(hourly, prefix);
-  const sumTok = rows.reduce((a, r) => a + r.tokens, 0);
-  const sumCalls = rows.reduce((a, r) => a + r.calls, 0);
+function usageHourCombinedPlotHtml(hourly, day) {
+  const rows = usageHourCombinedRows(hourly);
+  const sumLlmTok = rows.reduce((a, r) => a + r.llm_tokens, 0);
+  const sumCurTok = rows.reduce((a, r) => a + r.cursor_tokens, 0);
+  const sumLlmCalls = rows.reduce((a, r) => a + r.llm_calls, 0);
+  const sumCurCalls = rows.reduce((a, r) => a + r.cursor_calls, 0);
   const when = String(day || "").slice(0, 10) || "所选日期";
   return (
-    '<div class="usage-hour-sub">' + esc(when) + " 00:00–24:00 · 请求 " + sumCalls +
-    " · Token " + fmtUsageTokens(sumTok) + "</div>" +
+    '<div class="usage-hour-sub">' + esc(when) +
+    " 00:00–24:00 · LLM " + sumLlmCalls + " 次 / " + fmtUsageTokens(sumLlmTok) +
+    " · Cursor " + sumCurCalls + " 次 / " + fmtUsageTokens(sumCurTok) + "</div>" +
+    '<div class="usage-legend" style="margin:0 0 8px"><span><i style="background:#ff5a1f"></i>LLM</span>' +
+    '<span><i style="background:#14b8a6"></i>Cursor 写码</span></div>' +
     '<div class="usage-hour-plot" data-usage-hour="1" data-rows="' + esc(JSON.stringify(rows)) + '">' +
-    usageHourSvg(rows, color) +
+    usageHourCombinedSvg(rows) +
     '<div class="usage-hour-guide" hidden></div><div class="usage-hour-tip" hidden></div></div>'
   );
 }
@@ -1553,6 +1780,261 @@ function usageMeterHtml(title, subtitle, daily, prefix, palette, extraNote) {
 
 let _usageSummary = null;
 
+/* ================= 本机登录（进应用挡板，对齐 simplified-workbuddy） ================= */
+const AUTH_LS_KEY = "mes_auth_session";
+const ENTERPRISES = [
+  { key: "jsry", label: "江苏软云", code: "" },
+  { key: "jxzr", label: "江西中软", code: "" },
+  { key: "qhzr", label: "前海中软", code: "" },
+];
+let _enterpriseKey = "jxzr";
+let _authUser = null;
+let _appBooted = false;
+
+function getAuthSession() {
+  try {
+    const raw = localStorage.getItem(AUTH_LS_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || !data.access_token) return null;
+    if (data.expires_at && Date.now() / 1000 > Number(data.expires_at) - 30) {
+      try { localStorage.removeItem(AUTH_LS_KEY); } catch (e) { /* ignore */ }
+      return null;
+    }
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+function setAuthSession(session) {
+  try {
+    if (session && session.access_token) {
+      localStorage.setItem(AUTH_LS_KEY, JSON.stringify(session));
+    } else {
+      localStorage.removeItem(AUTH_LS_KEY);
+    }
+  } catch (e) { /* ignore */ }
+}
+function clearAuthSession() {
+  setAuthSession(null);
+}
+function authToken() {
+  const s = getAuthSession();
+  return (s && s.access_token) || "";
+}
+function authHeaders(extra) {
+  const headers = Object.assign({}, extra || {});
+  const t = authToken();
+  if (t) headers.Authorization = "Bearer " + t;
+  return headers;
+}
+
+function selectedEnterprise() {
+  return ENTERPRISES.find((e) => e.key === _enterpriseKey) || ENTERPRISES[1];
+}
+function paintEnterpriseMenu() {
+  const menu = $("entMenu");
+  const label = $("entLabel");
+  const sel = selectedEnterprise();
+  if (label) label.textContent = sel.label;
+  if (!menu) return;
+  menu.innerHTML = ENTERPRISES.map((item) =>
+    '<li role="option" class="ent-option' + (item.key === _enterpriseKey ? " active" : "") +
+    '" data-key="' + esc(item.key) + '" aria-selected="' + (item.key === _enterpriseKey) + '">' +
+    esc(item.label) + "</li>"
+  ).join("");
+  menu.querySelectorAll(".ent-option").forEach((li) => {
+    li.addEventListener("mousedown", function (ev) {
+      ev.preventDefault();
+      _enterpriseKey = li.getAttribute("data-key") || "jxzr";
+      $("entSelect").classList.remove("open");
+      $("entTrigger").setAttribute("aria-expanded", "false");
+      paintEnterpriseMenu();
+    });
+  });
+}
+function bindLoginChrome() {
+  const trigger = $("entTrigger");
+  const root = $("entSelect");
+  if (trigger && root) {
+    trigger.onclick = function () {
+      const open = !root.classList.contains("open");
+      root.classList.toggle("open", open);
+      trigger.setAttribute("aria-expanded", open ? "true" : "false");
+    };
+    document.addEventListener("pointerdown", function (e) {
+      if (!root.classList.contains("open")) return;
+      if (!root.contains(e.target)) {
+        root.classList.remove("open");
+        trigger.setAttribute("aria-expanded", "false");
+      }
+    });
+  }
+  paintEnterpriseMenu();
+  const form = $("loginForm");
+  if (form) {
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      doAppLogin();
+    });
+  }
+  const btnOut = $("btnLogout");
+  if (btnOut) btnOut.onclick = function () { doAppLogout(); };
+}
+
+function showLoginShell(errMsg) {
+  const login = $("loginShell");
+  const app = $("appShell");
+  if (login) login.classList.add("show");
+  if (app) app.classList.remove("show");
+  const err = $("loginError");
+  if (err) {
+    if (errMsg) {
+      err.hidden = false;
+      err.textContent = errMsg;
+    } else {
+      err.hidden = true;
+      err.textContent = "";
+    }
+  }
+  const btn = $("loginSubmit");
+  if (btn) { btn.disabled = false; btn.textContent = "登录"; }
+  _authUser = null;
+  const su = $("sideUser");
+  const bo = $("btnLogout");
+  if (su) su.hidden = true;
+  if (bo) bo.hidden = true;
+}
+
+function showAppShell(user) {
+  _authUser = user || null;
+  const login = $("loginShell");
+  const app = $("appShell");
+  if (login) login.classList.remove("show");
+  if (app) app.classList.add("show");
+  const su = $("sideUser");
+  const bo = $("btnLogout");
+  if (su) {
+    su.hidden = false;
+    const name = (user && (user.display_name || user.username)) || "";
+    su.textContent = name ? ("当前：" + name) : "";
+  }
+  if (bo) bo.hidden = false;
+  const navEnt = $("navEntUsage");
+  if (navEnt) navEnt.hidden = !(user && user.role === "admin");
+}
+
+async function doAppLogin() {
+  const err = $("loginError");
+  const btn = $("loginSubmit");
+  const u = (($("loginUsername") && $("loginUsername").value) || "").trim();
+  const p = ($("loginPassword") && $("loginPassword").value) || "";
+  if (err) { err.hidden = true; err.textContent = ""; }
+  if (!u || !p) {
+    showLoginShell("请输入账号和密码");
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = "登录中…"; }
+  try {
+    const r = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: u,
+        password: p,
+        enterprise_code: String(selectedEnterprise().code || "").trim(),
+      }),
+    });
+    const d = await r.json();
+    if (!d.ok || !d.token) throw new Error(d.detail || "登录失败");
+    setAuthSession({
+      access_token: d.token,
+      token_type: d.token_type || "Bearer",
+      username: (d.user && d.user.username) || u,
+      display_name: (d.user && d.user.display_name) || u,
+      user_id: (d.user && d.user.id) || "",
+      role: (d.user && d.user.role) || "user",
+      enterprise_code: String(selectedEnterprise().code || "").trim(),
+      expires_at: d.expires_at,
+    });
+    if ($("loginPassword")) $("loginPassword").value = "";
+    showAppShell(d.user);
+    bootAppAfterLogin(true);
+  } catch (e) {
+    clearAuthSession();
+    showLoginShell(e && e.message ? e.message : String(e));
+  } finally {
+    if (btn && $("loginShell").classList.contains("show")) {
+      btn.disabled = false;
+      btn.textContent = "登录";
+    }
+  }
+}
+
+async function doAppLogout() {
+  try {
+    await fetch("/api/auth/logout", { method: "POST", headers: authHeaders() });
+  } catch (e) { /* ignore */ }
+  clearAuthSession();
+  showLoginShell();
+}
+
+async function verifySessionOrLogin() {
+  const sess = getAuthSession();
+  if (!sess) {
+    showLoginShell();
+    return false;
+  }
+  try {
+    const r = await fetch("/api/auth/me", { headers: authHeaders() });
+    const d = await r.json();
+    if (d && d.ok && d.authenticated && d.user) {
+      showAppShell(d.user);
+      return true;
+    }
+  } catch (e) { /* fallthrough */ }
+  clearAuthSession();
+  showLoginShell("登录已失效，请重新登录");
+  return false;
+}
+
+function bootAppAfterLogin(isFreshLogin) {
+  if (!_appBooted) {
+    initTheme();
+    loadConvs();
+    loadStatus();
+    (function bindPluginInstall() {
+      const pre = $("pluginPreflightBtn");
+      const inst = $("pluginInstallBtn");
+      if (pre) pre.onclick = () => uploadPlugin("preflight");
+      if (inst) inst.onclick = () => uploadPlugin("install");
+    })();
+    loadConfig();
+    (function bindUsageOn() {
+      const inp = $("usageOn");
+      if (!inp) return;
+      usageOnValue();
+      inp.addEventListener("change", function () { loadUsage(); });
+    })();
+    (function bindEntUsage() {
+      const btn = $("entRefresh");
+      if (btn) btn.onclick = function () { loadEntUsage(); };
+      ["entFrom", "entTo", "entGrain"].forEach(function (id) {
+        const el = $(id);
+        if (el) el.addEventListener("change", function () { loadEntUsage(); });
+      });
+    })();
+    _appBooted = true;
+  }
+  if (isFreshLogin) {
+    newConv();
+  } else if (!convs.length) {
+    newConv();
+  } else {
+    selectConv(convs[0].id);
+  }
+}
+
 function usagePaint() {
   const el = $("usageBody");
   if (!el || !_usageSummary) return;
@@ -1567,15 +2049,16 @@ function usagePaint() {
   const curPal = { fill: "#99f6e4", stroke: "#14b8a6", hit: "#99f6e4", miss: "#14b8a6", out: "#0f766e" };
   const llmNote = llm.missing_calls ? "未回传 " + llm.missing_calls + " 次" : "";
   const curNote = cursor.missing_calls ? "未回传 " + cursor.missing_calls + " 次（不代表没消耗）" : "";
+  const pending = Number(s.pending_report || 0);
+  const uidLab = s.user_id ? ("账号 " + s.user_id) : "当前账号";
+  const pendLab = pending > 0 ? (" · 待上报 " + pending + " 条") : "";
   el.innerHTML =
     usageTodayKpisHtml(s.today, usageKpiDayLabel(s.on || s.to || usageOnValue())) +
-    '<div class="card"><h2>LLM 各时段</h2><div class="body">' +
-    usageHourPlotHtml(s.hourly || [], "llm_", "#ff5a1f", s.on || usageOnValue()) +
+    '<div class="card"><h2>各时段用量</h2><div class="body">' +
+    usageHourCombinedPlotHtml(s.hourly || [], s.on || usageOnValue()) +
     "</div></div>" +
-    '<div class="card"><h2>Cursor 各时段</h2><div class="body">' +
-    usageHourPlotHtml(s.hourly || [], "cursor_", "#14b8a6", s.on || usageOnValue()) +
-    "</div></div>" +
-    '<p class="usage-note">' + esc(monthLab || "当月") + " · 北京时间 " + esc(s.tz || "Asia/Shanghai") +
+    '<p class="usage-note">' + esc(uidLab) + esc(pendLab) + " · " + esc(monthLab || "当月") +
+    " · 北京时间 " + esc(s.tz || "Asia/Shanghai") +
     "。图表可左右滑动。鼠标悬停柱状图可看分项。SDK 未回传时 token 为 0，仍计请求次数。</p>" +
     usageMeterHtml("LLM", llmModel + (monthLab ? " · " + monthLab : ""), daily, "llm_", llmPal, llmNote) +
     usageMeterHtml("Cursor 写码", curModel + (monthLab ? " · " + monthLab : ""), daily, "cursor_", curPal, curNote);
@@ -1586,16 +2069,96 @@ function usagePaint() {
 async function loadUsage() {
   const el = $("usageBody");
   if (!el) return;
+  if (!getAuthSession()) {
+    showLoginShell("登录已失效，请重新登录");
+    return;
+  }
   const day = usageOnValue();
   el.textContent = "加载中…";
   try {
     const q = encodeURIComponent(day);
-    const sr = await fetch("/api/usage/summary?days=7&on=" + q);
+    const sr = await fetch("/api/usage/summary?days=7&on=" + q, { headers: authHeaders() });
+    if (sr.status === 401) {
+      clearAuthSession();
+      showLoginShell("登录已失效，请重新登录");
+      return;
+    }
     const s = await sr.json();
     if (!s.ok) throw new Error(s.detail || "汇总失败");
     if (s.on && $("usageOn") && s.on !== $("usageOn").value) $("usageOn").value = s.on;
     _usageSummary = s;
     usagePaint();
+  } catch (err) {
+    el.innerHTML = '<p class="usage-note">加载失败：' + esc(err && err.message ? err.message : String(err)) + "</p>";
+  }
+}
+
+function entRangeDefaults() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const fromEl = $("entFrom");
+  const toEl = $("entTo");
+  if (fromEl && !fromEl.value) fromEl.value = y + "-" + m + "-01";
+  if (toEl && !toEl.value) toEl.value = y + "-" + m + "-" + d;
+}
+
+async function loadEntUsage() {
+  const el = $("entUsageBody");
+  if (!el) return;
+  if (!getAuthSession()) {
+    showLoginShell("登录已失效，请重新登录");
+    return;
+  }
+  entRangeDefaults();
+  const from = ($("entFrom") && $("entFrom").value) || "";
+  const to = ($("entTo") && $("entTo").value) || "";
+  const grain = ($("entGrain") && $("entGrain").value) || "month";
+  el.textContent = "加载中…";
+  try {
+    const q = "from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
+    const cr = await fetch("/api/usage/enterprise/company?" + q, { headers: authHeaders() });
+    if (cr.status === 401) {
+      clearAuthSession();
+      showLoginShell("登录已失效，请重新登录");
+      return;
+    }
+    if (cr.status === 403) {
+      el.innerHTML = '<p class="usage-note">仅管理员可查看企业用量。</p>';
+      return;
+    }
+    const company = await cr.json();
+    if (!company.ok) throw new Error(company.detail || "公司合计失败");
+    const pr = await fetch("/api/usage/enterprise/people?" + q + "&grain=" + encodeURIComponent(grain), { headers: authHeaders() });
+    const people = await pr.json();
+    if (!people.ok) throw new Error(people.detail || "按人序列失败");
+    const llm = company.llm || {};
+    const cur = company.cursor || {};
+    const rows = people.rows || [];
+    const table = rows.length
+      ? ('<table class="usage-ent-table"><thead><tr>' +
+        "<th>账号</th><th>区间</th><th>LLM tokens</th><th>LLM 次数</th><th>Cursor tokens</th><th>Cursor 次数</th><th>LLM 未回传</th>" +
+        "</tr></thead><tbody>" +
+        rows.map(function (r) {
+          return "<tr><td>" + esc(r.display_name || r.username || r.user_id) + "</td><td>" + esc(r.period) + "</td><td>" +
+            esc(fmtUsageTokensTitle(r.llm_tokens)) + "</td><td>" + esc(String(r.llm_calls || 0)) + "</td><td>" +
+            esc(fmtUsageTokensTitle(r.cursor_tokens)) + "</td><td>" + esc(String(r.cursor_calls || 0)) + "</td><td>" +
+            esc(String(r.llm_missing_calls || 0)) + "</td></tr>";
+        }).join("") +
+        "</tbody></table>")
+      : '<p class="usage-note">所选区间暂无已上报流水。请在各机开启 usage.report_enabled 并配置 report_url。</p>';
+    el.innerHTML =
+      '<div class="usage-ent-cards">' +
+        '<div class="usage-ent-card"><div class="k">公司 LLM（Key）</div><div class="v">' + esc(fmtUsageTokens(llm.tokens)) +
+        '</div><div class="s">' + esc(fmtUsageTokensTitle(llm.tokens)) + " tokens · " + esc(String(llm.calls || 0)) + " 次 · 覆盖 " +
+        esc(String(company.people || 0)) + " 人</div></div>" +
+        '<div class="usage-ent-card"><div class="k">Cursor（非公司 Key）</div><div class="v">' + esc(fmtUsageTokens(cur.tokens)) +
+        '</div><div class="s">' + esc(fmtUsageTokensTitle(cur.tokens)) + " tokens · " + esc(String(cur.calls || 0)) + " 次</div></div>" +
+      "</div>" +
+      '<p class="usage-note">' + esc(company.note || "") + " · " + esc(company.from || "") + " ~ " + esc(company.to || "") +
+      " · " + esc(company.tz || "Asia/Shanghai") + "</p>" +
+      table;
   } catch (err) {
     el.innerHTML = '<p class="usage-note">加载失败：' + esc(err && err.message ? err.message : String(err)) + "</p>";
   }
@@ -4608,22 +5171,10 @@ $("btnSave").onclick = saveConfig;
 $("btnReload").onclick = loadConfig;
 $("btnNewChat").onclick = newConv;
 
-initTheme();
-loadConvs();
-if (!convs.length) newConv(); else selectConv(convs[0].id);
-loadStatus();
-(function bindPluginInstall() {
-  const pre = $("pluginPreflightBtn");
-  const inst = $("pluginInstallBtn");
-  if (pre) pre.onclick = () => uploadPlugin("preflight");
-  if (inst) inst.onclick = () => uploadPlugin("install");
-})();
-loadConfig();
-(function bindUsageOn() {
-  const inp = $("usageOn");
-  if (!inp) return;
-  usageOnValue();
-  inp.addEventListener("change", function () { loadUsage(); });
+bindLoginChrome();
+(async function bootGate() {
+  const ok = await verifySessionOrLogin();
+  if (ok) bootAppAfterLogin(false);
 })();
 </script>
 </body>
