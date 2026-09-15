@@ -117,6 +117,15 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "report_url": "",  # 如 http://127.0.0.1:8000/api/usage-hub/v1
         "report_token": "",
     },
+    # 本机「我的空间」（会话摘要进库、报告正文进空间；失败不影响业务）
+    "space": {
+        "retention_days": 90,
+        "max_session_body_chars": 65536,
+        "auto_purge_enabled": True,
+        "sync_pcb_8d": True,
+        "pcb_8d_drafts_dir": "",
+        "sync_chat_docs": True,
+    },
 }
 
 

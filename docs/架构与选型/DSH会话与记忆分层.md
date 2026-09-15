@@ -3,13 +3,13 @@
 > **状态**：定稿（2026-09-12）  
 > **原则**：能由 DSH 宿主处理的，插件与 WorkBuddy **不得再撑一套**；宿主接不住的，只补执行账本与对账，不当聊天会话库。
 
-配合：[四车道会话契约](./四车道会话契约.md)（WorkBuddy 写码/审码/提交/部署卡隔离）、DSH Cursor 插件 `@zhongruan/dsh-cursor-coding`。
+配合：[四车道会话契约](./四车道会话契约.md)（WorkBuddy 写码/审码/提交/部署卡隔离）、DSH Cursor 插件 `@zhongruan/dsh-cursor-coding`。人翻产物见 [会话与文档-需求理解](../产品与口径/会话与文档-需求理解.md) + [本机我的空间方案](../功能实现/会话归档方案.md)（L4，不上云）。
 
 ---
 
 ## 0. 一句话
 
-**聊天记忆认 DSH 事件日志；写码执行认本机 Job；浏览器缓存只加速。禁止插件/引擎另造会话树。**
+**聊天记忆认 DSH 事件日志；写码执行认本机 Job；浏览器缓存只加速；人翻产物走本机 L4「我的空间」。禁止插件/引擎另造会话树。不上云、不换机同步会话。**
 
 ---
 
@@ -17,10 +17,11 @@
 
 | 层 | 谁管 | 存什么 | 存活 | 禁止 |
 |---|---|---|---|---|
-| **L1 聊天会话** | DSH `ctx.sessions` + `sessionPersistence` | 消息树、`tool/call`+`tool/result`（含 `presentationMeta`）、标题 | 刷新/重启可恢复 | 插件 `sessionStorage` / 自建聊天库当权威 |
+| **L1 聊天会话** | DSH `ctx.sessions` + `sessionPersistence` | 消息树、`tool/call`+`tool/result`（含 `presentationMeta`）、标题 | 刷新/重启可恢复（同机） | 插件 `sessionStorage` / 自建聊天库当权威 |
 | **L1b 上下文窗口** | DSH `ctx.compaction` + tokenMeter + tool-result pruner | 压进 checkpoint 的工作集 | 模型只看见压缩后的 surface | 插件私自截断/改写 DSH 历史 |
 | **L2 执行账本** | 本机 Job（`ccj-*` / `ldj-*`） | Cursor/沙箱/同步、过程 transcript | 本机 `dataRoot/jobs` | 把 Job 目录当 DSH 会话库；按工作区抢别人的 Job |
 | **L3 加速** | `sessionStorage` / 卡级 localStorage | 首屏 transcript、滚动位置 | 关标签即丢 | 用缓存覆盖 DSH meta / Job 终态 |
+| **L4 我的空间** | 引擎 `space/`（见会话归档方案） | 会话摘要/正文档案进 SQLite；报告正文进空间文件；保留清理；人自管 | 本机 `engine/data/space/` | 当续聊权威；云同步冒充 L1；给 Agent 当记忆 |
 
 **模型可见 ⟺ 已写入 DSH 会话日志。** 要让下一轮 Agent 记得的结论，必须进 `tool/result` 的 `content`（如 `zr_cursor_finish` 的 `chat_body`），不要只写在 Job JSON 或浏览器里。
 
@@ -85,7 +86,7 @@ WorkBuddy 四车道另守 [四车道会话契约](./四车道会话契约.md)（
 
 - 在插件里用工作区路径当会话主键；
 - 把 `sessionStorage` / `localStorage` 当成恢复完成态的唯一依据；
-- 为「记忆」再造聊天消息表或平行于 DSH 的 session 文件；
+- 为「记忆」再造聊天消息表或平行于 DSH 的 session 文件（L4 catalog 只许指针与 SPA journal，禁止当续聊权威）；
 - 把 Cursor 全程日志灌进 DSH Agent 上下文（会撑爆窗口且重复 compaction）。
 
 **给宿主的后续诉求（不阻塞当前）**：`tool/progress` 或允许中途更新 `presentationMeta`，把 L2 进度绑到同一 `callId` 节点。

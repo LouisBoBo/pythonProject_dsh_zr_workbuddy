@@ -60,6 +60,7 @@ app = FastAPI(
         {"name": "功能热插拔", "description": "features 启停（无需重启 DSH）"},
         {"name": "配置中心", "description": "业务连接 / LLM 配置读写与连接测试"},
         {"name": "用量统计", "description": "本机 LLM 与 Cursor 写码 token 流水与汇总（只读）"},
+        {"name": "资料库", "description": "本机会话摘要与报告档案；按会话列出文档；可预览/下载/删除与保留清理；不当聊天续聊权威"},
         {"name": "账号", "description": "本机登录会话；引擎 SPA 进应用须先登录；用量流水带 user_id"},
         {"name": "文档导入", "description": "接口文档与数据字典导入"},
     ],
@@ -158,6 +159,30 @@ def _warn_non_loopback_bind():
         threading.Thread(target=_delayed_usage_report, name="usage-report", daemon=True).start()
     except Exception as exc:  # noqa: BLE001
         logging.getLogger("uvicorn.error").warning("用量上报后台线程启动失败：%s", exc)
+
+    def _delayed_space_purge() -> None:
+        import time
+
+        time.sleep(5)
+        try:
+            from .space import get_space_config, purge_expired
+
+            cfg = get_space_config()
+            if not cfg.get("auto_purge_enabled"):
+                return
+            out = purge_expired(dry_run=False)
+            n = int((out or {}).get("purged_sessions") or 0)
+            if n:
+                logging.getLogger("uvicorn.error").info("我的空间：已清理 %d 个过期会话档案", n)
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("uvicorn.error").warning("我的空间启动清理失败：%s", exc)
+
+    try:
+        import threading
+
+        threading.Thread(target=_delayed_space_purge, name="space-purge", daemon=True).start()
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("uvicorn.error").warning("我的空间清理线程启动失败：%s", exc)
 
 from .health import check_net  # noqa: E402
 
@@ -603,6 +628,10 @@ class CodeReviewRunBody(BaseModel):
         "",
         description="列文件/校验成功后签发的 path_ticket；默认必填（除非 allow_agent_absolute_path）",
     )
+    ui_session_id: str = Field(
+        "",
+        description="DSH 当前会话 sessionId；写入资料库绑定，用于点会话名精确打开",
+    )
 
 
 class PickFolderBody(BaseModel):
@@ -713,6 +742,7 @@ async def api_code_review_run(body: CodeReviewRunBody):
         scope=body.scope or "",
         files=body.files,
         focus=body.focus or "",
+        ui_session_id=body.ui_session_id or "",
     )
     if not out.get("ok"):
         return JSONResponse(out, status_code=400)
@@ -762,6 +792,7 @@ async def api_code_review_run_stream(body: CodeReviewRunBody):
                 scope=body.scope or "",
                 files=body.files,
                 focus=body.focus or "",
+                ui_session_id=body.ui_session_id or "",
             ):
                 yield f"data: {_json.dumps(ev, ensure_ascii=False)}\n\n"
                 # 促使中间代理/缓冲尽快下发，避免 token 被攒成一包
@@ -1243,7 +1274,7 @@ def _live_user_row_from_bearer(request: Request):
     tok = _bearer_token(request)
     if not tok:
         return None, JSONResponse(
-            {"ok": False, "detail": "请先登录后查看用量", "code": "auth_required"},
+            {"ok": False, "detail": "请先登录", "code": "auth_required"},
             status_code=401,
         )
     claims = verify_token(tok)
@@ -1262,7 +1293,7 @@ def _live_user_row_from_bearer(request: Request):
         return None, JSONResponse(
             {
                 "ok": False,
-                "detail": "请先修改默认密码后再查看用量",
+                "detail": "请先修改默认密码后再继续",
                 "code": "password_change_required",
             },
             status_code=403,
@@ -1681,6 +1712,290 @@ def api_usage_report_now(request: Request):
     if err:
         return err
     return flush_report(force=True)
+
+
+class SpacePurgeBody(BaseModel):
+    dry_run: bool = Field(False, description="仅统计将清理的条数，不真正删除")
+    retention_days: int | None = Field(
+        None,
+        description="临时覆盖配置中的保留天数；空则用 config space.retention_days",
+    )
+
+
+def _space_can_access(row_user_id: str, me: dict, *, admin: bool) -> bool:
+    if admin:
+        return True
+    return str(row_user_id or "") == str((me or {}).get("id") or "")
+
+
+@app.get(
+    "/api/space/status",
+    tags=["资料库"],
+    summary="空间占用与保留策略",
+    description="须登录。返回当前用户会话/文档条数、字节占用与保留天数。"
+    "资料库仅本机；不当聊天续聊权威。不做外部同步（同步在列表接口）。",
+)
+def api_space_status(request: Request):
+    from .space import get_space_config, status_counts
+
+    me, err = _require_login(request)
+    if err:
+        return err
+    # 不同步外部草稿：列表接口会 sync；此处只读计数，避免打开资料库时双倍扫盘卡顿
+    cfg = get_space_config()
+    counts = status_counts(user_id=str(me.get("id") or ""), admin_all=False)
+    return {"ok": True, **counts, "config": cfg}
+
+
+@app.get(
+    "/api/space/sessions",
+    tags=["资料库"],
+    summary="会话档案列表",
+    description="须登录。列出本机「我的空间」中的会话摘要档案（非 DSH 续聊列表）。"
+    "打开列表前会 fail-soft 同步本机 PCB 8D 草稿目录（~/.zhongruan/pcb-8d-drafts）。",
+)
+def api_space_sessions(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200, description="每页条数"),
+    offset: int = Query(0, ge=0, description="偏移"),
+):
+    from .space import list_sessions, sync_external_into_space
+
+    me, err = _require_login(request)
+    if err:
+        return err
+    try:
+        sync_external_into_space(user_id=str(me.get("id") or ""))
+    except Exception:
+        pass
+    rows = list_sessions(user_id=str(me.get("id") or ""), limit=limit, offset=offset)
+    # 列表不回传超长正文
+    slim = []
+    for r in rows:
+        item = {**r}
+        body = str(item.get("body_text") or "")
+        if len(body) > 400:
+            item["body_preview"] = body[:400] + "…"
+        else:
+            item["body_preview"] = body
+        item.pop("body_text", None)
+        slim.append(item)
+    return {"ok": True, "sessions": slim}
+
+
+@app.get(
+    "/api/space/sessions/{session_id}",
+    tags=["资料库"],
+    summary="会话档案详情",
+    description="须登录。含会话摘要正文与下属文档列表。",
+)
+def api_space_session_detail(request: Request, session_id: str):
+    from .space import get_session, list_artifacts
+
+    me, err = _require_login(request)
+    if err:
+        return err
+    row = get_session(session_id)
+    if not row or not _space_can_access(str(row.get("user_id") or ""), me, admin=False):
+        return JSONResponse({"ok": False, "detail": "会话档案不存在"}, status_code=404)
+    arts = list_artifacts(
+        user_id=str(me.get("id") or ""),
+        session_id=str(row.get("id") or ""),
+        limit=200,
+    )
+    return {"ok": True, "session": row, "artifacts": arts}
+
+
+@app.get(
+    "/api/space/sessions/{session_id}/locate-dsh",
+    tags=["资料库"],
+    summary="打开已绑定的 DSH 会话",
+    description="须登录。只返回入库时写死的 session-uuid（dsh_path / 档案 id）；"
+    "不做内容启发式反查，避免多个相似会话误命中。未绑定则 dsh_session_id 为空。",
+)
+def api_space_session_locate_dsh(request: Request, session_id: str):
+    from .space import get_session, locate_dsh_session
+
+    me, err = _require_login(request)
+    if err:
+        return err
+    row = get_session(session_id)
+    if not row or not _space_can_access(str(row.get("user_id") or ""), me, admin=False):
+        return JSONResponse({"ok": False, "detail": "会话档案不存在"}, status_code=404)
+    sid = str(row.get("id") or session_id)
+    loc = locate_dsh_session(
+        catalog_id=sid,
+        cached_dsh_id=str(row.get("dsh_path") or ""),
+    )
+    return {"ok": True, **loc}
+
+
+@app.delete(
+    "/api/space/sessions/{session_id}",
+    tags=["资料库"],
+    summary="删除会话档案",
+    description="须登录。删除本机空间中的会话摘要及级联文档；不删除 DSH 左侧原会话。",
+)
+def api_space_session_delete(request: Request, session_id: str):
+    from .space import delete_session, get_session
+
+    me, err = _require_login(request)
+    if err:
+        return err
+    row = get_session(session_id)
+    if not row or not _space_can_access(str(row.get("user_id") or ""), me, admin=False):
+        return JSONResponse({"ok": False, "detail": "会话档案不存在"}, status_code=404)
+    ok = delete_session(session_id, user_id=str(me.get("id") or ""), cascade_artifacts=True)
+    return {"ok": bool(ok)}
+
+
+@app.get(
+    "/api/space/library",
+    tags=["资料库"],
+    summary="按会话列出资料库",
+    description="须登录。只返回至少有一份文档的会话；每页默认 10 个会话。"
+    "打开前会 fail-soft 同步 PCB 8D / 聊天文档，并清理无文档的空会话标题。",
+)
+def api_space_library(
+    request: Request,
+    page: int = Query(1, ge=1, description="页码，从 1 开始"),
+    page_size: int = Query(10, ge=1, le=50, description="每页会话数，默认 10"),
+    q: str = Query("", description="可选：按会话/文档标题搜索"),
+    limit: int = Query(0, ge=0, le=200, description="兼容旧参数；若 >0 则当作 page_size"),
+):
+    from .space import list_library, purge_empty_sessions, sync_external_into_space
+
+    me, err = _require_login(request)
+    if err:
+        return err
+    try:
+        sync_external_into_space(user_id=str(me.get("id") or ""))
+    except Exception:
+        pass
+    try:
+        purge_empty_sessions(user_id=str(me.get("id") or ""))
+    except Exception:
+        pass
+    from .space.dsh_locate import bound_dsh_session_id
+
+    display = str(me.get("display_name") or me.get("username") or "").strip()
+    ps = int(limit) if limit and limit > 0 else page_size
+    packed = list_library(
+        user_id=str(me.get("id") or ""),
+        page=page,
+        page_size=ps,
+        q=q or "",
+    )
+    tree = packed.get("sessions") or []
+    for item in tree:
+        item["display_name"] = display or str(item.get("user_id") or "")
+        dsh = bound_dsh_session_id(
+            catalog_id=str(item.get("id") or ""),
+            dsh_path=str(item.get("dsh_path") or ""),
+        )
+        item["dsh_session_id"] = dsh
+        item["openable"] = bool(dsh)
+        for art in item.get("artifacts") or []:
+            if isinstance(art, dict) and not art.get("display_name"):
+                art["display_name"] = display or str(art.get("user_id") or "")
+    return {
+        "ok": True,
+        "sessions": tree,
+        "display_name": display,
+        "total": int(packed.get("total") or 0),
+        "page": int(packed.get("page") or page),
+        "page_size": int(packed.get("page_size") or ps),
+    }
+
+
+@app.get(
+    "/api/space/artifacts",
+    tags=["资料库"],
+    summary="文档列表",
+    description="须登录。扁平列出报告等文档（含审码报告历史）。",
+)
+def api_space_artifacts(
+    request: Request,
+    kind: str = Query("", description="可选类型过滤，如 code_review_report / pcb_8d_report"),
+    session_id: str = Query("", description="可选会话 id"),
+    limit: int = Query(50, ge=1, le=200, description="每页条数"),
+    offset: int = Query(0, ge=0, description="偏移"),
+):
+    from .space import list_artifacts, sync_external_into_space
+
+    me, err = _require_login(request)
+    if err:
+        return err
+    try:
+        sync_external_into_space(user_id=str(me.get("id") or ""))
+    except Exception:
+        pass
+    rows = list_artifacts(
+        user_id=str(me.get("id") or ""),
+        kind=kind,
+        session_id=session_id,
+        limit=limit,
+        offset=offset,
+    )
+    return {"ok": True, "artifacts": rows}
+
+
+@app.get(
+    "/api/space/artifacts/{artifact_id}",
+    tags=["资料库"],
+    summary="打开文档正文",
+    description="须登录。返回元数据与正文（报告 markdown 等）。",
+)
+def api_space_artifact_get(request: Request, artifact_id: str):
+    from .space import get_artifact
+    from .space.catalog import read_artifact_body
+
+    me, err = _require_login(request)
+    if err:
+        return err
+    row = get_artifact(artifact_id)
+    if not row or not _space_can_access(str(row.get("user_id") or ""), me, admin=False):
+        return JSONResponse({"ok": False, "detail": "文档不存在"}, status_code=404)
+    body = read_artifact_body(row)
+    return {"ok": True, "artifact": row, "body": body}
+
+
+@app.delete(
+    "/api/space/artifacts/{artifact_id}",
+    tags=["资料库"],
+    summary="删除文档",
+    description="须登录。删除空间内文档文件与目录项。",
+)
+def api_space_artifact_delete(request: Request, artifact_id: str):
+    from .space import delete_artifact, get_artifact
+
+    me, err = _require_login(request)
+    if err:
+        return err
+    row = get_artifact(artifact_id)
+    if not row or not _space_can_access(str(row.get("user_id") or ""), me, admin=False):
+        return JSONResponse({"ok": False, "detail": "文档不存在"}, status_code=404)
+    ok = delete_artifact(artifact_id, user_id=str(me.get("id") or ""))
+    return {"ok": bool(ok)}
+
+
+@app.post(
+    "/api/space/purge",
+    tags=["资料库"],
+    summary="按保留策略清理",
+    description="须登录。清理当前用户过期会话档案与文档；dry_run=true 时只统计。",
+)
+def api_space_purge(request: Request, body: SpacePurgeBody):
+    from .space import purge_expired
+
+    me, err = _require_login(request)
+    if err:
+        return err
+    return purge_expired(
+        user_id=str(me.get("id") or ""),
+        dry_run=bool(body.dry_run),
+        retention_days=body.retention_days,
+    )
 
 
 class PluginBody(BaseModel):

@@ -56,6 +56,8 @@ def start(
     source_gate_job_id: str = "",
     ui_call_id: str = "",
     ui_session_id: str = "",
+    user_id: str = "",
+    username: str = "",
 ) -> dict[str, Any]:
     """创建并启动 Job。sync=True 时前台跑完（测试用）；默认后台。"""
     cfg = get_config()
@@ -97,10 +99,25 @@ def start(
             "reply": f"进行中任务已达上限（{cfg.max_concurrent}）",
         }
 
+    uid = str(user_id or "").strip()
+    uname = str(username or "").strip()
+    if not uid:
+        try:
+            from ..auth import current_user_id, get_active_user
+
+            uid = (current_user_id() or "").strip()
+            if not uid:
+                active_u = get_active_user() or {}
+                uid = str(active_u.get("id") or "").strip()
+                if not uname:
+                    uname = str(active_u.get("username") or "").strip()
+        except Exception:
+            pass
+
     job = job_store.create_job(
         _dd(),
-        user_id="",
-        username="",
+        user_id=uid,
+        username=uname,
         thread_id=str(ui_session_id or "").strip(),
         workspace=str(check["path"]),
         message=msg,

@@ -53,6 +53,8 @@ apps/*/plugins/*/node_modules/
 **/engine/data/usage/
 **/engine/data/usage_hub/
 **/engine/data/auth/
+**/engine/data/space/
+**/engine/data/_test_space/
 
 # 宿主 host/（禁止再导入 DeepSeek Harness Studio 源码树）
 /host/

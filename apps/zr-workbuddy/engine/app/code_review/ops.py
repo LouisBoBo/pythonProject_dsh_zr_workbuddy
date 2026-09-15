@@ -25,6 +25,7 @@ async def iter_review_events(
     files: list[str] | None = None,
     focus: str = "",
     persist: bool = True,
+    ui_session_id: str = "",
 ):
     """SSE 用：逐步 yield step/status，最后 done（含 report_id）。"""
     cfg = get_config()
@@ -60,7 +61,11 @@ async def iter_review_events(
         if ev.get("ok") and persist:
             report = save_report(
                 default_data_dir(),
-                {**{k: v for k, v in ev.items() if k != "type"}, "feature": FEATURE_ID},
+                {
+                    **{k: v for k, v in ev.items() if k != "type"},
+                    "feature": FEATURE_ID,
+                    "ui_session_id": str(ui_session_id or "").strip(),
+                },
             )
             rid = report.get("id")
             ev = {
@@ -68,6 +73,13 @@ async def iter_review_events(
                 "report_id": rid,
                 "reply": (ev.get("reply") or "") + (f"\n\n报告 ID：`{rid}`" if rid else ""),
             }
+            # 我的空间：失败不得影响审码主流程
+            try:
+                from ..space import ingest_code_review_report
+
+                ingest_code_review_report(report)
+            except Exception:
+                pass
 
         # 终稿按「一行」SSE 推送；前端再排队逐行渲染，避免同帧刷完看起来像整段弹出
         reply = ev.get("reply") or ""
@@ -92,6 +104,7 @@ async def run_review_async(
     files: list[str] | None = None,
     focus: str = "",
     persist: bool = True,
+    ui_session_id: str = "",
 ) -> dict[str, Any]:
     final: dict[str, Any] = {"ok": False, "detail": "未完成", "reply": "未完成"}
     async for ev in iter_review_events(
@@ -100,6 +113,7 @@ async def run_review_async(
         files=files,
         focus=focus,
         persist=persist,
+        ui_session_id=ui_session_id,
     ):
         if ev.get("type") == "done":
             final = {k: v for k, v in ev.items() if k != "type"}
@@ -205,6 +219,7 @@ def run_review(
     files: list[str] | None = None,
     focus: str = "",
     persist: bool = True,
+    ui_session_id: str = "",
 ) -> dict[str, Any]:
     """同步入口（CLI）；HTTP 请用 run_review_async。"""
     return asyncio.run(
@@ -214,6 +229,7 @@ def run_review(
             files=files,
             focus=focus,
             persist=persist,
+            ui_session_id=ui_session_id,
         )
     )
 

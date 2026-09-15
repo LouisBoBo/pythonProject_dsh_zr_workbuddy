@@ -101,3 +101,15 @@ usage:
   report_url: ""                 # P0 本机汇总：http://127.0.0.1:<引擎端口>/api/usage-hub/v1
   report_token: ""               # 机器票据（必填才能 ingest）；不是 DeepSeek Key；日志禁止回显
                                  # 为空时拒绝上报入库，防止伪造流水
+
+# 本机「我的空间」（会话摘要进库、报告正文可自管；失败不影响聊天/审码）
+space:
+  retention_days: 90             # 0 = 不自动清理
+  max_session_body_chars: 65536
+  auto_purge_enabled: true
+  sync_pcb_8d: true              # 打开空间时同步 ~/.zhongruan/pcb-8d-drafts/*.md
+  pcb_8d_drafts_dir: ""          # 空 = 默认草稿目录；须在用户 home 下
+  sync_chat_docs: true           # 打开空间时从本机 DSH 会话抽出聊天产出的文档（测试用例/方案等）
+  ingest_code_files: true        # 写码成功后把已同步源码副本进资料库（白名单扩展名；跳过密钥文件）
+  code_file_max_count: 20        # 单次任务最多入库源码文件数
+  code_file_max_bytes: 262144    # 单文件上限（字节）

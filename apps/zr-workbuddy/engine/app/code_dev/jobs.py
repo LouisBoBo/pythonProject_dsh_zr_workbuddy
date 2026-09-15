@@ -187,7 +187,16 @@ def update_job(data_dir: Path, job_id: str, **fields: Any) -> dict[str, Any] | N
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(path)
-        return job
+        out = dict(job)
+    # 锁外：我的空间归档（仅成功入库源码；失败不影响写码）
+    if out and str(out.get("status") or "") == "succeeded":
+        try:
+            from ..space import ingest_code_dev_job
+
+            ingest_code_dev_job(out)
+        except Exception:
+            pass
+    return out
 
 
 def record_event(data_dir: Path, job_id: str, event: dict[str, Any]) -> dict[str, Any] | None:

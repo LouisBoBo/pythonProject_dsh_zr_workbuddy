@@ -994,4 +994,24 @@ async def run_async(cmd: str, rest: list[str]) -> dict:
         if not uid:
             return {"ok": False, "detail": "请先登录后查看用量（用量跟账号，不跟设备）"}
         return summarize(days=days, user_id=uid)
+    if cmd == "space-list":
+        from .auth import get_active_user
+        from .space import list_sessions
+
+        active = get_active_user()
+        uid = str((active or {}).get("id") or "").strip()
+        if not uid:
+            return {"ok": False, "detail": "请先登录后查看我的空间"}
+        rows = list_sessions(user_id=uid, limit=50)
+        return {"ok": True, "sessions": rows}
+    if cmd == "space-purge":
+        from .auth import get_active_user
+        from .space import purge_expired
+
+        active = get_active_user()
+        uid = str((active or {}).get("id") or "").strip()
+        if not uid:
+            return {"ok": False, "detail": "请先登录"}
+        dry = "dry" in rest or "dry_run" in rest
+        return purge_expired(user_id=uid, dry_run=dry)
     return {"ok": False, "detail": f"未知命令: {cmd}"}

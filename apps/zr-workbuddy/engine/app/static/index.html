@@ -633,6 +633,7 @@
     <div class="conv-list" id="convList"></div>
     <div class="side-bottom">
       <button class="side-btn" id="navPlugins" onclick="switchView('plugins')">🧩 功能插件</button>
+      <button class="side-btn" id="navSpace" onclick="switchView('space')">📁 资料库</button>
       <button class="side-btn" id="navUsage" onclick="switchView('usage')">📈 用量</button>
       <button class="side-btn" id="navEntUsage" onclick="switchView('ent-usage')" hidden>🏢 企业用量</button>
       <button class="side-btn" id="navCfg" onclick="switchView('config')">⚙️ 配置中心</button>
@@ -1046,6 +1047,39 @@
       </div>
     </div>
 
+    <!-- ============ 资料库 ============ -->
+    <div class="view" id="view-space">
+      <div class="plugins-scroll">
+        <div class="plugins-wrap">
+          <div class="plugins-head">
+            <h2>资料库</h2>
+            <p>按会话列出其下文档。点文档全屏预览；下载为 Markdown。删档案不会删除 DSH 原会话。</p>
+          </div>
+          <div class="usage-filter" id="spaceToolbar">
+            <input type="search" id="spaceSearch" placeholder="搜索文件、会话" style="flex:1;min-width:160px;height:32px;border:1px solid #e5e7eb;border-radius:8px;padding:0 10px" />
+            <button type="button" class="btn ghost" id="spaceRefresh">刷新</button>
+            <button type="button" class="btn ghost" id="spacePurgeDry">预览清理</button>
+            <button type="button" class="btn" id="spacePurge">清理过期</button>
+          </div>
+          <div id="spaceStatus" class="usage-note" style="margin-bottom:12px"></div>
+          <div id="spaceBody" style="flex:1;min-height:0;display:flex;flex-direction:column">加载中…</div>
+        </div>
+      </div>
+    </div>
+    <div id="spaceFs" hidden style="position:fixed;inset:0;z-index:80;background:#fff;display:flex;flex-direction:column">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid #eef0f3;gap:12px">
+        <div>
+          <div id="spaceFsTitle" style="font-weight:600"></div>
+          <div id="spaceFsSub" class="usage-note"></div>
+        </div>
+        <div>
+          <button type="button" class="btn ghost" id="spaceFsDl">下载 .md</button>
+          <button type="button" class="btn ghost" id="spaceFsClose">×</button>
+        </div>
+      </div>
+      <pre id="spaceFsBody" class="md-code" style="flex:1;margin:0;overflow:auto;padding:24px 32px;white-space:pre-wrap"></pre>
+    </div>
+
     <!-- ============ 企业用量（管理员） ============ -->
     <div class="view" id="view-ent-usage">
       <div class="plugins-scroll">
@@ -1248,12 +1282,15 @@ function switchView(name) {
   $("navPlugins").classList.toggle("active", name === "plugins");
   $("navCfg").classList.toggle("active", name === "config");
   $("navUsage").classList.toggle("active", name === "usage");
+  const navSpace = $("navSpace");
+  if (navSpace) navSpace.classList.toggle("active", name === "space");
   const navEnt = $("navEntUsage");
   if (navEnt) navEnt.classList.toggle("active", name === "ent-usage");
   if (name === "plugins") loadPlugins();
   else stopPluginsPoll();
   if (name === "usage") loadUsage();
   if (name === "ent-usage") loadEntUsage();
+  if (name === "space") loadSpace();
 }
 
 function fmtUsageTokens(n) {
@@ -2092,6 +2129,328 @@ async function loadUsage() {
     el.innerHTML = '<p class="usage-note">加载失败：' + esc(err && err.message ? err.message : String(err)) + "</p>";
   }
 }
+
+/* ================= 资料库 ================= */
+let _spaceQuery = "";
+let _spacePage = 1;
+let _spaceTotal = 0;
+const _SPACE_PAGE_SIZE = 10;
+let _spaceCollapsed = {};
+let _spaceFsBody = "";
+let _spaceFsName = "";
+
+function spaceFmtTime(ts) {
+  const n = Number(ts) || 0;
+  if (!n) return "";
+  try {
+    return new Date(n * 1000).toLocaleString("zh-CN");
+  } catch (e) {
+    return String(n);
+  }
+}
+
+function spaceFmtBytes(n) {
+  const x = Number(n) || 0;
+  if (x < 1024) return x + " B";
+  if (x < 1024 * 1024) return Math.round(x / 1024) + " KB";
+  return (x / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function spaceDownloadMd(filename, text) {
+  const raw = String(filename || "library-export").trim() || "library-export";
+  const safe = raw.replace(/[\\/:*?"<>|]+/g, "_").replace(/\s+/g, " ").slice(0, 120);
+  const name = /\.md$/i.test(safe) ? safe : safe + ".md";
+  const blob = new Blob([text == null ? "" : String(text)], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    try { a.remove(); } catch (e) {}
+    try { URL.revokeObjectURL(url); } catch (e2) {}
+  }, 800);
+}
+
+function closeSpaceFs() {
+  const fs = $("spaceFs");
+  if (fs) fs.hidden = true;
+}
+
+function openSpaceFs(title, id, body) {
+  _spaceFsBody = body || "";
+  _spaceFsName = id || "preview";
+  $("spaceFsTitle").textContent = title || id || "预览";
+  $("spaceFsSub").textContent = "正在预览 · " + (id || "");
+  $("spaceFsBody").textContent = body || "（无正文）";
+  $("spaceFs").hidden = false;
+}
+
+async function loadSpaceStatus() {
+  const el = $("spaceStatus");
+  if (!el) return;
+  try {
+    const r = await fetch("/api/space/status", { headers: authHeaders() });
+    if (r.status === 401) {
+      clearAuthSession();
+      showLoginShell("登录已失效，请重新登录");
+      return;
+    }
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.detail || "状态失败");
+    const cfg = d.config || {};
+    el.textContent =
+      (d.sessions || 0) + " 个会话 · " + (d.artifacts || 0) +
+      " 份文档 · 约 " + Math.round((d.bytes || 0) / 1024) + " KB · 保留 " +
+      (cfg.retention_days == null ? "—" : cfg.retention_days) + " 天";
+  } catch (err) {
+    el.textContent = "状态加载失败：" + (err && err.message ? err.message : String(err));
+  }
+}
+
+async function openSpaceSession(id) {
+  const r = await fetch("/api/space/sessions/" + encodeURIComponent(id), { headers: authHeaders() });
+  const d = await r.json();
+  if (!d.ok) { alert(d.detail || "预览失败"); return; }
+  const s = d.session || {};
+  openSpaceFs(s.title || s.id, s.id, s.body_text || "");
+}
+
+async function openSpaceArtifact(id) {
+  const r = await fetch("/api/space/artifacts/" + encodeURIComponent(id), { headers: authHeaders() });
+  const d = await r.json();
+  if (!d.ok) { alert(d.detail || "预览失败"); return; }
+  const a = d.artifact || {};
+  openSpaceFs(a.title || a.id, a.id, d.body || "");
+}
+
+async function downloadSpaceArtifact(id) {
+  const r = await fetch("/api/space/artifacts/" + encodeURIComponent(id), { headers: authHeaders() });
+  const d = await r.json();
+  if (!d.ok) { alert(d.detail || "下载失败"); return; }
+  spaceDownloadMd((d.artifact || {}).id || id, d.body || "");
+}
+
+async function deleteSpaceSession(id) {
+  if (!id || !confirm("删除该会话档案及其文档？不会删除 DSH 原会话。")) return;
+  const r = await fetch("/api/space/sessions/" + encodeURIComponent(id), {
+    method: "DELETE",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+  });
+  const d = await r.json();
+  if (!d.ok) alert(d.detail || "删除失败");
+  closeSpaceFs();
+  await loadSpace();
+}
+
+async function deleteSpaceArtifact(id) {
+  if (!id || !confirm("删除该文档？")) return;
+  const r = await fetch("/api/space/artifacts/" + encodeURIComponent(id), {
+    method: "DELETE",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+  });
+  const d = await r.json();
+  if (!d.ok) alert(d.detail || "删除失败");
+  closeSpaceFs();
+  await loadSpace();
+}
+
+async function spacePurge(dry) {
+  if (!dry && !confirm("按保留策略清理过期档案？")) return;
+  const r = await fetch("/api/space/purge", {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ dry_run: !!dry }),
+  });
+  const d = await r.json();
+  alert(
+    (dry ? "将清理约 " : "已清理 ") +
+      (d.purged_sessions || 0) +
+      " 个会话（保留 " +
+      (d.retention_days != null ? d.retention_days : "—") +
+      " 天）"
+  );
+  if (!dry) await loadSpace();
+  else await loadSpaceStatus();
+}
+
+async function loadSpace() {
+  if (!getAuthSession()) {
+    showLoginShell("登录已失效，请重新登录");
+    return;
+  }
+  await loadSpaceStatus();
+  const el = $("spaceBody");
+  el.textContent = "加载中…";
+  try {
+    let url =
+      "/api/space/library?page=" +
+      encodeURIComponent(String(_spacePage || 1)) +
+      "&page_size=" +
+      _SPACE_PAGE_SIZE;
+    const qRaw = String(_spaceQuery || "").trim();
+    if (qRaw) url += "&q=" + encodeURIComponent(qRaw);
+    const r = await fetch(url, { headers: authHeaders() });
+    if (r.status === 401) {
+      clearAuthSession();
+      showLoginShell("登录已失效，请重新登录");
+      return;
+    }
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.detail || "列表失败");
+    const sessions = d.sessions || [];
+    _spaceTotal = Number(d.total) || 0;
+    _spacePage = Number(d.page) || _spacePage || 1;
+    if (!sessions.length) {
+      el.innerHTML =
+        '<p class="usage-note">' +
+        (qRaw ? "没有匹配的会话或文档。" : "暂无资料。") +
+        "</p>";
+      return;
+    }
+    const pageCount = Math.max(1, Math.ceil(_spaceTotal / _SPACE_PAGE_SIZE));
+    let html =
+      '<div style="flex:1;min-height:0;overflow:auto"><table class="res" style="table-layout:fixed;width:100%"><colgroup><col><col style="width:52px"><col style="width:72px"><col style="width:148px"><col style="width:64px"><col style="width:44px"></colgroup><tr><th>名称</th><th>类型</th><th>更新人</th><th>更新时间</th><th>大小</th><th></th></tr>';
+    sessions.forEach((s) => {
+      const who = esc(s.display_name || d.display_name || "");
+      const arts = s.artifacts || [];
+      const multi = arts.length > 1;
+      if (multi && _spaceCollapsed[s.id] == null) _spaceCollapsed[s.id] = false;
+      if (!multi) delete _spaceCollapsed[s.id];
+      const folded = multi && !!_spaceCollapsed[s.id];
+      html +=
+        "<tr><td colspan=\"6\" style=\"padding-left:0\">" +
+        (multi
+          ? '<button type="button" class="btn ghost space-fold" data-id="' +
+            esc(s.id) +
+            '" style="width:18px;padding:0;margin-right:2px">' +
+            (folded ? "▶" : "▼") +
+            "</button> "
+          : '<span style="display:inline-block;width:18px;margin-right:2px"></span>') +
+        "<b>" +
+        esc(s.title || s.id) +
+        "</b> <span style=\"color:#94a3b8;font-size:12px\">" +
+        arts.length +
+        " 份文档</span></td></tr>";
+      if (folded) return;
+      arts.forEach((a) => {
+        html +=
+          "<tr><td style=\"padding-left:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">" +
+          esc(a.title || a.id) +
+          "</td><td>文档</td><td>" +
+          who +
+          "</td><td>" +
+          esc(spaceFmtTime(a.created_at)) +
+          "</td><td>" +
+          esc(spaceFmtBytes(a.bytes)) +
+          '</td><td style="position:relative;overflow:visible;text-align:right">' +
+          '<button type="button" class="btn ghost space-more" data-id="' +
+          esc(a.id) +
+          '" style="width:28px;padding:0;font-size:16px;letter-spacing:1px" aria-label="更多操作">···</button>' +
+          '<div class="space-menu" data-id="' +
+          esc(a.id) +
+          '" hidden style="position:absolute;right:0;bottom:calc(100% + 4px);z-index:30;min-width:112px;padding:4px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.12)">' +
+          '<button type="button" class="space-open-art" data-id="' +
+          esc(a.id) +
+          '" style="display:block;width:100%;text-align:left;border:0;background:transparent;padding:8px 10px;font:12px inherit;border-radius:6px;cursor:pointer">预览</button>' +
+          '<button type="button" class="space-dl-art" data-id="' +
+          esc(a.id) +
+          '" style="display:block;width:100%;text-align:left;border:0;background:transparent;padding:8px 10px;font:12px inherit;border-radius:6px;cursor:pointer">下载</button>' +
+          '<button type="button" class="space-del-art" data-id="' +
+          esc(a.id) +
+          '" style="display:block;width:100%;text-align:left;border:0;background:transparent;padding:8px 10px;font:12px inherit;border-radius:6px;cursor:pointer;color:#b91c1c">删除</button>' +
+          "</div></td></tr>";
+      });
+    });
+    html += "</table></div>";
+    html +=
+      '<div style="display:flex;gap:8px;align-items:center;justify-content:flex-end;flex:none;padding-top:10px;font-size:12px;color:#64748b">' +
+      '<button type="button" class="btn ghost" id="spacePrev"' +
+      (_spacePage <= 1 ? " disabled" : "") +
+      ">上一页</button>" +
+      "<span>第 " +
+      _spacePage +
+      " / " +
+      pageCount +
+      " 页 · 共 " +
+      _spaceTotal +
+      " 个会话</span>" +
+      '<button type="button" class="btn ghost" id="spaceNext"' +
+      (_spacePage >= pageCount ? " disabled" : "") +
+      ">下一页</button></div>";
+    el.innerHTML = html;
+    el.querySelectorAll(".space-fold").forEach((btn) => {
+      btn.onclick = () => {
+        const id = btn.getAttribute("data-id");
+        _spaceCollapsed[id] = !_spaceCollapsed[id];
+        loadSpace();
+      };
+    });
+    el.querySelectorAll(".space-more").forEach((btn) => {
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        const id = btn.getAttribute("data-id");
+        el.querySelectorAll(".space-menu").forEach((m) => {
+          if (m.getAttribute("data-id") === id) m.hidden = !m.hidden;
+          else m.hidden = true;
+        });
+      };
+    });
+    el.querySelectorAll(".space-open-art").forEach((btn) => {
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        openSpaceArtifact(btn.getAttribute("data-id"));
+      };
+    });
+    el.querySelectorAll(".space-dl-art").forEach((btn) => {
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        downloadSpaceArtifact(btn.getAttribute("data-id"));
+      };
+    });
+    el.querySelectorAll(".space-del-art").forEach((btn) => {
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        deleteSpaceArtifact(btn.getAttribute("data-id"));
+      };
+    });
+    if ($("spacePrev")) {
+      $("spacePrev").onclick = () => {
+        if (_spacePage > 1) {
+          _spacePage -= 1;
+          loadSpace();
+        }
+      };
+    }
+    if ($("spaceNext")) {
+      $("spaceNext").onclick = () => {
+        if (_spacePage < pageCount) {
+          _spacePage += 1;
+          loadSpace();
+        }
+      };
+    }
+  } catch (err) {
+    el.innerHTML = '<p class="usage-note">加载失败：' + esc(err && err.message ? err.message : String(err)) + "</p>";
+  }
+}
+
+if ($("spaceRefresh")) $("spaceRefresh").onclick = () => loadSpace();
+if ($("spacePurgeDry")) $("spacePurgeDry").onclick = () => spacePurge(true);
+if ($("spacePurge")) $("spacePurge").onclick = () => spacePurge(false);
+if ($("spaceSearch")) {
+  $("spaceSearch").oninput = () => {
+    _spaceQuery = $("spaceSearch").value || "";
+    _spacePage = 1;
+    loadSpace();
+  };
+}
+if ($("spaceFsClose")) $("spaceFsClose").onclick = closeSpaceFs;
+if ($("spaceFsDl")) $("spaceFsDl").onclick = () => spaceDownloadMd(_spaceFsName, _spaceFsBody);
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && $("spaceFs") && !$("spaceFs").hidden) closeSpaceFs();
+});
 
 function entRangeDefaults() {
   const now = new Date();
