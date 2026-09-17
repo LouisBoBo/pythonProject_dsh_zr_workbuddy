@@ -26,6 +26,9 @@ const MARKET_PKG = 'dshmarket'
 const KB_PKG = process.env.WORKBUDDY_KB_PKG || '@zhongruan/dsh-knowledge'
 const KB_VERSION = process.env.WORKBUDDY_KB_VERSION || '1.0.0'
 const KB_LEGACY_PKGS = ['@lemoncat7/dsh-knowledge', 'dsh-knowledge-base']
+/** WorkBuddy 预装 LLM 用量计量（只记 llm/stream；见 ensure_dsh_llm_meter.py） */
+const METER_PKG = process.env.WORKBUDDY_METER_PKG || '@zhongruan/dsh-llm-meter'
+const METER_VERSION = process.env.WORKBUDDY_METER_VERSION || '0.1.1'
 /** 旧 0.2.7/0.2.8 把 name 写成文件路径，client-modules 解析不了 package.json，设置里没有 WorkBuddy。 */
 const BRIDGE_REL_LEGACY =
   `../../link/${LINK_NAME}/apps/zr-workbuddy/plugins/mes-bridge/lib/index.js`
@@ -903,6 +906,26 @@ function ensureWorkBuddyWire(appRoot) {
     console.warn('[desktop] ensure dsh-knowledge:', e && e.message ? e.message : e)
   }
 
+  // 用量计量：只写 cordis 启用配置；未进 node_modules 前不写依赖（与 ensure_dsh_llm_meter.py 一致）
+  try {
+    const ensureMeter = path.join(appRoot, 'scripts', 'lib', 'ensure_dsh_llm_meter.py')
+    if (fs.existsSync(ensureMeter)) {
+      const py =
+        process.env.APP_ENGINE_PYTHON ||
+        (fs.existsSync(path.join(runtimeRoot(), 'python', 'bin', 'python3'))
+          ? path.join(runtimeRoot(), 'python', 'bin', 'python3')
+          : 'python3')
+      execFileSync(py, [ensureMeter, profile], {
+        cwd: appRoot,
+        env: { ...process.env, DSH_HOME: home },
+        stdio: 'inherit',
+        timeout: 60000,
+      })
+    }
+  } catch (e) {
+    console.warn('[desktop] ensure dsh-llm-meter:', e && e.message ? e.message : e)
+  }
+
   // dsh 首次生成的 cordis.patch.yml 正文是单独的 []；后面再拼 - insert 会变成非法 YAML。
   // name 必须是 npm 包名：client-modules 用 require.resolve(name/package.json) 发现
   // dsh.client，才会把 Bridge 的 client.js 打进设置侧栏（WorkBuddy 配置中心）。
@@ -1080,6 +1103,78 @@ function ensureWorkBuddyWire(appRoot) {
     }
   } catch (e) {
     console.warn('[desktop] knowledge soft-install:', e && e.message ? e.message : e)
+  }
+
+  // 中软用量计量：npmrc 就绪后再试装；失败则回滚依赖登记，不拖垮桌面接线
+  try {
+    const meterPkgJson = path.join(profile, 'node_modules', ...METER_PKG.split('/'), 'package.json')
+    if (!fs.existsSync(meterPkgJson) && fs.existsSync(profilePkg)) {
+      const pkgMeter = JSON.parse(fs.readFileSync(profilePkg, 'utf8'))
+      pkgMeter.dependencies = pkgMeter.dependencies || {}
+      pkgMeter.dsh = pkgMeter.dsh || {}
+      pkgMeter.dsh.profile = pkgMeter.dsh.profile || {}
+      let bundlesMeter = Array.isArray(pkgMeter.dsh.profile.bundles)
+        ? pkgMeter.dsh.profile.bundles.slice()
+        : []
+      pkgMeter.dependencies[METER_PKG] = METER_VERSION
+      if (!bundlesMeter.includes(METER_PKG)) bundlesMeter = bundlesMeter.concat([METER_PKG])
+      pkgMeter.dsh.profile.bundles = bundlesMeter
+      fs.writeFileSync(profilePkg, JSON.stringify(pkgMeter, null, 2) + '\n', 'utf8')
+      try {
+        const pnpm = findBundledPnpm()
+        const hostNode = findHostNodeBinary() || process.execPath
+        const env = applyDesktopToolchain({ ...process.env, CI: 'true', DSH_HOME: home })
+        delete env.ELECTRON_RUN_AS_NODE
+        if (pnpm) {
+          execFileSync(hostNode, [pnpm, 'install'], {
+            cwd: profile,
+            env,
+            stdio: 'inherit',
+            timeout: 300000,
+          })
+        } else {
+          execFileSync('pnpm', ['install'], {
+            cwd: profile,
+            env,
+            stdio: 'inherit',
+            timeout: 300000,
+          })
+        }
+        const ensureMeter = path.join(appRoot, 'scripts', 'lib', 'ensure_dsh_llm_meter.py')
+        if (fs.existsSync(ensureMeter) && fs.existsSync(meterPkgJson)) {
+          const py =
+            process.env.APP_ENGINE_PYTHON ||
+            (fs.existsSync(path.join(runtimeRoot(), 'python', 'bin', 'python3'))
+              ? path.join(runtimeRoot(), 'python', 'bin', 'python3')
+              : 'python3')
+          execFileSync(py, [ensureMeter, profile], {
+            cwd: appRoot,
+            env: { ...process.env, DSH_HOME: home },
+            stdio: 'inherit',
+            timeout: 60000,
+          })
+        }
+      } catch (meterErr) {
+        console.warn(
+          '[desktop] 预装用量计量失败（包未发布或网络问题可忽略）:',
+          meterErr && meterErr.message ? meterErr.message : meterErr
+        )
+        try {
+          const rollback = JSON.parse(fs.readFileSync(profilePkg, 'utf8'))
+          if (rollback.dependencies) delete rollback.dependencies[METER_PKG]
+          if (rollback.dsh && rollback.dsh.profile && Array.isArray(rollback.dsh.profile.bundles)) {
+            rollback.dsh.profile.bundles = rollback.dsh.profile.bundles.filter(
+              (b) => b !== METER_PKG
+            )
+          }
+          fs.writeFileSync(profilePkg, JSON.stringify(rollback, null, 2) + '\n', 'utf8')
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[desktop] llm-meter soft-install:', e && e.message ? e.message : e)
   }
 
   // 避免市场装公司插件时被 gh-proxy 皮肤包拖死

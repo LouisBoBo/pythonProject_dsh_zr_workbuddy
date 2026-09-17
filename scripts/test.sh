@@ -21,6 +21,9 @@ echo "== company dsh market merge =="
 echo "== ensure dsh-knowledge =="
 ( cd "$ROOT/scripts/lib" && python3 -m unittest test_ensure_dsh_knowledge.py -q )
 
+echo "== ensure dsh-llm-meter =="
+( cd "$ROOT/scripts/lib" && python3 -m unittest test_ensure_dsh_llm_meter.py -q )
+
 echo "== vendor vs host (dsh-tools realpath) =="
 "$ROOT/scripts/check-vendor.sh"
 

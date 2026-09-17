@@ -1,7 +1,7 @@
 {
   "name": "company-dsh-plugins",
   "url": "http://175.178.238.31/dsh-plugins",
-  "updated": "2026-09-16",
+  "updated": "2026-09-17",
   "count": 5,
   "categories": {
     "tools": {
@@ -10,34 +10,6 @@
     }
   },
   "plugins": [
-    {
-      "name": "@zhongruan/dsh-pcb-helper",
-      "owner": "中软",
-      "url": "https://github.com/zhongruan/dsh-pcb-helper",
-      "category": "tools",
-      "description": {
-        "zh": "PCB 尺寸解析、BOM 清单统计",
-        "en": "PCB dimension parsing and BOM counting"
-      },
-      "npm": "@zhongruan/dsh-pcb-helper",
-      "version": "0.1.0",
-      "install": "dsh plugin --profile web add @zhongruan/dsh-pcb-helper",
-      "added": "2026-09-11"
-    },
-    {
-      "name": "@zhongruan/dsh-weather",
-      "owner": "中软",
-      "url": "https://github.com/zhongruan/dsh-weather",
-      "category": "tools",
-      "description": {
-        "zh": "城市天气实况与未来几天预报",
-        "en": "City weather nowcast and short-term forecast"
-      },
-      "npm": "@zhongruan/dsh-weather",
-      "version": "0.1.0",
-      "install": "dsh plugin --profile web add @zhongruan/dsh-weather",
-      "added": "2026-09-11"
-    },
     {
       "name": "@zhongruan/dsh-pcb-8d",
       "owner": "中软",
@@ -79,6 +51,34 @@
       "version": "1.0.0",
       "install": "dsh plugin --profile web add @zhongruan/dsh-knowledge@1.0.0",
       "added": "2026-09-16"
+    },
+    {
+      "name": "@zhongruan/dsh-llm-meter",
+      "owner": "中软",
+      "url": "https://github.com/zhongruan/dsh-llm-meter",
+      "category": "tools",
+      "description": {
+        "zh": "LLM 用量计量（中软）：拦截 llm/stream，写本机 jsonl；WorkBuddy 接线预装",
+        "en": "Zhongruan LLM usage meter via llm/stream → local jsonl; preinstalled by WorkBuddy"
+      },
+      "npm": "@zhongruan/dsh-llm-meter",
+      "version": "0.1.1",
+      "install": "dsh plugin --profile web add @zhongruan/dsh-llm-meter@0.1.1",
+      "added": "2026-09-17"
+    },
+    {
+      "name": "@zhongruan/dsh-automations",
+      "owner": "中软",
+      "url": "https://github.com/zhongruan/dsh-automations",
+      "category": "tools",
+      "description": {
+        "zh": "自动化任务：模板一键建或自定义指令，定时执行只读汇总并可选推企微",
+        "en": "Scheduled automations: templates or custom prompts, read-only summaries, optional WeCom push"
+      },
+      "npm": "@zhongruan/dsh-automations",
+      "version": "0.1.1",
+      "install": "dsh plugin --profile web add @zhongruan/dsh-automations@0.1.1",
+      "added": "2026-09-17"
     }
   ]
 }

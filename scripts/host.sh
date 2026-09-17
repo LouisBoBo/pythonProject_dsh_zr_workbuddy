@@ -107,7 +107,7 @@ cmd_hint() {
 6. 仅确保聊天壳:     scripts/host.sh ensure-web
 7. 重启聊天壳:       scripts/host.sh restart-web
 8. 停 Web 宿主:      scripts/host.sh stop-web
-9. 生态插件: 宿主跑起来后用插件中心 / \`dsh plugin add\`——勿往引擎功能页硬塞整仓 zip；知识库 \`@zhongruan/dsh-knowledge\` 由 wire/桌面预装（见 docs/功能实现/知识库预装方案.md）
+9. 生态插件: 宿主跑起来后用插件中心 / \`dsh plugin add\`——勿往引擎功能页硬塞整仓 zip；知识库 \`@zhongruan/dsh-knowledge\`、用量计量 \`@zhongruan/dsh-llm-meter\` 由 wire/桌面预装
 10. 本仓禁止再导入 DSH Studio 源码树。桌面包内嵌 CLI 见 desktop/runtime/host（打包时 npm 安装，不进 git）
 EOF
 }
@@ -211,6 +211,8 @@ cmd_wire() {
   fi
   # 预装本机知识库插件（配置 + 缺包则 dsh plugin add；默认关回写）
   ensure_workbuddy_knowledge_plugin || true
+  # 预装 LLM 用量计量（只记 llm/stream；缺包则 dsh plugin add；失败不拖垮 wire）
+  ensure_workbuddy_llm_meter_plugin || true
   cmd_verify || true
 }
 
@@ -260,6 +262,35 @@ ensure_workbuddy_knowledge_plugin() {
       return 0
     fi
     python3 "$ROOT/scripts/lib/ensure_dsh_knowledge.py" "$PROFILE" >/dev/null || true
+  fi
+}
+
+# 预装 @zhongruan/dsh-llm-meter：cordis 启用 + 登记依赖；缺包时尝试 dsh plugin add
+# 失败只 warn，不拖垮宿主。版本可用 WORKBUDDY_METER_VERSION 覆盖（默认 0.1.0）
+ensure_workbuddy_llm_meter_plugin() {
+  if [ ! -f "$PROFILE/package.json" ]; then
+    echo "跳过用量计量预装：缺少 $PROFILE/package.json" >&2
+    return 0
+  fi
+  local out meter_spec
+  out="$(python3 "$ROOT/scripts/lib/ensure_dsh_llm_meter.py" "$PROFILE" 2>&1)" || true
+  printf '%s\n' "$out"
+  meter_spec="$(printf '%s\n' "$out" | sed -n 's/^NEED_INSTALL //p' | head -1)"
+  if [ -n "$meter_spec" ]; then
+    local dsh_bin
+    dsh_bin="$(resolve_dsh_bin 2>/dev/null || command -v dsh 2>/dev/null || true)"
+    if [ -z "$dsh_bin" ]; then
+      echo "用量计量包未安装且 PATH 无 dsh；请稍后: dsh plugin --profile web add ${meter_spec}" >&2
+      return 0
+    fi
+    echo "执行: dsh plugin --profile web add ${meter_spec}"
+    local profile_name
+    profile_name="$(basename "$PROFILE")"
+    if ! "$dsh_bin" plugin --profile "$profile_name" add "$meter_spec"; then
+      echo "dsh plugin add 用量计量失败：请确认 ${meter_spec} 已发布到公司 npm。配置已写入；未装上时用量页回退会话补采。" >&2
+      return 0
+    fi
+    python3 "$ROOT/scripts/lib/ensure_dsh_llm_meter.py" "$PROFILE" >/dev/null || true
   fi
 }
 
@@ -375,6 +406,7 @@ cmd_restart_web() {
   fi
   ensure_workbuddy_webserver_patch
   ensure_workbuddy_knowledge_plugin || true
+  ensure_workbuddy_llm_meter_plugin || true
   cmd_stop_web || true
   sleep 1
   cmd_start_web "$@"
