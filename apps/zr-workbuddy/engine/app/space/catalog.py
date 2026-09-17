@@ -138,9 +138,23 @@ def _refresh_artifact_count(conn: sqlite3.Connection, session_id: str) -> None:
         "SELECT COUNT(*) FROM artifacts WHERE session_id = ?",
         (sid,),
     ).fetchone()[0]
+    mx_row = conn.execute(
+        "SELECT COALESCE(MAX(created_at), 0) FROM artifacts WHERE session_id = ?",
+        (sid,),
+    ).fetchone()
+    mx = int(mx_row[0] if mx_row else 0)
+    # 会话排序跟「最新文档时间」对齐，避免 updated_at 陈旧导致旧会话排前
     conn.execute(
-        "UPDATE sessions SET artifact_count = ? WHERE id = ?",
-        (int(n), sid),
+        """
+        UPDATE sessions SET
+          artifact_count = ?,
+          updated_at = CASE
+            WHEN ? > updated_at THEN ?
+            ELSE updated_at
+          END
+        WHERE id = ?
+        """,
+        (int(n), mx, mx, sid),
     )
 
 
@@ -455,8 +469,16 @@ def list_library(
                 tuple(params),
             ).fetchone()
             total = int(count_row[0] if count_row else 0)
+            # 按「会话下最新文档时间」倒序（与资料库「更新时间」列一致）；无文档时回退 sessions.updated_at
             rows = conn.execute(
-                base_sql + " ORDER BY s.updated_at DESC LIMIT ? OFFSET ?",
+                base_sql
+                + """
+                ORDER BY COALESCE(
+                  (SELECT MAX(a3.created_at) FROM artifacts a3 WHERE a3.session_id = s.id),
+                  s.updated_at
+                ) DESC
+                LIMIT ? OFFSET ?
+                """,
                 (*params, ps, off),
             ).fetchall()
             sessions = [_row_to_session(r) for r in rows if r]

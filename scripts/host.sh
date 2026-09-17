@@ -107,7 +107,7 @@ cmd_hint() {
 6. 仅确保聊天壳:     scripts/host.sh ensure-web
 7. 重启聊天壳:       scripts/host.sh restart-web
 8. 停 Web 宿主:      scripts/host.sh stop-web
-9. 生态插件: 宿主跑起来后用插件中心 / \`dsh plugin add\`——勿往引擎功能页硬塞整仓 zip
+9. 生态插件: 宿主跑起来后用插件中心 / \`dsh plugin add\`——勿往引擎功能页硬塞整仓 zip；知识库 \`@zhongruan/dsh-knowledge\` 由 wire/桌面预装（见 docs/功能实现/知识库预装方案.md）
 10. 本仓禁止再导入 DSH Studio 源码树。桌面包内嵌 CLI 见 desktop/runtime/host（打包时 npm 安装，不进 git）
 EOF
 }
@@ -170,6 +170,12 @@ PY
     echo "宿主 web: :$PORT 未监听（可用 scripts/host.sh ensure-web / up）"
   fi
 
+  # 公司/私有插件市场不得静默掉回官方（见 .cursor/rules/workbuddy-company-market.mdc）
+  if ! WORKBUDDY_WEB_PORT="$PORT" DSH_HOME="$DSH_HOME_DIR" \
+    python3 "$ROOT/scripts/lib/verify_company_dsh_market.py"; then
+    ok=0
+  fi
+
   if [ "$ok" -eq 1 ]; then
     echo "=== verify OK ==="
     return 0
@@ -199,7 +205,12 @@ cmd_wire() {
   # 接线时同步写入公司市场 npmrc（不启动 web 也会准备好）
   # shellcheck source=lib/company_dsh_market.sh
   . "$ROOT/scripts/lib/company_dsh_market.sh"
-  apply_company_dsh_market
+  if ! apply_company_dsh_market; then
+    echo "wire 失败：公司插件市场未就绪（LOCKED）" >&2
+    exit 1
+  fi
+  # 预装本机知识库插件（配置 + 缺包则 dsh plugin add；默认关回写）
+  ensure_workbuddy_knowledge_plugin || true
   cmd_verify || true
 }
 
@@ -222,15 +233,50 @@ ensure_workbuddy_webserver_patch() {
   python3 "$ROOT/scripts/lib/ensure_web_port_patch.py" "$PROFILE" "$WORKBUDDY_WEB_PORT"
 }
 
+# 预装 @zhongruan/dsh-knowledge：allowBuilds + 关回写 + 登记依赖；缺包时尝试 dsh plugin add
+# 版本可用 WORKBUDDY_KB_VERSION 覆盖（默认 1.0.0，与中软仓已发版本对齐）
+ensure_workbuddy_knowledge_plugin() {
+  if [ ! -f "$PROFILE/package.json" ]; then
+    echo "跳过知识库预装：缺少 $PROFILE/package.json" >&2
+    return 0
+  fi
+  local out kb_spec
+  out="$(python3 "$ROOT/scripts/lib/ensure_dsh_knowledge.py" "$PROFILE" 2>&1)" || true
+  printf '%s\n' "$out"
+  kb_spec="$(printf '%s\n' "$out" | sed -n 's/^NEED_INSTALL //p' | head -1)"
+  if [ -n "$kb_spec" ]; then
+    local dsh_bin
+    dsh_bin="$(resolve_dsh_bin 2>/dev/null || command -v dsh 2>/dev/null || true)"
+    if [ -z "$dsh_bin" ]; then
+      echo "知识库包未安装且 PATH 无 dsh；请稍后: dsh plugin --profile web add ${kb_spec}" >&2
+      return 0
+    fi
+    echo "执行: dsh plugin --profile web add ${kb_spec}"
+    # profile 名相对 DSH_HOME/profiles
+    local profile_name
+    profile_name="$(basename "$PROFILE")"
+    if ! "$dsh_bin" plugin --profile "$profile_name" add "$kb_spec"; then
+      echo "dsh plugin add 知识库失败：请确认 ${kb_spec} 已发布到公司 npm（@zhongruan）。配置已写入；未装上前勿与 lemoncat7 双开。" >&2
+      return 0
+    fi
+    python3 "$ROOT/scripts/lib/ensure_dsh_knowledge.py" "$PROFILE" >/dev/null || true
+  fi
+}
+
 _launch_web_daemon() {
   sync_dev_engine_env
   # 强制会话库落到本脚本解析出的家目录（daemon 子进程也继承）
   export DSH_HOME="$DSH_HOME_DIR"
   echo "DSH_HOME=$DSH_HOME  PROFILE=$PROFILE  port=$PORT"
-  # 公司插件市场：合并目录（公司在前）+ @zhongruan npmrc（可被环境变量覆盖）
+  # 公司插件市场：合并目录（公司在前）+ @zhongruan npmrc
+  # LOCKED：无 DSHM 不得启动（见 workbuddy-company-market.mdc）
   # shellcheck source=lib/company_dsh_market.sh
   . "$ROOT/scripts/lib/company_dsh_market.sh"
-  apply_company_dsh_market
+  if ! apply_company_dsh_market; then
+    echo "拒绝启动宿主：公司/私有插件市场未就绪（中软插件会「消失」）" >&2
+    echo "破窗（仅调试）: WORKBUDDY_ALLOW_OFFICIAL_MARKET=1 scripts/host.sh restart-web" >&2
+    exit 1
+  fi
   mkdir -p "$ROOT/tmp"
   local log pidf
   log="$(web_port_log_file "$ROOT" "$PORT")"
@@ -328,6 +374,7 @@ cmd_restart_web() {
     "$ROOT/scripts/check-vendor.sh" --fix || true
   fi
   ensure_workbuddy_webserver_patch
+  ensure_workbuddy_knowledge_plugin || true
   cmd_stop_web || true
   sleep 1
   cmd_start_web "$@"

@@ -17,6 +17,8 @@
 > Cursor 规则（alwaysApply）：  
 > - 五条铁律：`.cursor/rules/workbuddy-ops-standard.mdc`  
 > - 企业级安全底线：`.cursor/rules/workbuddy-security-enterprise.mdc`  
+> - 公司插件市场硬锁定：`.cursor/rules/workbuddy-company-market.mdc`  
+> - **用量计量口径硬冻结**：`.cursor/rules/workbuddy-usage-metering-locked.mdc`（无用户允许禁止改 Token 公式 / 防双计）  
 > 加固方案全文：`docs/安全/企业级安全加固方案.md`。
 
 本仓库**两条插件通道分开**：自有/契约包进 `features/`；**DSH 生态第三方必须走 Studio 插件中心**（引擎 zip 装不了，见 `docs/产品与口径/最简产品形态.md`）。业务验收仍认引擎网页；生态插件验收认插件中心「运行中」。聊天壳用本机/桌面包里的 **`dsh` 发行版**（`npm @deepseek-ai/dsh`），**本仓不放 DSH 源码**，不焊业务进 Studio。
@@ -270,6 +272,12 @@ scripts/plugin.sh --app zr-workbuddy features   # 确认状态
 
 17. **在 Node 里直接 `spawn uvicorn`**  
     → 与 `engine.sh ensure` 抢端口。一律 `scripts/engine.sh <app> ensure`（mes-runtime 已如此）。
+
+18. **宿主没带 `DSHM_REGISTRY_URL` / 打包漏了公司 seed**  
+    → 插件市场仍能开，但只剩官方目录，**中软私有插件整页消失**。必须走 `host.sh`/`桌面壳` 合并市场；`verify_company_dsh_market.py` 不过不得交付。见 `.cursor/rules/workbuddy-company-market.mdc`。
+
+19. **擅自改用量 Token 公式 / 恢复 session+meter 双计**  
+    → 与 DeepSeek 控制台再次对不齐。口径已 LOCKED：`.cursor/rules/workbuddy-usage-metering-locked.mdc`；**无用户明确允许禁止改**。
 
 ---
 

@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merge_company_dsh_market import (  # noqa: E402
     catalog_usable,
     merge_catalogs,
+    overlay_seed_plugins,
     plugin_identity,
     should_refresh_official,
     OFFICIAL_TTL_S,
@@ -84,6 +85,26 @@ class MergeCatalogsTest(unittest.TestCase):
     def test_plugin_identity_prefers_npm(self):
         self.assertEqual(plugin_identity({"name": "A", "npm": "@scope/a"}), "@scope/a")
         self.assertEqual(plugin_identity({"name": "A"}), "a")
+
+    def test_overlay_seed_fills_missing_only(self):
+        company = {
+            "name": "remote",
+            "updated": "2026-09-11",
+            "plugins": [_plug("@zhongruan/a"), _plug("@zhongruan/b")],
+            "categories": {"tools": {"zh": "工具", "en": "Tools"}},
+        }
+        seed = {
+            "plugins": [
+                _plug("@zhongruan/a", version="9.9.9"),  # 已有，不覆盖
+                _plug("@zhongruan/dsh-knowledge", version="0.1.0"),
+            ],
+            "categories": {"tools": {"zh": "工具与能力", "en": "Tools"}},
+        }
+        out = overlay_seed_plugins(company, seed)
+        names = [p["name"] for p in out["plugins"]]
+        self.assertEqual(names, ["@zhongruan/a", "@zhongruan/b", "@zhongruan/dsh-knowledge"])
+        self.assertNotEqual(out["plugins"][0].get("version"), "9.9.9")
+        self.assertEqual(out["count"], 3)
 
 
 class TtlTest(unittest.TestCase):

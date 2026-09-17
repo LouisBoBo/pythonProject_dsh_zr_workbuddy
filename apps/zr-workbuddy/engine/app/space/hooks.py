@@ -309,7 +309,10 @@ def _ingest_synced_code_files(
         return 0
     try:
         workspace = Path(ws_raw).expanduser().resolve()
-    except OSError:
+        home = Path.home().resolve()
+        workspace.relative_to(home)
+    except (OSError, ValueError):
+        _LOG.warning("space code ingest: workspace outside home, skip: %s", ws_raw[:200])
         return 0
     if not workspace.is_dir():
         return 0
@@ -440,8 +443,36 @@ def purge_delivery_summaries(*, user_id: str = "") -> int:
     return n
 
 
+def purge_unbound_dev_code_sessions(*, user_id: str = "") -> int:
+    """清掉无真实 DSH 会话绑定的写码壳（dev:ccj- / dev:ldj- 等）及其源码副本。
+
+    必须带 user_id：禁止空用户 + admin 扫删全库（多租户误伤）。
+    """
+    n = 0
+    try:
+        uid = str(user_id or "").strip()
+        if not uid:
+            return 0
+        rows = catalog.list_sessions(user_id=uid, limit=200, offset=0)
+        for sess in rows:
+            if not isinstance(sess, dict):
+                continue
+            sid = str(sess.get("id") or "")
+            dsh = looks_like_dsh_session_id(str(sess.get("dsh_path") or "")) or looks_like_dsh_session_id(sid)
+            if dsh:
+                continue
+            # 仅清写码回填壳，不动 pcb8d: / review: / 无绑定但非 dev: 的档案
+            if not (sid.startswith("dev:") or sid.startswith("unassigned")):
+                continue
+            if catalog.delete_session(sid, user_id=uid, admin=False, cascade_artifacts=True):
+                n += 1
+    except Exception:
+        _LOG.debug("purge unbound dev code sessions failed", exc_info=True)
+    return n
+
+
 def ingest_code_dev_job(job: dict[str, Any]) -> None:
-    """写码成功时 fail-soft 入库已改动源码；不写「写码交付」摘要文档。"""
+    """写码成功时 fail-soft 入库已改动源码；须已有真实 DSH session-uuid。"""
     try:
         if not isinstance(job, dict):
             return
@@ -456,11 +487,16 @@ def ingest_code_dev_job(job: dict[str, Any]) -> None:
         max_chars = int(cfg.get("max_session_body_chars") or 65536)
         uid = _resolve_user_id(str(job.get("user_id") or ""))
         raw_sid = str(job.get("ui_session_id") or job.get("thread_id") or "").strip()
+        # 无真实会话 ID 不入库（禁止再造 dev:ccj- / dev:ldj- 灰壳）
+        if not looks_like_dsh_session_id(raw_sid):
+            return
         sid, dsh_path = _catalog_session_for_ingest(
             ui_session_id=raw_sid,
             fallback_prefix="dev",
             fallback_id=jid,
         )
+        if not dsh_path:
+            return
         msg0 = ""
         msgs = job.get("messages")
         if isinstance(msgs, list) and msgs:
@@ -519,12 +555,13 @@ def backfill_code_dev_files(*, user_id: str = "", limit: int = 40) -> dict[str, 
         if not bool(cfg.get("ingest_code_files", True)):
             return out
         uid = _resolve_user_id(user_id)
-        # 历史误入库的「写码交付」摘要一律清掉
+        # 历史误入库的「写码交付」摘要、无会话绑定的写码壳一律清掉
         try:
             out["purged_delivery"] = purge_delivery_summaries(user_id=uid)
+            out["purged_unbound_dev"] = purge_unbound_dev_code_sessions(user_id=uid)
             catalog.purge_empty_sessions(user_id=uid)
         except Exception:
-            _LOG.debug("space purge delivery_summary on backfill failed", exc_info=True)
+            _LOG.debug("space purge delivery/unbound on backfill failed", exc_info=True)
         rows = job_store.list_jobs(default_data_dir())[: max(1, min(80, int(limit or 40)))]
         for job in rows:
             if not isinstance(job, dict):
@@ -604,6 +641,9 @@ def _job_dict_from_ccj(raw: dict[str, Any], *, user_id: str) -> dict[str, Any] |
     if not isinstance(changed, list):
         changed = []
     req = str(raw.get("requirement") or "").strip()
+    dsh = looks_like_dsh_session_id(str(raw.get("dsh_session_id") or ""))
+    if not dsh:
+        return None
     return {
         "id": jid,
         "status": "succeeded",
@@ -611,17 +651,17 @@ def _job_dict_from_ccj(raw: dict[str, Any], *, user_id: str) -> dict[str, Any] |
         "workspace": ws,
         "changed_files": [str(x) for x in changed if str(x or "").strip()],
         "synced_files": [str(x) for x in synced if str(x or "").strip()],
-        "ui_session_id": str(raw.get("dsh_session_id") or "").strip(),
+        "ui_session_id": dsh,
         "ui_call_id": str(raw.get("dsh_call_id") or "").strip(),
-        "thread_id": str(raw.get("dsh_session_id") or "").strip(),
+        "thread_id": dsh,
         "messages": [{"role": "user", "content": req[:4000]}] if req else [],
         "delivery_text": str(raw.get("assistant_text") or "")[:12000],
     }
 
 
 def backfill_cursor_coding_files(*, user_id: str = "", limit: int = 30) -> dict[str, Any]:
-    """扫 ~/.zhongruan/cursor-coding/jobs 成功任务，把改动源码写入资料库（fail-soft，幂等）。"""
-    out: dict[str, Any] = {"ok": True, "scanned": 0, "ingested_jobs": 0}
+    """扫 ~/.zhongruan/cursor-coding/jobs 成功任务；仅入库带真实 DSH session-uuid 的改动源码。"""
+    out: dict[str, Any] = {"ok": True, "scanned": 0, "ingested_jobs": 0, "skipped_no_session": 0}
     try:
         cfg = get_space_config()
         if not bool(cfg.get("ingest_code_files", True)):
@@ -642,15 +682,19 @@ def backfill_cursor_coding_files(*, user_id: str = "", limit: int = 30) -> dict[
                 continue
             job = _job_dict_from_ccj(raw if isinstance(raw, dict) else {}, user_id=uid)
             if not job:
+                # 无真实会话 ID 或非成功态
+                if isinstance(raw, dict) and str(raw.get("id") or "").startswith("ccj-"):
+                    if str(raw.get("status") or "").strip().lower() in {"succeeded", "done"}:
+                        if not looks_like_dsh_session_id(str(raw.get("dsh_session_id") or "")):
+                            out["skipped_no_session"] += 1
                 continue
             # 会话已被其他用户占用则不抢
             sid = str(job.get("ui_session_id") or "").strip()
-            if sid:
-                sess = catalog.get_session(sid)
-                if sess:
-                    owner = str(sess.get("user_id") or "").strip()
-                    if owner and owner != uid:
-                        continue
+            sess = catalog.get_session(sid)
+            if sess:
+                owner = str(sess.get("user_id") or "").strip()
+                if owner and owner != uid:
+                    continue
             out["scanned"] += 1
             jid = str(job.get("id") or "")
             if _backfill_should_skip_job(job, user_id=uid):

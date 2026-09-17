@@ -261,11 +261,40 @@ EOF
   log "dshmarket 已就绪"
 }
 
+# 公司/私有插件通道：打包不得漏 seed / 合并脚本 / 市场 env（铁律 workbuddy-company-market）
+assert_company_market_packaging() {
+  local seed="$ROOT/apps/zr-workbuddy/config/company-dsh-plugins.seed.json"
+  local envf="$ROOT/apps/zr-workbuddy/config/company-dsh-market.env"
+  local merge="$ROOT/scripts/lib/merge_company_dsh_market.py"
+  local verify="$ROOT/scripts/lib/verify_company_dsh_market.py"
+  [[ -f "$seed" ]] || { err "打包失败：缺少公司插件 seed $seed（私有插件会丢）"; return 1; }
+  [[ -f "$envf" ]] || { err "打包失败：缺少 $envf"; return 1; }
+  [[ -f "$merge" ]] || { err "打包失败：缺少市场合并脚本 $merge"; return 1; }
+  [[ -f "$verify" ]] || { err "打包失败：缺少市场验收脚本 $verify"; return 1; }
+  python3 - <<'PY' "$seed" || return 1
+import json, sys
+p = sys.argv[1]
+data = json.load(open(p, encoding="utf-8"))
+names = [
+    str(x.get("npm") or x.get("name") or "")
+    for x in (data.get("plugins") or [])
+    if isinstance(x, dict)
+]
+zr = [n for n in names if n.startswith("@zhongruan/")]
+if len(zr) < 1:
+    print(f"打包失败：{p} 无 @zhongruan 插件", file=sys.stderr)
+    raise SystemExit(1)
+print(f"公司插件 seed OK：{len(zr)} 个 @zhongruan/*")
+PY
+  log "公司插件市场打包门禁通过（seed + merge + verify）"
+}
+
 if [[ "$MODE" == "unified" ]]; then
   stage_dshmarket || exit 1
 else
   mkdir -p "$MARKET_STAGED/node_modules"
 fi
+assert_company_market_packaging || exit 1
 
 # 插件市场 / dsh plugin 需要 pnpm；一体包内嵌 Node 不可写，不能 npm i -g。
 PNPM_VER="${PNPM_VER:-11.7.0}"

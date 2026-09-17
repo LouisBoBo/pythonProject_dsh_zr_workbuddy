@@ -101,6 +101,13 @@ usage:
   report_url: ""                 # P0 本机汇总：http://127.0.0.1:<引擎端口>/api/usage-hub/v1
   report_token: ""               # 机器票据（必填才能 ingest）；不是 DeepSeek Key；日志禁止回显
                                  # 为空时拒绝上报入库，防止伪造流水
+  # 本机观测口径（2026-09）：有 ~/.dsh/llm-meter/events.jsonl 时采宿主 llm/stream；
+  # 无则回退会话/记忆/标题。控制台对照仅可选参考，不对账。
+  # 官网对照（可选参考）：platform.deepseek.com 登录态 userToken 或用量页手工录入
+  #   JSON.parse(localStorage.getItem('userToken')).value
+  # 写入本机 config.yaml（gitignore）；禁止提交仓库；日志禁止回显全文
+  deepseek_platform_enabled: true
+  deepseek_platform_token: ""
 
 # 本机「我的空间」（会话摘要进库、报告正文可自管；失败不影响聊天/审码）
 space:

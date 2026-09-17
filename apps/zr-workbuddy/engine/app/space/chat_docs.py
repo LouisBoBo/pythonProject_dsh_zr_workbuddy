@@ -1,7 +1,8 @@
 """从本机 DSH session.jsonl 抽出聊天产出的文档进资料库（只读投影，fail-soft）。
 
 只收：创作类 AIGC（《标题》/童话故事等）、测试用例/规格等实质文档。
-不收：写码/提交结论、菜单增删完成确认、工具卡状态、闲聊说明。
+不收：写码/提交结论、菜单增删完成确认、工具卡状态、闲聊说明、
+      **知识库/文档检索问答**（RAG 召回、源自《…》标准答案、工业 FAQ 提纲）。
 绑定真实 session-uuid。聊天扫描不收工程源码；写码同步源码另走 hooks.ingest_code_dev_job。
 """
 from __future__ import annotations
@@ -33,6 +34,39 @@ _CREATIVE_HINT = re.compile(
 )
 # 仅书名号《》——「」在中文里常用于菜单/路径引用，不能当创作标记
 _CREATIVE_BOOK = re.compile(r"《[^》]{1,40}》")
+# 书名号若是「引用资料」而非作品标题，不算创作
+_BOOK_CITATION = re.compile(
+    r"(源自|来自|参考|根据|见|摘自|引自|出处)[《「『]|"
+    r"标准答案[（(]?源自|"
+    r"[《「『][^》」』]{1,40}[》」』].{0,12}(FMEA|文档|手册|规范|规则|报价|"
+    r"第[一二三四五六七八九十百零\d]+[节章条])",
+    re.I,
+)
+
+# 知识库 / 文档检索生成的问答——一律不进资料库
+_KB_RETRIEVAL = re.compile(
+    r"("
+    r"源自《|来自《|参考《|根据《|摘自《|引自《|"
+    r"知识库|知识文档|知识问答|挂载召回|召回片段|文档检索|检索到以下|"
+    r"根据(?:你的)?知识|相关文档如下|根据挂载|"
+    r"FMEA\s*标准答案|标准答案[（(]?源自|"
+    r"P0\s*最着急|直接卡出货|"
+    r"(?:一|二|三)、.{0,40}权重\s*\d+\s*%|"
+    r"计价规则|失效模式|潜在后果|检验关卡|成本内核|"
+    r"专属.?计费|二钻\s*/\s*二锣|二锣计价|压合板计价|"
+    r"(?:一|二|三)、.{0,20}公式\b|"
+    r"报价规则|铜价折算|半固化片|PP\s*片|"
+    r"\d+\s*元\s*/\s*(?:㎡|张|pcs|PCS)|元/㎡|元/张"
+    r")",
+    re.I,
+)
+# 工业问答提纲（无创作意图）：「一、二、」+ 领域词 → 视为检索/FAQ
+_KB_OUTLINE = re.compile(r"(?m)^[一二三四五六七八九十]+、")
+_KB_DOMAIN = re.compile(
+    r"(合格率|计价规则|加工费|计费项|失效模式|潜在后果|V\s*割|检验关卡|压合板|沉金|"
+    r"FMEA|出货|客诉|锣带|二钻|二锣|成本内核|铜价|报价|表面处理|压合)",
+    re.I,
+)
 
 # 车道结论 / 工具卡 / 菜单操作完成确认 / 闲聊——一律不进
 _OPS_NOISE = re.compile(
@@ -85,8 +119,34 @@ def is_ops_noise(text: str) -> bool:
         return True
     if _OPS_NOISE.search(body):
         # 创作正文里偶尔提到「菜单」不算；有书名号创作或明确创作词则放行
-        if _CREATIVE_BOOK.search(body) or _CREATIVE_HINT.search(body):
+        if _is_creative_body(body):
             return False
+        return True
+    return False
+
+
+def is_knowledge_retrieval(text: str) -> bool:
+    """知识库/文档检索生成的问答（RAG、标准答案、工业 FAQ 提纲）——不应进资料库。"""
+    body = str(text or "").strip()
+    if not body:
+        return False
+    if _KB_RETRIEVAL.search(body):
+        return True
+    if _BOOK_CITATION.search(body):
+        return True
+    if _CREATIVE_HINT.search(body):
+        return False
+    outlines = _KB_OUTLINE.findall(body)
+    # 多级提纲 + 工业域词；或单条「一、…」标题本身已带域词（资料库列表常见）
+    if _KB_DOMAIN.search(body) and (len(outlines) >= 2 or (len(outlines) >= 1 and len(body) < 800)):
+        return True
+    return False
+
+
+def _is_creative_body(body: str) -> bool:
+    if _CREATIVE_HINT.search(body):
+        return True
+    if _CREATIVE_BOOK.search(body) and not _BOOK_CITATION.search(body):
         return True
     return False
 
@@ -98,8 +158,10 @@ def looks_like_chat_document(text: str) -> bool:
         return False
     if is_ops_noise(body):
         return False
-    # 创作：书名号《》或创作关键词
-    if _CREATIVE_BOOK.search(body) or _CREATIVE_HINT.search(body):
+    if is_knowledge_retrieval(body):
+        return False
+    # 创作：书名号《》或创作关键词（引用资料的《》不算）
+    if _is_creative_body(body):
         return len(body) >= _MIN_CREATIVE_CHARS
     if len(body) < _MIN_DOC_CHARS:
         return False
@@ -144,7 +206,7 @@ def _already_covered_elsewhere(body: str) -> bool:
 
 
 def purge_ops_noise_artifacts(*, user_id: str = "") -> int:
-    """清掉误入库的操作状态/结论类 chat_document。"""
+    """清掉误入库的操作状态/结论类、以及知识库检索问答类 chat_document。"""
     n = 0
     try:
         arts = catalog.list_artifacts(user_id=user_id or "", limit=200, offset=0)
@@ -159,11 +221,15 @@ def purge_ops_noise_artifacts(*, user_id: str = "") -> int:
             except Exception:
                 body = title
             sample = (title + "\n" + (body or "")[:3000]).strip()
-            if is_ops_noise(sample) or not looks_like_chat_document(body or title):
+            if (
+                is_ops_noise(sample)
+                or is_knowledge_retrieval(sample)
+                or not looks_like_chat_document(body or title)
+            ):
                 if catalog.delete_artifact(str(art.get("id") or ""), user_id=user_id or "", admin=False):
                     n += 1
     except Exception:
-        _LOG.debug("purge ops noise artifacts failed", exc_info=True)
+        _LOG.debug("purge ops/knowledge noise artifacts failed", exc_info=True)
     return n
 
 

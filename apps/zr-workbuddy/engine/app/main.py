@@ -128,9 +128,9 @@ def _warn_non_loopback_bind():
     try:
         from .usage import backfill_orphan_user_id
 
-        n = backfill_orphan_user_id(default_user_id="u_hebo")
+        n = backfill_orphan_user_id()
         if n:
-            logging.getLogger("uvicorn.error").info("用量：已将 %d 条历史流水归到账号 hebo", n)
+            logging.getLogger("uvicorn.error").info("用量：已将 %d 条历史引擎流水归到本机账号", n)
     except Exception as exc:  # noqa: BLE001
         logging.getLogger("uvicorn.error").warning("用量历史流水归户失败：%s", exc)
     try:
@@ -1480,7 +1480,8 @@ def _require_admin(request: Request):
     description="按北京时间自然日汇总**当前登录账号**的 LLM 与 Cursor token（跟账号，不跟设备）。"
     "须先登录。两条账不能加总成一笔钱。days 默认 7，最大 90。"
     "grain=day：卡片与 hourly 锚定 on 当日；monthly 为当月。"
-    "grain=month：卡片为整月合计；daily/monthly 为当月逐日。",
+    "grain=month：卡片为整月合计；daily/monthly 为当月逐日。"
+    "本机观测：引擎直连 +（有 llm-meter 时）宿主 llm/stream 落盘；无 meter 时回退会话/记忆/标题补采。",
 )
 def api_usage_summary(
     request: Request,
@@ -1489,6 +1490,7 @@ def api_usage_summary(
     on: str = Query("", description="锚定自然日 YYYY-MM-DD，默认今天；卡片为该日，monthly 为当月"),
     grain: str = Query("day", description="粒度：day=锚定日分时段；month=整月逐日"),
 ):
+    from .auth import reset_current_user, set_current_user
     from .usage import summarize
     from .usage.report import pending_count
 
@@ -1497,13 +1499,56 @@ def api_usage_summary(
         return err
     uid = str((user or {}).get("id") or "")
     g = grain if grain in {"day", "month"} else "day"
-    out = summarize(days=days, source=source, on=on, user_id=uid, grain=g)
+    tok = set_current_user(user)
+    try:
+        out = summarize(days=days, source=source, on=on, user_id=uid, grain=g)
+    finally:
+        reset_current_user(tok)
     try:
         out["pending_report"] = pending_count()
     except Exception:
         out["pending_report"] = 0
+    # 个人用量页已去掉官网对照 UI；不在此拉取 deepseek_console（企业页另挂）
     return out
 
+
+@app.post(
+    "/api/usage/console-day",
+    tags=["用量统计"],
+    summary="录入 DeepSeek 控制台当日用量",
+    description="把官网「请求次数 / Tokens / 消费金额」录入本机，用量页「DeepSeek 官网」卡片与控制台同口径。"
+    "须**管理员**登录。数据存 engine/data/usage/console_days.json（全机共享对照），不含 API Key。",
+)
+async def api_usage_console_day(request: Request):
+    from .usage.deepseek_console import save_manual_day
+
+    user, err = _require_admin(request)
+    if err:
+        return err
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    day = str(body.get("day") or body.get("on") or "").strip()
+    try:
+        calls = int(body.get("calls") or 0)
+        tokens = int(body.get("tokens") or 0)
+        cost = float(body.get("cost_cny") or body.get("cost") or 0)
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "detail": "calls/tokens/cost 须为数字"}, status_code=400)
+    if calls < 0 or tokens < 0 or cost < 0:
+        return JSONResponse({"ok": False, "detail": "数值不能为负"}, status_code=400)
+    if not day:
+        return JSONResponse({"ok": False, "detail": "请提供 day=YYYY-MM-DD"}, status_code=400)
+    return save_manual_day(
+        day=day,
+        calls=calls,
+        tokens=tokens,
+        cost_cny=cost,
+        note=str(body.get("note") or ""),
+    )
 
 @app.get(
     "/api/usage/events",
@@ -1520,6 +1565,7 @@ def api_usage_events(
     on: str = Query("", description="可选，只看该自然日 YYYY-MM-DD"),
     limit: int | None = Query(None, ge=1, le=200, description="兼容旧参数，传入时覆盖每页条数"),
 ):
+    from .auth import reset_current_user, set_current_user
     from .usage import list_events
 
     user, err = _require_login(request)
@@ -1527,7 +1573,11 @@ def api_usage_events(
         return err
     uid = str((user or {}).get("id") or "")
     size = int(limit or page_size)
-    return list_events(page=page, page_size=size, source=source, limit=size, on=on, user_id=uid)
+    tok = set_current_user(user)
+    try:
+        return list_events(page=page, page_size=size, source=source, limit=size, on=on, user_id=uid)
+    finally:
+        reset_current_user(tok)
 
 
 @app.get(
@@ -1657,6 +1707,19 @@ def api_usage_enterprise_summary(
         out["pending_report"] = pending_count()
     except Exception:
         out["pending_report"] = 0
+    try:
+        from .usage.deepseek_console import fetch_console_day
+
+        out["deepseek_console"] = fetch_console_day(
+            on=str(out.get("on") or on or ""),
+            local=out.get("today") if isinstance(out.get("today"), dict) else None,
+        )
+    except Exception:
+        out["deepseek_console"] = {
+            "ok": False,
+            "configured": False,
+            "detail": "官网对照不可用",
+        }
     return out
 
 
@@ -1853,7 +1916,8 @@ def api_space_session_delete(request: Request, session_id: str):
     "/api/space/library",
     tags=["资料库"],
     summary="按会话列出资料库",
-    description="须登录。只返回至少有一份文档的会话；每页默认 10 个会话。"
+    description="须登录。只返回至少有一份文档的会话；每页默认 10 个会话；"
+    "按会话下最新文档时间倒序（新的在前）。"
     "打开前会 fail-soft 同步 PCB 8D / 聊天文档，并清理无文档的空会话标题。",
 )
 def api_space_library(

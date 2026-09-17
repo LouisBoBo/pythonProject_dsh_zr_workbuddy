@@ -33,10 +33,12 @@ def pcb_8d_drafts_dir() -> Path | None:
             base = Path(raw).expanduser().resolve()
         else:
             base = (home / ".zhongruan" / "pcb-8d-drafts").resolve()
-        if not str(base).startswith(str(home)):
+        try:
+            base.relative_to(home)
+        except ValueError:
             _LOG.warning("space pcb_8d drafts dir outside home, skip: %s", base)
             return None
-        if ".." in Path(raw).parts if raw else False:
+        if raw and ".." in Path(raw).expanduser().parts:
             return None
         return base
     except OSError:

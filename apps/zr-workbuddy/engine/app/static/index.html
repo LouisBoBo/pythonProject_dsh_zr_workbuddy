@@ -1036,7 +1036,7 @@
         <div class="plugins-wrap">
           <div class="plugins-head">
             <h2>用量</h2>
-            <p>LLM 含引擎聊天/审码与 DSH 宿主会话；Cursor 含本机写码与 DSH「Cursor 写码」。左侧请求次数、右侧 token 按「命中缓存 / 未命中缓存 / 输出」堆叠。两条账不能加总成一笔钱。</p>
+            <p>本机观测：引擎直连调用 + DSH 宿主（装 llm-meter 后采 llm/stream 真明细；未装则回退会话/记忆/标题）。≠ DeepSeek 控制台账单。Cursor 另列，不能与 LLM 加总成一笔钱。</p>
           </div>
           <div class="usage-filter">
             <label for="usageOn">日期</label>
@@ -2084,8 +2084,6 @@ function usagePaint() {
   const curModel = (cursor.models && cursor.models[0] && cursor.models[0].model) || "暂无调用";
   const llmPal = { fill: "#93c5fd", stroke: "#3b82f6", hit: "#93c5fd", miss: "#3b82f6", out: "#1d4ed8" };
   const curPal = { fill: "#99f6e4", stroke: "#14b8a6", hit: "#99f6e4", miss: "#14b8a6", out: "#0f766e" };
-  const llmNote = llm.missing_calls ? "未回传 " + llm.missing_calls + " 次" : "";
-  const curNote = cursor.missing_calls ? "未回传 " + cursor.missing_calls + " 次（不代表没消耗）" : "";
   const pending = Number(s.pending_report || 0);
   const uidLab = s.user_id ? ("账号 " + s.user_id) : "当前账号";
   const pendLab = pending > 0 ? (" · 待上报 " + pending + " 条") : "";
@@ -2096,9 +2094,9 @@ function usagePaint() {
     "</div></div>" +
     '<p class="usage-note">' + esc(uidLab) + esc(pendLab) + " · " + esc(monthLab || "当月") +
     " · 北京时间 " + esc(s.tz || "Asia/Shanghai") +
-    "。图表可左右滑动。鼠标悬停柱状图可看分项。SDK 未回传时 token 为 0，仍计请求次数。</p>" +
-    usageMeterHtml("LLM", llmModel + (monthLab ? " · " + monthLab : ""), daily, "llm_", llmPal, llmNote) +
-    usageMeterHtml("Cursor 写码", curModel + (monthLab ? " · " + monthLab : ""), daily, "cursor_", curPal, curNote);
+    "。图表可左右滑动。鼠标悬停柱状图可看分项。</p>" +
+    usageMeterHtml("LLM", llmModel + (monthLab ? " · " + monthLab : ""), daily, "llm_", llmPal, "") +
+    usageMeterHtml("Cursor 写码", curModel + (monthLab ? " · " + monthLab : ""), daily, "cursor_", curPal, "");
   usageBindCurves(el);
   usageScrollToFocus(el, daily, s.on || usageOnValue());
 }

@@ -479,7 +479,14 @@ PY
     if [ -f "$PROFILE/cordis.patch.yml" ]; then
       python3 "$ROOT/scripts/lib/ensure_web_port_patch.py" "$PROFILE" 3081
     fi
+    # 预装知识库（配置登记；缺包时随 pnpm install 拉下）
+    if [ -f "$PROFILE/package.json" ]; then
+      python3 "$ROOT/scripts/lib/ensure_dsh_knowledge.py" "$PROFILE" || true
+    fi
     cd "$PROFILE" && pnpm install
+    if [ -f "$PROFILE/package.json" ]; then
+      python3 "$ROOT/scripts/lib/ensure_dsh_knowledge.py" "$PROFILE" || true
+    fi
     # pnpm 可能把市场插件的 dsh-tools 又装成独立副本，必须装后再对齐
     if [ -x "$ROOT/scripts/check-vendor.sh" ]; then
       "$ROOT/scripts/check-vendor.sh" --fix || true

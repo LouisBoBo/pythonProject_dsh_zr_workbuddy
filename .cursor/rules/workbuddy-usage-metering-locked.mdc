@@ -1,0 +1,54 @@
+---
+description: 【LOCKED】用量计量口径硬冻结——无用户明确允许禁止改公式/双计策略（alwaysApply）
+alwaysApply: true
+---
+
+# 用量计量口径硬冻结（不可推翻 · LOCKED）
+
+> **冻结日**：2026-09-17。个人用量页与 DeepSeek 控制台已对齐验收。  
+> **破窗条件**：**仅当用户在对话里明确允许**改计量规则；改代码前须先改本规则。  
+> **权威说明**：`docs/功能实现/DSH-LLM用量计量插件-开发指导.md` §0～§1；实现：`engine/app/usage/`。
+
+**不是**建议。擅自改 = 事故。官网刷新延迟 **不是**改公式的理由。
+
+### A. 架构分工（合并展示 · 禁止叠记）
+
+1. 真相源只有一本账：`engine/data/usage/events.jsonl`。  
+2. 宿主 `llm/stream` → `@zhongruan/dsh-llm-meter` → 引擎 **只读 ingest**。  
+3. 引擎直连 DeepSeek（审码 / PCB 等）→ 自己 `append_event`，不经过 meter。  
+4. meter 已启用：对 **首条 meter 同一秒及之后** 禁止 session/memory/title 叠记；启用前历史可补采、禁止整段抹掉。  
+5. meter / 旁路流水须有明确 `user_id`（启动归户或请求 ContextVar）；**禁止**空账号对全员可见；**禁止**用 `active.json` 给 meter 归户。  
+6. 自然日 / 时段 = **Asia/Shanghai**（`_event_ymd` / `_parse_ts`）；禁止 UTC `ts[:10]`。  
+7. **禁止**把计量焊进 `mes-bridge`、另做业务 Cordis 用量包、或删引擎账本只留插件。  
+8. 个人用量读路径**禁止**把孤儿流水永久写给先打开的账号。
+
+### B. Token 公式（与控制台 Tokens 对齐）
+
+| 字段 | 规则 |
+|---|---|
+| `prompt_tokens` 与 `cacheReadTokens` | **互斥分列**；未命中≈input，命中≈cacheRead |
+| 展示「输出」 | **仅** `completion` / `outputTokens` |
+| `reasoningTokens` | **只作明细**；**禁止**加进 `total`；**禁止**并进「输出」 |
+| `total` / 卡片 Token | 有供应商 `totalTokens` 则原样用；否则 **`input + output + cacheRead + cacheWrite`** |
+| 卡片与柱状图合计 | **必须** = 命中缓存 + 未命中 + 输出 |
+
+插件若把 reasoning 加进 `total`，`ingest_llm_meter._tokens_from_row` / `_event_parts` 必须纠正为上式。
+
+### C. 无用户允许一律拒绝
+
+- 把 `reasoning` 加回 `total` 或展示「输出」  
+- 改 `_event_parts` / `_tokens_from_row` / `pickUsage` / 指导书 §1「先试另一种」  
+- 二次削数、加权缓存、并行另一套合计  
+- 恢复 session+meter 双采，或对同一 `llm/stream` 引擎与 meter 各记一次  
+- 再跑一遍「清除全部旧旁路」类 supersede（v1 已误删 16 号）  
+- 删本规则、改 `alwaysApply: false`
+
+**允许**（无需破窗）：排障只读、修崩溃/安全、补测试且**不改口径**、UI 说明「官网可能延迟」。
+
+要改口径：用户明确允许 → 先改本规则冻结段 → 再改代码与指导书。
+
+## 交付自检
+
+- 卡片 Token = 命中 + 未命中 + 输出；`reasoning` 不进合计  
+- meter 启用后无 session/memory/title 双计；启用前历史仍在  
+- 先对官网 **请求次数**；次数一致再对 Tokens（注意控制台延迟）

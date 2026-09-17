@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -88,8 +89,8 @@ class UsageParseTests(unittest.TestCase):
         )
         self.assertEqual(p["cache_hit"], 13824)
         self.assertEqual(p["cache_miss"], 303)
-        self.assertEqual(p["output"], 520)
-        self.assertEqual(p["tokens"], 14647)
+        self.assertEqual(p["output"], 383)  # 不含 reasoning（官网口径）
+        self.assertEqual(p["tokens"], 14510)  # 303+13824+383
 
     def test_missing_tokens(self):
         from app.usage.parse import missing_tokens
@@ -550,13 +551,68 @@ class IngestDshLlmTests(unittest.TestCase):
                     self.assertEqual(s["llm"]["calls"], 1)
                     self.assertEqual(s["llm"]["cache_hit"], 13824)
                     self.assertEqual(s["llm"]["cache_miss"], 303)
-                    self.assertEqual(s["llm"]["output"], 520)
-                    self.assertEqual(s["llm"]["tokens"], 14647)
+                    self.assertEqual(s["llm"]["output"], 383)  # 不含 reasoning
+                    self.assertEqual(s["llm"]["tokens"], 14510)  # 303+13824+383
                     n2 = ingest_dsh_llm.ingest_dsh_sessions(force=True)
                     self.assertEqual(n2, 0)
                     ev = store.list_events(source="llm", page=1, page_size=10)
                     self.assertEqual(ev["events"][0]["quality"], "session")
                     self.assertEqual(ev["events"][0]["label"], "DSH 聊天")
+        finally:
+            store.set_data_dir(prev)
+
+    def test_session_ingest_skips_after_before_cutoff(self):
+        from pathlib import Path
+        from unittest import mock
+
+        from app.usage import ingest_dsh_llm, store
+
+        prev = store._data_dir_override
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                store.set_data_dir(td)
+                sid = "session-aaaabbbb-cccc-dddd-eeee-ffffffffffff"
+                sdir = os.path.join(td, "sessions", "--ws--", sid)
+                os.makedirs(sdir)
+                lines = [
+                    {"type": "session", "id": sid},
+                    {
+                        "type": "request/header",
+                        "time": 1789355219174,
+                        "data": {
+                            "header": {
+                                "config": {
+                                    "provider": "deepseek-official",
+                                    "model": "deepseek-v4-flash",
+                                }
+                            }
+                        },
+                    },
+                    {
+                        "type": "assistant/chunk",
+                        "time": 1789355222101,
+                        "data": {
+                            "turn": 1,
+                            "step": 1,
+                            "chunk": {
+                                "type": "usage",
+                                "usage": {"inputTokens": 10, "outputTokens": 2},
+                            },
+                        },
+                    },
+                ]
+                with open(os.path.join(sdir, "session.jsonl"), "w", encoding="utf-8") as f:
+                    for row in lines:
+                        f.write(json.dumps(row, separators=(",", ":")) + "\n")
+                with mock.patch.object(ingest_dsh_llm, "_sessions_root", return_value=Path(td) / "sessions"):
+                    n = ingest_dsh_llm.ingest_dsh_sessions(
+                        force=True, before="2026-09-14T00:00:00+08:00"
+                    )
+                    self.assertEqual(n, 0)
+                    n2 = ingest_dsh_llm.ingest_dsh_sessions(
+                        force=True, before="2026-09-15T00:00:00+08:00"
+                    )
+                    self.assertEqual(n2, 1)
         finally:
             store.set_data_dir(prev)
 
@@ -681,6 +737,487 @@ class IngestPathGuardTests(unittest.TestCase):
                     self.assertEqual(n, 1)
                     s = store.summarize(days=7)
                     self.assertEqual(s["cursor"]["tokens"], 0)
+        finally:
+            store.set_data_dir(prev)
+
+
+class UsageSideChannelTests(unittest.TestCase):
+    def test_ingest_memory_audit(self):
+        import sqlite3
+        from pathlib import Path
+        from unittest import mock
+
+        from app.usage import ingest_dsh_side, store
+
+        prev = None
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                store.set_data_dir(td)
+                mem = Path(td) / "memory"
+                mem.mkdir()
+                db = mem / "memory.db"
+                con = sqlite3.connect(db)
+                con.execute(
+                    "CREATE TABLE llm_audit_logs ("
+                    "id INTEGER PRIMARY KEY, timestamp TEXT, trigger_source TEXT, "
+                    "operation_type TEXT, model_id TEXT, input_tokens INT, "
+                    "output_tokens INT, total_tokens INT, status TEXT, error_message TEXT, "
+                    "duration_ms INT, related_memory_ids TEXT)"
+                )
+                con.execute(
+                    "INSERT INTO llm_audit_logs VALUES "
+                    "(1,'2026-09-16T11:00:00Z','autoDream','dream_consolidate',"
+                    "'deepseek-official:deepseek-v4-flash',100,20,120,'success',NULL,20000,NULL)"
+                )
+                con.execute(
+                    "INSERT INTO llm_audit_logs VALUES "
+                    "(2,'2026-09-16T11:01:00Z','autoSummarize','summarize_compress',"
+                    "'deepseek-official:deepseek-v4-flash',0,0,0,'success',NULL,5000,NULL)"
+                )
+                con.commit()
+                con.close()
+                with mock.patch.object(ingest_dsh_side, "_memory_db", return_value=db):
+                    n = ingest_dsh_side.ingest_dsh_memory_audit(force=True)
+                self.assertEqual(n, 2)
+                known = store.known_job_ids()
+                self.assertIn("dsh-mem-audit:1", known)
+                self.assertIn("dsh-mem-audit:2", known)
+                # audit 有真值的保留；零 token 的应升为 estimate
+                ev = [e for e in store.iter_all_events() if e.get("job_id") == "dsh-mem-audit:2"][0]
+                self.assertEqual(ev.get("quality"), "estimate")
+                self.assertGreater(int(ev.get("total_tokens") or 0), 0)
+                # second pass dedupes
+                with mock.patch.object(ingest_dsh_side, "_memory_db", return_value=db):
+                    self.assertEqual(ingest_dsh_side.ingest_dsh_memory_audit(force=True), 0)
+        finally:
+            store.set_data_dir(prev)
+
+    def test_console_normalize_day(self):
+        from app.usage.deepseek_console import _normalize_day, _pick_day_row
+
+        rows = [
+            {"date": "2026-09-15", "request_count": 1, "total_tokens": 10},
+            {"date": "2026-09-16", "request_count": 209, "total_tokens": 1921220, "cost": 4.52},
+        ]
+        row = _pick_day_row(rows, "2026-09-16")
+        self.assertIsNotNone(row)
+        out = _normalize_day(row, "2026-09-16", cost_cny=4.52)
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["calls"], 209)
+        self.assertEqual(out["tokens"], 1921220)
+        self.assertEqual(out["cost_cny"], 4.52)
+
+    def test_llm_meter_ingest_and_dedupe(self):
+        from unittest import mock
+        from pathlib import Path
+        from app.usage import ingest_llm_meter, store
+
+        prev = store._data_dir_override
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                store.set_data_dir(td)
+                meter_dir = Path(td) / "llm-meter"
+                meter_dir.mkdir()
+                row = {
+                    "v": 1,
+                    "id": "meter_20260917120000_abc123",
+                    "ts": "2026-09-17T12:00:00+08:00",
+                    "source": "dsh_knowledge",
+                    "provider": "deepseek-official",
+                    "model": "deepseek-v4-flash",
+                    "session_id": "session-x",
+                    "ok": True,
+                    "finish": "stop",
+                    "error": "",
+                    "quality": "provider",
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "cache_read_tokens": 50,
+                    "cache_write_tokens": 0,
+                    "reasoning_tokens": 5,
+                    "total_tokens": 999,
+                    "duration_ms": 100,
+                }
+                row_synth = {
+                    **row,
+                    "id": "meter_20260917120000_synth",
+                    "total_tokens": 0,
+                }
+                (meter_dir / "events.jsonl").write_text(
+                    json.dumps(row, ensure_ascii=False)
+                    + "\n"
+                    + json.dumps(row_synth, ensure_ascii=False)
+                    + "\n",
+                    encoding="utf-8",
+                )
+                # 误采诱饵：.lock / .tmp 不得入库
+                (meter_dir / "events.jsonl.lock").write_text(
+                    json.dumps({**row, "id": "meter_lock_should_skip", "total_tokens": 9999})
+                    + "\n",
+                    encoding="utf-8",
+                )
+                (meter_dir / "events.jsonl.tmp").write_text(
+                    json.dumps({**row, "id": "meter_tmp_should_skip", "total_tokens": 8888})
+                    + "\n",
+                    encoding="utf-8",
+                )
+                with mock.patch.object(ingest_llm_meter, "_meter_dir", return_value=meter_dir):
+                    with mock.patch.object(
+                        ingest_llm_meter, "_current_user_id", create=True, return_value="u_hebo"
+                    ):
+                        # override 下默认跳过；force 才采
+                        self.assertEqual(ingest_llm_meter.ingest_llm_meter(force=False), 0)
+                        n = ingest_llm_meter.ingest_llm_meter(force=True)
+                        self.assertEqual(n, 2)
+                        self.assertEqual(ingest_llm_meter.ingest_llm_meter(force=True), 0)
+                by_id = {
+                    e.get("job_id"): e
+                    for e in store.iter_all_events()
+                    if str(e.get("job_id") or "").startswith("meter_20260917120000")
+                }
+                self.assertEqual(int(by_id["meter_20260917120000_abc123"].get("total_tokens") or 0), 999)
+                self.assertEqual(int(by_id["meter_20260917120000_synth"].get("total_tokens") or 0), 170)
+                # 插件若误报 total=base+reasoning，入库应纠成 base
+                row_bad = {
+                    **row,
+                    "id": "meter_20260917120000_badtotal",
+                    "total_tokens": 175,  # 100+20+50+5
+                }
+                (meter_dir / "events.jsonl").write_text(
+                    json.dumps(row_bad, ensure_ascii=False) + "\n", encoding="utf-8"
+                )
+                with mock.patch.object(ingest_llm_meter, "_meter_dir", return_value=meter_dir):
+                    with mock.patch.object(
+                        ingest_llm_meter, "_current_user_id", create=True, return_value="u_hebo"
+                    ):
+                        self.assertEqual(ingest_llm_meter.ingest_llm_meter(force=True), 1)
+                bad_ev = [
+                    e
+                    for e in store.iter_all_events()
+                    if e.get("job_id") == "meter_20260917120000_badtotal"
+                ]
+                self.assertEqual(int(bad_ev[0].get("total_tokens") or 0), 170)
+                self.assertEqual(by_id["meter_20260917120000_abc123"].get("lane"), "dsh_knowledge")
+                self.assertEqual(int(by_id["meter_20260917120000_abc123"].get("reasoning_tokens") or 0), 5)
+                self.assertEqual(by_id["meter_20260917120000_abc123"].get("quality"), "provider")
+                self.assertEqual(by_id["meter_20260917120000_abc123"].get("user_id"), "u_hebo")
+                bad = [
+                    e
+                    for e in store.iter_all_events()
+                    if e.get("job_id") in {"meter_lock_should_skip", "meter_tmp_should_skip"}
+                ]
+                self.assertEqual(bad, [])
+        finally:
+            store.set_data_dir(prev)
+
+    def test_meter_active_still_ingests_pre_meter_sessions(self):
+        from unittest import mock
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from app.usage import store
+
+        prev = store._data_dir_override
+        cutoff = datetime(2026, 9, 17, 10, 17, tzinfo=ZoneInfo("Asia/Shanghai"))
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                store.set_data_dir(td)
+                with mock.patch("app.usage.ingest_cursor.ingest_dsh_cursor_jobs"), mock.patch(
+                    "app.usage.ingest_llm_meter.meter_active", return_value=True
+                ), mock.patch("app.usage.ingest_llm_meter.ingest_llm_meter") as m_meter, mock.patch(
+                    "app.usage.ingest_llm_meter.first_meter_datetime", return_value=cutoff
+                ), mock.patch(
+                    "app.usage.ingest_dsh_llm.ingest_dsh_sessions"
+                ) as m_sess, mock.patch(
+                    "app.usage.ingest_dsh_side.ingest_dsh_side_channels"
+                ) as m_side, mock.patch(
+                    "app.usage.report.flush_report"
+                ), mock.patch(
+                    "app.usage.store.supersede_pre_meter_side_lanes"
+                ) as m_sup:
+                    out = store.summarize(days=1, on="2026-09-17")
+                    self.assertTrue(out.get("llm_meter_active"))
+                    m_meter.assert_called()
+                    m_sup.assert_called()
+                    m_sess.assert_called()
+                    self.assertEqual(m_sess.call_args.kwargs.get("before"), cutoff)
+                    m_side.assert_called()
+                    self.assertEqual(m_side.call_args.kwargs.get("before"), cutoff)
+        finally:
+            store.set_data_dir(prev)
+
+    def test_meter_supersede_keeps_history_before_cutoff(self):
+        from app.usage import store
+
+        prev = store._data_dir_override
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                store.set_data_dir(td)
+                tokens_s = {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                    "quality": "session",
+                }
+                tokens_m = {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "quality": "provider",
+                }
+                store.append_event(
+                    source="llm",
+                    lane="dsh_chat",
+                    provider="deepseek",
+                    model="x",
+                    tokens=tokens_s,
+                    job_id="sess_old:t1:s1",
+                    user_id="u_hebo",
+                    ts="2026-09-16T12:00:00+08:00",
+                    allow_active_fallback=False,
+                )
+                store.append_event(
+                    source="llm",
+                    lane="dsh_chat",
+                    provider="deepseek",
+                    model="x",
+                    tokens=tokens_s,
+                    job_id="sess_overlap:t1:s1",
+                    user_id="u_hebo",
+                    ts="2026-09-17T10:18:00+08:00",
+                    allow_active_fallback=False,
+                )
+                store.append_event(
+                    source="llm",
+                    lane="dsh_chat",
+                    provider="deepseek",
+                    model="x",
+                    tokens=tokens_m,
+                    job_id="meter_keep_me",
+                    user_id="u_hebo",
+                    ts="2026-09-17T10:17:00+08:00",
+                    allow_active_fallback=False,
+                )
+                n = store.supersede_pre_meter_side_lanes(since="2026-09-17T10:17:00+08:00")
+                self.assertEqual(n, 1)
+                self.assertEqual(store.supersede_pre_meter_side_lanes(), 0)
+                jobs = {e.get("job_id") for e in store.iter_all_events()}
+                self.assertIn("meter_keep_me", jobs)
+                self.assertIn("sess_old:t1:s1", jobs)
+                self.assertNotIn("sess_overlap:t1:s1", jobs)
+        finally:
+            store.set_data_dir(prev)
+
+    def test_match_user_no_orphan_share(self):
+        """空 user_id 不得对任意登录账号可见（防多账号串账）。"""
+        from app.usage import store
+
+        self.assertFalse(
+            store._match_user({"user_id": "", "job_id": "meter_1", "lane": "dsh_chat"}, "u_a")
+        )
+        self.assertTrue(
+            store._match_user({"user_id": "u_a", "job_id": "job1", "lane": "code_review"}, "u_a")
+        )
+        self.assertFalse(
+            store._match_user({"user_id": "u_b", "job_id": "job1", "lane": "code_review"}, "u_a")
+        )
+        self.assertFalse(
+            store._match_user({"user_id": "", "job_id": "eng_1", "lane": "code_review"}, "u_a")
+        )
+
+    def test_exclude_same_second_as_meter_cutoff(self):
+        from app.usage import store
+
+        cutoff = store.as_shanghai("2026-09-17T10:17:56.530+08:00")
+        self.assertTrue(
+            store.exclude_at_or_after_cutoff("2026-09-17T10:17:56+08:00", cutoff)
+        )
+        self.assertFalse(
+            store.exclude_at_or_after_cutoff("2026-09-17T10:17:55+08:00", cutoff)
+        )
+
+    def test_event_ymd_uses_shanghai_calendar_day(self):
+        from app.usage import store
+
+        self.assertEqual(store._event_ymd({"ts": "2026-09-16T16:30:00+00:00"}), "2026-09-17")
+        self.assertEqual(store._event_ymd({"ts": "2026-09-17T00:30:00+08:00"}), "2026-09-17")
+        self.assertEqual(store._event_ymd({"ts": "2026-09-16T23:50:00+08:00"}), "2026-09-16")
+
+    def test_bind_empty_meter_user_id(self):
+        from app.usage import store
+
+        prev = store._data_dir_override
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                store.set_data_dir(td)
+                store.append_event(
+                    source="llm",
+                    lane="dsh_chat",
+                    provider="deepseek",
+                    model="x",
+                    tokens={
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                        "quality": "provider",
+                    },
+                    job_id="meter_orphan",
+                    user_id="",
+                    ts="2026-09-17T10:17:00+08:00",
+                    allow_active_fallback=False,
+                )
+                n = store.bind_empty_meter_user_id("u_hebo")
+                self.assertEqual(n, 1)
+                ev = [e for e in store.iter_all_events() if e.get("job_id") == "meter_orphan"]
+                self.assertEqual(ev[0].get("user_id"), "u_hebo")
+                s = store.summarize(days=1, on="2026-09-17", user_id="u_hebo")
+                self.assertEqual(s["today"]["llm_calls"], 1)
+        finally:
+            store.set_data_dir(prev)
+
+    def test_summarize_does_not_rebind_orphans(self):
+        """个人页读路径不得把空账号流水永久写给先打开的人。"""
+        from unittest import mock
+        from app.usage import store
+
+        prev = store._data_dir_override
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                store.set_data_dir(td)
+                store.append_event(
+                    source="llm",
+                    lane="dsh_chat",
+                    provider="deepseek",
+                    model="x",
+                    tokens={
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                        "quality": "provider",
+                    },
+                    job_id="meter_shared",
+                    user_id="",
+                    ts="2026-09-17T10:17:00+08:00",
+                    allow_active_fallback=False,
+                )
+                with mock.patch("app.usage.ingest_cursor.ingest_dsh_cursor_jobs"), mock.patch(
+                    "app.usage.ingest_llm_meter.meter_active", return_value=True
+                ), mock.patch("app.usage.ingest_llm_meter.ingest_llm_meter"), mock.patch(
+                    "app.usage.ingest_dsh_llm.ingest_dsh_sessions"
+                ), mock.patch(
+                    "app.usage.ingest_dsh_side.ingest_dsh_side_channels"
+                ), mock.patch("app.usage.report.flush_report"):
+                    s_a = store.summarize(days=1, on="2026-09-17", user_id="u_a")
+                    s_b = store.summarize(days=1, on="2026-09-17", user_id="u_b")
+                # 空账号不可见；读路径不得写归户
+                self.assertEqual(s_a["today"]["llm_calls"], 0)
+                self.assertEqual(s_b["today"]["llm_calls"], 0)
+                ev = [e for e in store.iter_all_events() if e.get("job_id") == "meter_shared"]
+                self.assertEqual(ev[0].get("user_id"), "")
+        finally:
+            store.set_data_dir(prev)
+
+    def test_meter_ingest_ignores_forged_user_id(self):
+        """meter JSONL 里的 user_id 可伪造，入库只认 ContextVar/active。"""
+        from unittest import mock
+        from pathlib import Path
+        from app.usage import store, ingest_llm_meter
+
+        prev = store._data_dir_override
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                store.set_data_dir(td)
+                meter_dir = Path(td) / "meter"
+                meter_dir.mkdir()
+                row = {
+                    "id": "meter_20260917130000_forge",
+                    "ts": "2026-09-17T13:00:00+08:00",
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "cache_read_tokens": 0,
+                    "total_tokens": 15,
+                    "ok": True,
+                    "user_id": "u_attacker",
+                }
+                (meter_dir / "events.jsonl").write_text(
+                    json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8"
+                )
+                with mock.patch.object(ingest_llm_meter, "_meter_dir", return_value=meter_dir):
+                    with mock.patch.object(
+                        ingest_llm_meter, "_current_user_id", create=True, return_value="u_hebo"
+                    ):
+                        self.assertEqual(ingest_llm_meter.ingest_llm_meter(force=True), 1)
+                ev = [
+                    e
+                    for e in store.iter_all_events()
+                    if e.get("job_id") == "meter_20260917130000_forge"
+                ]
+                self.assertEqual(ev[0].get("user_id"), "u_hebo")
+        finally:
+            store.set_data_dir(prev)
+
+    def test_bind_empty_engine_user_id(self):
+        """审码/PCB 等引擎直连空账号须归户，否则个人页漏计。"""
+        from unittest import mock
+        from app.usage import store
+
+        prev = store._data_dir_override
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                store.set_data_dir(td)
+                store.append_event(
+                    source="llm",
+                    lane="code_review",
+                    provider="deepseek",
+                    model="x",
+                    tokens={
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "cache_read_tokens": 0,
+                        "total_tokens": 15,
+                        "quality": "provider",
+                    },
+                    job_id="",
+                    user_id="",
+                    ts="2026-09-17T12:00:00+08:00",
+                    allow_active_fallback=False,
+                )
+                store.append_event(
+                    source="llm",
+                    lane="dsh_other",
+                    provider="deepseek",
+                    model="x",
+                    tokens={
+                        "prompt_tokens": 3,
+                        "completion_tokens": 1,
+                        "total_tokens": 4,
+                        "quality": "provider",
+                    },
+                    job_id="sess_side",
+                    user_id="",
+                    ts="2026-09-17T12:01:00+08:00",
+                    allow_active_fallback=False,
+                )
+                n = store.bind_empty_meter_user_id("u_hebo")
+                self.assertEqual(n, 2)
+                by_lane = {e.get("lane"): e.get("user_id") for e in store.iter_all_events()}
+                self.assertEqual(by_lane["code_review"], "u_hebo")
+                self.assertEqual(by_lane["dsh_other"], "u_hebo")
+                with mock.patch("app.usage.ingest_cursor.ingest_dsh_cursor_jobs"), mock.patch(
+                    "app.usage.ingest_llm_meter.meter_active", return_value=False
+                ), mock.patch(
+                    "app.usage.ingest_llm_meter.ingest_llm_meter"
+                ), mock.patch(
+                    "app.usage.ingest_dsh_llm.ingest_dsh_sessions"
+                ), mock.patch(
+                    "app.usage.ingest_dsh_side.ingest_dsh_side_channels"
+                ), mock.patch(
+                    "app.usage.report.flush_report"
+                ):
+                    s = store.summarize(days=1, on="2026-09-17", user_id="u_hebo")
+                self.assertEqual(s["today"]["llm_calls"], 2)
+                self.assertEqual(s["today"]["llm_tokens"], 19)
         finally:
             store.set_data_dir(prev)
 

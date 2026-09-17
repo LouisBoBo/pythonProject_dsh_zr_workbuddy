@@ -55,7 +55,10 @@ Cursor Local
 
 - 不新增业务 Cordis 包；账本只在引擎。DSH 设置「用量」是 mes-bridge 只读壳（`settings.section` `id=workbuddy-usage`，`order: 39`，紧挨插件市场 `order: 40`），不另造鉴权、不 HITL。  
 - 不把 Job SSE 的 `token` 事件改名（会动四车道契约）；账本事件用 `usage` / `llm_tokens`。  
-- 不以 Cursor 官网 Usage 页或 DeepSeek 控制台为验收（那些是对照，不是本产品）。  
+- 不以 Cursor 官网 Usage 页或 DeepSeek 控制台为**本机明细**的验收（本机账本另计）；**要对齐官网让别人认**，须配置 `usage.deepseek_platform_token`，用量页展示「DeepSeek 官网」卡片（控制台同口径）。  
+- DeepSeek **没有**公开的按日用量 Bearer API，只有余额接口；官网卡片走 `platform.deepseek.com` 登录态 userToken（本机 config，禁止进仓）。  
+- 本机账本已补采：DSH 聊天 usage、记忆 `llm_audit_logs`、会话标题 LLM；记忆审计常无 token 字段 → 次数可对齐、Token 仍以官网卡片为准。  
+- **减漏采（旁路 `llm/stream`）**：不在本仓改 DSH 插件；独立包指导见 [DSH-LLM用量计量插件-开发指导.md](./DSH-LLM用量计量插件-开发指导.md)。产品口径为「本机观测」，不对齐控制台总额。  
 - 不在本期做「额度用完自动停写码」策略开关以外的计费系统（可后续加阈值告警）。
 
 ---

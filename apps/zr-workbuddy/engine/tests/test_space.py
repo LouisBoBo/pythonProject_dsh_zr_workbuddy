@@ -100,7 +100,7 @@ class SpaceCatalogTests(unittest.TestCase):
             {
                 "id": "cr-test01",
                 "ok": True,
-                "reply": "结论通过\napi_key=sk-abcdefghijklmnopqrstuvwxyz",
+                "reply": "结论通过\napi_key=" + ("sk-" + "abcdefghijklmnopqrstuvwxyz"),
                 "session_id": "session-11111111-1111-1111-1111-111111111111",
                 "user_id": "u_hebo",
             }
@@ -257,6 +257,9 @@ class SpaceCatalogTests(unittest.TestCase):
         mapped = _job_dict_from_ccj(raw, user_id="u_hebo")
         self.assertIsNotNone(mapped)
         self.assertEqual(mapped["ui_session_id"], raw["dsh_session_id"])
+        no_sid = dict(raw)
+        no_sid["dsh_session_id"] = ""
+        self.assertIsNone(_job_dict_from_ccj(no_sid, user_id="u_hebo"))
         old = os.environ.get("CURSOR_CODING_HOME")
         os.environ["CURSOR_CODING_HOME"] = str(ccj_home)
         try:
@@ -502,6 +505,7 @@ class SpaceChatDocsTests(unittest.TestCase):
         from unittest import mock
 
         from app.space.chat_docs import (
+            is_knowledge_retrieval,
             is_ops_noise,
             looks_like_chat_document,
             sync_chat_docs_from_dsh,
@@ -509,6 +513,32 @@ class SpaceChatDocsTests(unittest.TestCase):
 
         short = "好的，我帮你写。"
         self.assertFalse(looks_like_chat_document(short))
+        # 知识库/文档检索问答不进库（含「源自《…》」引用）
+        kb_ans = (
+            "一、FMEA 标准答案（源自《双面沉金板FMEA》中 V 割深度超差条目）\n\n"
+            "潜在后果包括层间短路与客户退货。\n"
+            + ("说明补充。\n" * 40)
+        )
+        self.assertTrue(is_knowledge_retrieval(kb_ans))
+        self.assertFalse(looks_like_chat_document(kb_ans))
+        kb_faq = (
+            "一、五大检验关卡合格率（核心，权重 100%）\n\n"
+            "二、P0 最着急：直接卡出货/客诉\n\n"
+            "三、过程能力与抽样方案\n"
+            + ("指标说明。\n" * 30)
+        )
+        self.assertTrue(is_knowledge_retrieval(kb_faq))
+        self.assertFalse(looks_like_chat_document(kb_faq))
+        self.assertTrue(is_knowledge_retrieval("二钻 / 二锣计价：先看成本内核，再看口径"))
+        self.assertTrue(is_knowledge_retrieval('一、8 层板"专属"计费项'))
+        self.assertTrue(is_knowledge_retrieval("一、公式\n\n加工费 = 基材 + 压合。"))
+        self.assertTrue(
+            is_knowledge_retrieval(
+                "《PCB报价规则》第十四节「表面处理」按 **面积（元/㎡）** 计价，共四种："
+            )
+        )
+        self.assertTrue(is_knowledge_retrieval("一、铜价折算（主口径）\n\n按当日铜价。"))
+        self.assertTrue(is_knowledge_retrieval("1080 PP 片（半固化片）的价格是 **18 元/张**。"))
         # 写码/提交结论、菜单完成确认不进库
         conclusion = (
             "## 本轮结论\n\n写码已完成并同步到本机。\n\n"
@@ -715,6 +745,54 @@ class SpaceLibraryPagingTests(unittest.TestCase):
         self.assertEqual(p1.get("total"), 12)
         self.assertEqual(len(p1.get("sessions") or []), 10)
         self.assertEqual(len(p2.get("sessions") or []), 2)
+
+    def test_list_library_sorts_by_latest_doc_time(self):
+        """资料库会话应按最新文档时间倒序（新的在前），不单看 sessions.updated_at。"""
+        # 会话 A：会话行很新，但文档很旧 → 应排后
+        self.catalog.upsert_session(
+            session_id="sess-old-docs",
+            user_id="u_hebo",
+            title="旧文档会话",
+            body_text="",
+            at=2_000_000_900,
+        )
+        rel_a, n_a = self.catalog.write_report_file(
+            user_id="u_hebo", artifact_id="doc-old", body="# old\n"
+        )
+        self.catalog.upsert_artifact(
+            artifact_id="doc-old",
+            user_id="u_hebo",
+            kind="chat_document",
+            title="旧文档",
+            relpath=rel_a,
+            bytes_n=n_a,
+            session_id="sess-old-docs",
+            at=2_000_000_100,
+        )
+        # 会话 B：会话行较旧，文档最新 → 应排前
+        self.catalog.upsert_session(
+            session_id="sess-new-docs",
+            user_id="u_hebo",
+            title="新文档会话",
+            body_text="",
+            at=2_000_000_200,
+        )
+        rel_b, n_b = self.catalog.write_report_file(
+            user_id="u_hebo", artifact_id="doc-new", body="# new\n"
+        )
+        self.catalog.upsert_artifact(
+            artifact_id="doc-new",
+            user_id="u_hebo",
+            kind="chat_document",
+            title="新文档",
+            relpath=rel_b,
+            bytes_n=n_b,
+            session_id="sess-new-docs",
+            at=2_000_000_800,
+        )
+        packed = self.catalog.list_library(user_id="u_hebo", page=1, page_size=10)
+        ids = [s.get("id") for s in packed.get("sessions") or []]
+        self.assertEqual(ids[:2], ["sess-new-docs", "sess-old-docs"])
 
 
 if __name__ == "__main__":

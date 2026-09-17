@@ -161,7 +161,7 @@ window.__ModuleLoader__.load({
     var cssInjected = false;
     function ensureCss() {
       if (typeof document === "undefined") return;
-      var ver = "composer-70";
+      var ver = "composer-72";
       if (cssInjected && document.querySelector("style[data-wb-cd-css='" + ver + "']")) return;
       document.querySelectorAll("style[data-plugin='@dsh-external/dsh-mes-bridge']").forEach(function (el) {
         if (el.parentNode) el.parentNode.removeChild(el);
@@ -10479,7 +10479,9 @@ window.__ModuleLoader__.load({
           { className: "wb-set-lead" },
           isEnt
             ? "企业总用量：全部账号合计的 API 请求次数与 Token。LLM 与 Cursor 分列，不能加总成一笔钱。"
-            : "LLM 含引擎聊天/审码，以及 DSH 宿主会话（DeepSeek 等）。Cursor 含本机写码与 DSH「Cursor 写码」。两条账不能加总成一笔钱。",
+            : data && data.llm_meter_active
+              ? "本机观测：引擎直连 + 宿主 llm-meter（llm/stream 真明细，含知识库抽取等旁路）。Cursor 另列，不能与 LLM 加总。"
+              : "本机观测：引擎直连 + DSH 会话/记忆/标题补采（未装 llm-meter）。记忆等可能为估算。装 @zhongruan/dsh-llm-meter 后可减漏采。Cursor 另列。",
         ),
         h(
           "div",
@@ -10548,7 +10550,7 @@ window.__ModuleLoader__.load({
           meterSeries,
           "llm_",
           llmPal,
-          llm.missing_calls ? "未回传 " + llm.missing_calls + " 次" : "",
+          "",
           meterAxis,
         ),
         usageMeterNode(
@@ -10562,7 +10564,7 @@ window.__ModuleLoader__.load({
           meterSeries,
           "cursor_",
           curPal,
-          cursor.missing_calls ? "未回传 " + cursor.missing_calls + " 次（不代表没消耗）" : "",
+          "",
           meterAxis,
         ),
         isEnt
@@ -11519,7 +11521,7 @@ window.__ModuleLoader__.load({
         h(
           "p",
           { className: "wb-space-note" },
-          "点蓝色会话名打开已绑定聊天。资料库收创作/测试用例、审码与 8D；写码成功后只挂本任务改动并已同步的源码（未改动的不入库）。",
+          "点蓝色会话名打开已绑定聊天。资料库收创作/测试用例、审码与 8D；写码成功后只挂本任务改动并已同步的源码（未改动的不入库）。知识库检索问答不进资料库。",
         ),
         h(
           "div",

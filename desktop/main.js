@@ -22,6 +22,10 @@ const LINK_NAME = 'DSH-ZR-WorkBuddy'
 const BRIDGE_PKG = '@dsh-external/dsh-mes-bridge'
 const BRIDGE_ID = 'dsh-mes-bridge'
 const MARKET_PKG = 'dshmarket'
+/** WorkBuddy 预装本机知识库（中软包；默认关回写，见 ensure_dsh_knowledge.py） */
+const KB_PKG = process.env.WORKBUDDY_KB_PKG || '@zhongruan/dsh-knowledge'
+const KB_VERSION = process.env.WORKBUDDY_KB_VERSION || '1.0.0'
+const KB_LEGACY_PKGS = ['@lemoncat7/dsh-knowledge', 'dsh-knowledge-base']
 /** 旧 0.2.7/0.2.8 把 name 写成文件路径，client-modules 解析不了 package.json，设置里没有 WorkBuddy。 */
 const BRIDGE_REL_LEGACY =
   `../../link/${LINK_NAME}/apps/zr-workbuddy/plugins/mes-bridge/lib/index.js`
@@ -531,17 +535,25 @@ function findMergePython() {
   }
 }
 
-/** 公司插件永远可展示；官方目录后台每天最多拉一次。失败则回退公司原 URL。 */
+/** 公司插件永远可展示；官方目录后台每天最多拉一次。失败则回退公司原 URL。
+ * LOCKED：空 DSHM_REGISTRY_URL 不得掉回官方，除非 WORKBUDDY_ALLOW_OFFICIAL_MARKET=1。
+ */
 function ensureMergedMarketCatalog(appRoot, market) {
   const companyUrl =
     market.COMPANY_DSH_MARKET_URL || COMPANY_MARKET_DEFAULTS.COMPANY_DSH_MARKET_URL
+  const allowOfficial = process.env.WORKBUDDY_ALLOW_OFFICIAL_MARKET === '1'
   const fromEnv = Object.prototype.hasOwnProperty.call(process.env, 'DSHM_REGISTRY_URL')
     ? process.env.DSHM_REGISTRY_URL || ''
     : market.DSHM_REGISTRY_URL
   if (typeof fromEnv === 'string' && fromEnv !== '' && fromEnv !== companyUrl) {
     return fromEnv
   }
-  if (fromEnv === '') return ''
+  if (fromEnv === '' && allowOfficial) return ''
+  if (fromEnv === '' && !allowOfficial) {
+    console.warn(
+      '[desktop] 忽略空 DSHM_REGISTRY_URL=（交付态锁定合并市场；破窗 WORKBUDDY_ALLOW_OFFICIAL_MARKET=1）'
+    )
+  }
   const script = path.join(appRoot, 'scripts', 'lib', 'merge_company_dsh_market.py')
   if (!fs.existsSync(script)) return companyUrl
   const py = findMergePython()
@@ -840,8 +852,55 @@ function ensureWorkBuddyWire(appRoot) {
     pkg.dsh.profile.bundles = bundles.concat([MARKET_PKG])
     changed = true
   }
+  let bundlesNow = Array.isArray(pkg.dsh.profile.bundles) ? pkg.dsh.profile.bundles.slice() : []
+  // 中软包未进 node_modules 前不写入依赖、不卸 lemoncat7（与 ensure_dsh_knowledge.py 一致）
+  const kbInstalled = fs.existsSync(
+    path.join(profile, 'node_modules', ...KB_PKG.split('/'), 'package.json')
+  )
+  if (kbInstalled) {
+    for (const legacy of KB_LEGACY_PKGS) {
+      if (legacy === KB_PKG) continue
+      if (pkg.dependencies[legacy]) {
+        delete pkg.dependencies[legacy]
+        changed = true
+      }
+      if (bundlesNow.includes(legacy)) {
+        bundlesNow = bundlesNow.filter((b) => b !== legacy)
+        changed = true
+      }
+    }
+    if (!pkg.dependencies[KB_PKG]) {
+      pkg.dependencies[KB_PKG] = KB_VERSION
+      changed = true
+    }
+    if (!bundlesNow.includes(KB_PKG)) {
+      bundlesNow = bundlesNow.concat([KB_PKG])
+      changed = true
+    }
+  }
+  pkg.dsh.profile.bundles = bundlesNow
   if (changed) {
     fs.writeFileSync(profilePkg, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
+  }
+
+  // 知识库：pnpm install 前写好 allowBuilds + 关回写（与 scripts/lib/ensure_dsh_knowledge.py 一致）
+  try {
+    const ensureKb = path.join(appRoot, 'scripts', 'lib', 'ensure_dsh_knowledge.py')
+    if (fs.existsSync(ensureKb)) {
+      const py =
+        process.env.APP_ENGINE_PYTHON ||
+        (fs.existsSync(path.join(runtimeRoot(), 'python', 'bin', 'python3'))
+          ? path.join(runtimeRoot(), 'python', 'bin', 'python3')
+          : 'python3')
+      execFileSync(py, [ensureKb, profile], {
+        cwd: appRoot,
+        env: { ...process.env, DSH_HOME: home },
+        stdio: 'inherit',
+        timeout: 60000,
+      })
+    }
+  } catch (e) {
+    console.warn('[desktop] ensure dsh-knowledge:', e && e.message ? e.message : e)
   }
 
   // dsh 首次生成的 cordis.patch.yml 正文是单独的 []；后面再拼 - insert 会变成非法 YAML。
@@ -951,6 +1010,78 @@ function ensureWorkBuddyWire(appRoot) {
     console.warn('[desktop] company market npmrc:', e && e.message ? e.message : e)
   }
 
+  // 中软知识库：npmrc 就绪后再试装；失败则回滚依赖登记，不拖垮桌面接线
+  try {
+    const kbPkgJson = path.join(profile, 'node_modules', ...KB_PKG.split('/'), 'package.json')
+    if (!fs.existsSync(kbPkgJson) && fs.existsSync(profilePkg)) {
+      const pkgKb = JSON.parse(fs.readFileSync(profilePkg, 'utf8'))
+      pkgKb.dependencies = pkgKb.dependencies || {}
+      pkgKb.dsh = pkgKb.dsh || {}
+      pkgKb.dsh.profile = pkgKb.dsh.profile || {}
+      let bundlesKb = Array.isArray(pkgKb.dsh.profile.bundles)
+        ? pkgKb.dsh.profile.bundles.slice()
+        : []
+      pkgKb.dependencies[KB_PKG] = KB_VERSION
+      if (!bundlesKb.includes(KB_PKG)) bundlesKb = bundlesKb.concat([KB_PKG])
+      pkgKb.dsh.profile.bundles = bundlesKb
+      fs.writeFileSync(profilePkg, JSON.stringify(pkgKb, null, 2) + '\n', 'utf8')
+      try {
+        const pnpm = findBundledPnpm()
+        const hostNode = findHostNodeBinary() || process.execPath
+        const env = applyDesktopToolchain({ ...process.env, CI: 'true', DSH_HOME: home })
+        delete env.ELECTRON_RUN_AS_NODE
+        if (pnpm) {
+          execFileSync(hostNode, [pnpm, 'install'], {
+            cwd: profile,
+            env,
+            stdio: 'inherit',
+            timeout: 300000,
+          })
+        } else {
+          execFileSync('pnpm', ['install'], {
+            cwd: profile,
+            env,
+            stdio: 'inherit',
+            timeout: 300000,
+          })
+        }
+        const ensureKb = path.join(appRoot, 'scripts', 'lib', 'ensure_dsh_knowledge.py')
+        if (fs.existsSync(ensureKb) && fs.existsSync(kbPkgJson)) {
+          const py =
+            process.env.APP_ENGINE_PYTHON ||
+            (fs.existsSync(path.join(runtimeRoot(), 'python', 'bin', 'python3'))
+              ? path.join(runtimeRoot(), 'python', 'bin', 'python3')
+              : 'python3')
+          execFileSync(py, [ensureKb, profile], {
+            cwd: appRoot,
+            env: { ...process.env, DSH_HOME: home },
+            stdio: 'inherit',
+            timeout: 60000,
+          })
+        }
+      } catch (kbErr) {
+        console.warn(
+          '[desktop] 预装知识库失败（包未发布或网络问题可忽略）:',
+          kbErr && kbErr.message ? kbErr.message : kbErr
+        )
+        try {
+          const rollback = JSON.parse(fs.readFileSync(profilePkg, 'utf8'))
+          if (rollback.dependencies) delete rollback.dependencies[KB_PKG]
+          if (rollback.dsh && rollback.dsh.profile && Array.isArray(rollback.dsh.profile.bundles)) {
+            rollback.dsh.profile.bundles = rollback.dsh.profile.bundles.filter(
+              (b) => b !== KB_PKG
+            )
+          }
+          fs.writeFileSync(profilePkg, JSON.stringify(rollback, null, 2) + '\n', 'utf8')
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[desktop] knowledge soft-install:', e && e.message ? e.message : e)
+  }
+
   // 避免市场装公司插件时被 gh-proxy 皮肤包拖死
   try {
     ensureWhaleMusumeOffline(profile)
@@ -1042,6 +1173,40 @@ async function startBundledHost(enginePort, appRoot) {
   })
   if (registryUrl) {
     console.log('[desktop] 插件市场目录:', registryUrl)
+    // 持久化到 DSH_HOME/.env，宿主自拉起 / 裸 dsh 也能读到（与 company_dsh_market.sh 同块）
+    try {
+      const safeUrl = String(registryUrl || '')
+        .replace(/[\r\n\t ]+/g, '')
+        .trim()
+      const okUrl =
+        /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/i.test(safeUrl) ||
+        /^https:\/\//i.test(safeUrl) ||
+        /^http:\/\/175\.178\.238\.31\//i.test(safeUrl)
+      if (!okUrl) {
+        console.warn('[desktop] 拒绝写入非法 DSHM_REGISTRY_URL:', registryUrl)
+      } else {
+        const envf = path.join(dshHome(), '.env')
+        let body = ''
+        if (fs.existsSync(envf)) {
+          body = fs
+            .readFileSync(envf, 'utf8')
+            .replace(
+              /\n?# --- workbuddy-company-market ---[\s\S]*?# --- \/workbuddy-company-market ---\n?/g,
+              '\n'
+            )
+            .replace(/\n{3,}/g, '\n\n')
+            .trimEnd()
+        }
+        const block =
+          `\n# --- workbuddy-company-market ---\n` +
+          `# LOCKED by WorkBuddy — 勿手删；改市场须走 scripts/host.sh + 破窗变量\n` +
+          `DSHM_REGISTRY_URL=${safeUrl}\n` +
+          `# --- /workbuddy-company-market ---\n`
+        fs.writeFileSync(envf, (body ? body + '\n' : '') + block, 'utf8')
+      }
+    } catch (e) {
+      console.warn('[desktop] 写入 DSH_HOME/.env 市场目录失败:', e && e.message ? e.message : e)
+    }
   } else {
     console.log('[desktop] 插件市场目录: dshmarket 默认官方')
   }

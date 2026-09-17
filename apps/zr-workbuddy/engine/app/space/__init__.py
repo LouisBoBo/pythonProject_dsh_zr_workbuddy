@@ -24,6 +24,7 @@ from .hooks import (
     ingest_chat_document,
     ingest_code_dev_job,
     purge_delivery_summaries,
+    purge_unbound_dev_code_sessions,
     ingest_code_review_report,
 )
 from .purge import purge_expired
@@ -45,6 +46,7 @@ __all__ = [
     "list_sessions",
     "locate_dsh_session",
     "purge_delivery_summaries",
+    "purge_unbound_dev_code_sessions",
     "purge_empty_sessions",
     "purge_expired",
     "set_data_dir",

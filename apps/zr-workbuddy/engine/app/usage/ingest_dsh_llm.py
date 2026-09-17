@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .parse import from_sdk_usage
-from .store import append_event, known_job_ids
+from .store import append_event, as_shanghai, exclude_at_or_after_cutoff, known_job_ids
 
 _LOG = logging.getLogger(__name__)
 _last_ingest = 0.0
@@ -43,13 +43,24 @@ def _sessions_root() -> Path:
 def _iter_session_files(root: Path) -> Iterator[Path]:
     if not root.is_dir():
         return
+    try:
+        root_r = root.resolve()
+    except OSError:
+        return
     for path in root.rglob("session.jsonl*"):
         name = path.name
         if name not in {"session.jsonl", "session.jsonl.zstd"}:
             continue
-        if not path.is_file():
+        try:
+            if path.is_symlink():
+                continue
+            cand = path.resolve()
+            cand.relative_to(root_r)
+            if not cand.is_file():
+                continue
+        except (OSError, ValueError):
             continue
-        yield path
+        yield cand
 
 
 def _iter_lines(path: Path) -> Iterator[str]:
@@ -101,7 +112,9 @@ def _ts_from_ms(ms: Any) -> str:
     if n > 10_000_000_000:
         n = n / 1000.0
     try:
-        return datetime.fromtimestamp(n, tz=timezone.utc).isoformat()
+        from .store import _TZ
+
+        return datetime.fromtimestamp(n, tz=timezone.utc).astimezone(_TZ).isoformat()
     except (OSError, OverflowError, ValueError):
         return ""
 
@@ -115,7 +128,7 @@ def _provider_name(raw: str) -> str:
     return (raw or "deepseek")[:80]
 
 
-def _ingest_file(path: Path, *, known: set[str]) -> int:
+def _ingest_file(path: Path, *, known: set[str], before: datetime | None = None) -> int:
     sid = _session_id_from_path(path)
     model = ""
     provider = "deepseek"
@@ -161,6 +174,8 @@ def _ingest_file(path: Path, *, known: set[str]) -> int:
         if not job_id or job_id in known:
             continue
         ts = _ts_from_ms(obj.get("time"))
+        if exclude_at_or_after_cutoff(ts, before):
+            continue
         evt = append_event(
             source="llm",
             lane="dsh_chat",
@@ -177,8 +192,11 @@ def _ingest_file(path: Path, *, known: set[str]) -> int:
     return added
 
 
-def ingest_dsh_sessions(*, force: bool = False) -> int:
-    """扫描 ~/.dsh/sessions，把宿主聊天 LLM usage 记入引擎账本。"""
+def ingest_dsh_sessions(*, force: bool = False, before: datetime | str | None = None) -> int:
+    """扫描 ~/.dsh/sessions，把宿主聊天 LLM usage 记入引擎账本。
+
+    before：只采该时刻之前的步进（meter 启用后用来避免与 meter_* 双计）。
+    """
     global _last_ingest
     now = time.monotonic()
     if not force and now - _last_ingest < 2.0:
@@ -190,6 +208,7 @@ def ingest_dsh_sessions(*, force: bool = False) -> int:
     _last_ingest = now
     known = known_job_ids()
     added = 0
+    cutoff = as_shanghai(before)
     root = _sessions_root()
     for path in _iter_session_files(root):
         try:
@@ -203,7 +222,7 @@ def ingest_dsh_sessions(*, force: bool = False) -> int:
         if not force and _file_stamp.get(key) == mtime:
             continue
         try:
-            n = _ingest_file(path, known=known)
+            n = _ingest_file(path, known=known, before=cutoff)
         except Exception:
             _LOG.warning("ingest dsh session failed path=%s", path, exc_info=True)
             continue

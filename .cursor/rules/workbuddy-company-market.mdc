@@ -1,0 +1,41 @@
+---
+description: 【LOCKED】公司/私有插件市场硬锁定——禁止削弱、禁止静默回官方（alwaysApply）
+alwaysApply: true
+---
+
+# 公司插件市场硬锁定（不可推翻 · LOCKED）
+
+完整说明：`docs/宿主与运维排障/插件中心使用说明.md`。  
+实现：`scripts/lib/company_dsh_market.sh` · 验收：`scripts/lib/verify_company_dsh_market.py`。
+
+## 写死含义
+
+**不是**文档建议，是运行时门禁：
+
+1. `host.sh` 启动宿主前 `apply_company_dsh_market` **必须成功**，否则 **exit 1**，不许起 `dsh web`。  
+2. 置空 `DSHM_REGISTRY_URL=` **无效**（会被忽略并继续合并）。  
+3. `$DSH_HOME/.env` 里的 `# --- workbuddy-company-market ---` 块 **无破窗不得清除**。  
+4. 唯一破窗：`WORKBUDDY_ALLOW_OFFICIAL_MARKET=1`（仅本机调试；**禁止**写进发版脚本 / CI / 桌面默认）。
+
+## Agent / 开发者禁令（谁都不能改弱）
+
+**禁止**下列「方便」改动（提 PR / 改脚本一律拒绝）：
+
+- 删掉或绕过 `apply_company_dsh_market` 失败即 `exit 1`
+- 恢复「空 `DSHM_REGISTRY_URL` = 官方市场」为默认行为
+- 从 `package-desktop.sh` 去掉 `assert_company_market_packaging`
+- 删 seed / merge / verify，或让 verify 变 soft-fail
+- 把 `WORKBUDDY_ALLOW_OFFICIAL_MARKET=1` 写进默认 env、桌面启动、发版流水线
+
+要改市场行为：先改本规则 + 用户明确确认破窗需求，再动代码。
+
+## 事故根因（2026-09-16）
+
+`dshmarket` 只认 `DSHM_REGISTRY_URL`。裸 `dsh web` / 置空变量 / 「更新插件市场」自拉起 → 静默官方目录 → 中软插件「消失」。
+
+## 交付检查
+
+```bash
+python3 scripts/lib/verify_company_dsh_market.py   # 必须过
+scripts/host.sh verify
+```

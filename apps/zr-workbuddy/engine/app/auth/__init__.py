@@ -4,7 +4,12 @@
 """
 
 from .active import clear_active, get_active_user, set_active
-from .context import current_user, current_user_id
+from .context import (
+    current_user,
+    current_user_id,
+    reset_current_user,
+    set_current_user,
+)
 from .tokens import issue_token, verify_token
 from .users import ensure_seed_users, public_user, verify_password
 
@@ -16,7 +21,9 @@ __all__ = [
     "get_active_user",
     "issue_token",
     "public_user",
+    "reset_current_user",
     "set_active",
+    "set_current_user",
     "verify_password",
     "verify_token",
 ]

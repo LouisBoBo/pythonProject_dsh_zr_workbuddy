@@ -1,8 +1,8 @@
 {
   "name": "company-dsh-plugins",
   "url": "http://175.178.238.31/dsh-plugins",
-  "updated": "2026-09-11",
-  "count": 4,
+  "updated": "2026-09-16",
+  "count": 5,
   "categories": {
     "tools": {
       "en": "Tools & Capabilities",
@@ -65,6 +65,20 @@
       "version": "0.1.5",
       "install": "dsh plugin --profile web add @zhongruan/dsh-remote-review",
       "added": "2026-09-11"
+    },
+    {
+      "name": "@zhongruan/dsh-knowledge",
+      "owner": "中软",
+      "url": "https://github.com/zhongruan/dsh-knowledge",
+      "category": "tools",
+      "description": {
+        "zh": "本机知识库（中软）：文档导入/管理、挂载召回；WorkBuddy 接线预装，默认关回写",
+        "en": "Zhongruan local knowledge base with import/mount/recall; preinstalled by WorkBuddy"
+      },
+      "npm": "@zhongruan/dsh-knowledge",
+      "version": "1.0.0",
+      "install": "dsh plugin --profile web add @zhongruan/dsh-knowledge@1.0.0",
+      "added": "2026-09-16"
     }
   ]
 }

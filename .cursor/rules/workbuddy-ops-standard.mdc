@@ -30,6 +30,14 @@ alwaysApply: true
    聊天壳用本机/桌面包的 `dsh` 发行版，**本仓不放 DSH 源码**。宿主跑起来后用插件中心/官方命令装。  
    `scripts/host.sh` 接线和启停（走 PATH `dsh`）；**禁止**把 Studio 源码树倒进本仓，除非用户明确要求另开独立仓。
 
+6. **公司/私有插件市场硬锁定**（详规 LOCKED：`.cursor/rules/workbuddy-company-market.mdc`）  
+   启停与打包必须保留合并市场 + seed + `@zhongruan` npmrc；无 `DSHM` **拒绝启动**；`verify_company_dsh_market.py` 不过不得交付。  
+   置空 `DSHM_REGISTRY_URL=` **无效**。唯一破窗：`WORKBUDDY_ALLOW_OFFICIAL_MARKET=1`（禁止写进发版默认）。
+
+7. **用量计量口径硬冻结**（详规 LOCKED：`.cursor/rules/workbuddy-usage-metering-locked.mdc`）  
+   Token 合计 = input+output+cache（reasoning 只明细）；引擎账本 + meter 插件分工合并、禁止叠记。  
+   **无用户明确允许禁止改公式/双计策略。**
+
 ## 分层（实施禁止推翻）
 
 | 层 | 路径 | 禁令 |
@@ -44,4 +52,6 @@ alwaysApply: true
 - ❌「必须重启 DSH 业务才生效」→ ✅ 日常改 feature 热插拔  
 - ❌「删掉 Bridge 也一样」→ ✅ 删 Bridge = 退出 DSH 架构  
 - ❌「引擎页能装任意上游包」→ ✅ 生态走宿主；features 要 manifest+index  
+- ❌「官方市场能刷列表=中软还在」→ ✅ 必须合并目录 + 进程带 `DSHM_REGISTRY_URL`；`verify_company_dsh_market` 过才算  
+- ✅「架构在 Bridge+features；验收看引擎；生态在 Studio 插件中心装」
 - ✅「架构在 Bridge+features；验收看引擎；生态在 Studio 插件中心装」

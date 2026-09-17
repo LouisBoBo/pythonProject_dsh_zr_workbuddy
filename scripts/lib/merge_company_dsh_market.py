@@ -277,22 +277,68 @@ def load_seed(root: Path) -> dict[str, Any]:
     raise RuntimeError(f"公司插件种子不可用: {path}")
 
 
+def overlay_seed_plugins(company: dict[str, Any], seed: dict[str, Any]) -> dict[str, Any]:
+    """远端/缓存公司目录为主；本仓 seed 补缺失条目（如尚未上架的 @zhongruan/dsh-knowledge）。"""
+    out = dict(company)
+    plugins: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for plugin in company.get("plugins") or []:
+        if not isinstance(plugin, dict):
+            continue
+        key = plugin_identity(plugin)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        plugins.append(plugin)
+    added = 0
+    for plugin in seed.get("plugins") or []:
+        if not isinstance(plugin, dict):
+            continue
+        key = plugin_identity(plugin)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        plugins.append(dict(plugin))
+        added += 1
+    out["plugins"] = plugins
+    if added:
+        out["updated"] = _today()
+        print(f"公司目录已叠加 seed 缺失插件 +{added}", file=sys.stderr)
+    # 分类：seed 里多出来的 key 并入（zhongruan 仍由 merge_catalogs 保证）
+    cats: dict[str, Any] = {}
+    for src in (company.get("categories"), seed.get("categories")):
+        if isinstance(src, dict):
+            for key, value in src.items():
+                if key not in cats:
+                    cats[key] = value
+    if cats:
+        out["categories"] = cats
+    out["count"] = len(plugins)
+    return out
+
+
 def resolve_company_catalog(root: Path, cache_dir: Path, company_url: str) -> dict[str, Any]:
     company_path = cache_dir / "company.json"
+    seed = load_seed(root)
+    base: dict[str, Any] | None = None
     try:
         live = http_json(company_url, COMPANY_TIMEOUT_S)
         if catalog_usable(live):
-            atomic_write_json(company_path, live)
-            return live
-        print("公司目录响应不可用，沿用缓存/种子", file=sys.stderr)
+            base = live  # type: ignore[assignment]
+        else:
+            print("公司目录响应不可用，沿用缓存/种子", file=sys.stderr)
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError, ValueError) as exc:
         print(f"公司目录拉取失败（不影响已有公司插件）: {exc}", file=sys.stderr)
-    cached = load_json(company_path)
-    if catalog_usable(cached):
-        return cached  # type: ignore[return-value]
-    seed = load_seed(root)
-    atomic_write_json(company_path, seed)
-    return seed
+    if base is None:
+        cached = load_json(company_path)
+        if catalog_usable(cached):
+            base = cached  # type: ignore[assignment]
+    if base is None:
+        atomic_write_json(company_path, seed)
+        return seed
+    merged_company = overlay_seed_plugins(base, seed)
+    atomic_write_json(company_path, merged_company)
+    return merged_company
 
 
 def load_meta(cache_dir: Path) -> dict[str, Any]:

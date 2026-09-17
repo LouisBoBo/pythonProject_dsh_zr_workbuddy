@@ -18,6 +18,9 @@ echo "== secrets check =="
 echo "== company dsh market merge =="
 ( cd "$ROOT/scripts/lib" && python3 -m unittest test_merge_company_dsh_market.py -q )
 
+echo "== ensure dsh-knowledge =="
+( cd "$ROOT/scripts/lib" && python3 -m unittest test_ensure_dsh_knowledge.py -q )
+
 echo "== vendor vs host (dsh-tools realpath) =="
 "$ROOT/scripts/check-vendor.sh"
 
