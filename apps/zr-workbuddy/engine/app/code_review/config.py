@@ -90,7 +90,8 @@ SKIP_DIR_NAMES = frozenset(
 
 @dataclass
 class CodeReviewConfig:
-    enabled: bool = False
+    # 常用能力：配置层恒开；启停只认功能插件 code-review
+    enabled: bool = True
     max_files: int = 40
     max_file_bytes: int = 120_000
     max_total_bytes: int = 800_000
@@ -102,7 +103,7 @@ class CodeReviewConfig:
 def get_config() -> CodeReviewConfig:
     raw = load_config().get("code_review") or {}
     return CodeReviewConfig(
-        enabled=bool(raw.get("enabled")),
+        enabled=True,
         max_files=max(1, min(int(raw.get("max_files") or 40), 200)),
         max_file_bytes=max(1024, min(int(raw.get("max_file_bytes") or 120_000), 500_000)),
         max_total_bytes=max(4096, min(int(raw.get("max_total_bytes") or 800_000), 2_000_000)),
@@ -114,12 +115,6 @@ def get_config() -> CodeReviewConfig:
 def availability() -> dict[str, Any]:
     cfg = get_config()
     full = load_config()
-    if not cfg.enabled:
-        return {
-            "ok": False,
-            "enabled": False,
-            "detail": "本机审码未开启：请到引擎「配置中心 → 审码车道」勾选开启并保存",
-        }
     if not llm_ready(full):
         return {
             "ok": False,

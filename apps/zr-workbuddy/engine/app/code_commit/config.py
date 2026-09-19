@@ -22,8 +22,7 @@ class CodeCommitConfig:
 
 def get_config() -> CodeCommitConfig:
     raw = load_config().get("code_commit") or {}
-    # 缺省/未写入时默认开启（总开关仍是功能插件 code-commit）
-    enabled = True if "enabled" not in raw else bool(raw.get("enabled"))
+    # 常用能力：配置层恒开；启停只认功能插件 code-commit
     # allow_blocked 仅环境变量，禁止靠 yaml 放行阻断项
     allow_blocked = (os.getenv("CODE_COMMIT_ALLOW_BLOCKED") or "").strip() in {
         "1",
@@ -32,7 +31,7 @@ def get_config() -> CodeCommitConfig:
         "yes",
     }
     return CodeCommitConfig(
-        enabled=enabled,
+        enabled=True,
         default_workspace=str(raw.get("default_workspace") or "").strip(),
         work_branch=str(raw.get("work_branch") or "").strip().strip("/"),
         remote_name=(str(raw.get("remote_name") or "origin").strip() or "origin"),
@@ -45,21 +44,12 @@ def get_config() -> CodeCommitConfig:
 
 def availability() -> dict[str, Any]:
     cfg = get_config()
-    if not cfg.enabled:
-        return {
-            "ok": False,
-            "enabled": False,
-            "detail": (
-                "提交车道未开启。请用浏览器打开 http://127.0.0.1:8000 "
-                "→ 左侧「配置中心」→ 向下滚动到第 7 步「提交车道」→ 勾选开启并保存"
-            ),
-        }
     return {
         "ok": True,
         "enabled": True,
-        "detail": "提交车道就绪（门禁审核 → 人确认 → commit/push）",
+        "detail": "提交车道就绪（门禁审核 → 人确认 → commit/push；分支默认当前，无则自动创建）",
         "default_push": cfg.default_push,
-        "work_branch": cfg.work_branch or "(空=使用仓库当前分支)",
+        "work_branch": "(默认当前分支；保护分支/无分支时自动创建)",
         "remote_name": cfg.remote_name,
         "max_files": cfg.max_files,
     }

@@ -22,6 +22,12 @@ deepseek:
   base_url: https://api.deepseek.com
   model: deepseek-chat
 
+# 视觉模型（对齐 simplified「商用模型 → 视觉模型」；OpenAI 兼容多模态）
+vision:
+  api_key: ""                                          # 智谱 / 通义等；勿提交
+  base_url: ""                                         # 例 https://open.bigmodel.cn/api/paas/v4
+  model: ""                                            # 例 glm-4v-flash、qwen-vl-plus
+
 # P0-1 本机 Cursor Local 写码（默认关闭；请在引擎「配置中心 → 写码车道」填写）
 code_dev:
   enabled: false
@@ -108,6 +114,16 @@ usage:
   # 写入本机 config.yaml（gitignore）；禁止提交仓库；日志禁止回显全文
   deepseek_platform_enabled: true
   deepseek_platform_token: ""
+
+# 自动化推送（对齐 simplified「系统配置 → 自动化推送」；企微群消息与飞书多维表格可只开其一）
+automations:
+  wecom_webhook_key: ""          # 企微群机器人 Webhook 完整地址或 key=
+  wecom_push_enabled: false      # 开启自动化结果推送
+  wecom_push_dry_run: false      # 推送联调：只打日志不真正发
+  feishu_app_id: ""              # 飞书开放平台 App ID
+  feishu_app_secret: ""          # 飞书 App Secret（加密存 config.yaml，勿提交）
+  feishu_bitable_enabled: false  # 开启飞书多维表格同步
+  feishu_bitable_dry_run: false  # 写表联调：只打日志不真正写
 
 # 本机「我的空间」（会话摘要进库、报告正文可自管；失败不影响聊天/审码）
 space:

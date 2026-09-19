@@ -436,10 +436,10 @@ def resolve_work_branch(
     """解析提交分支。
 
     优先级：
-    1. 配置中心 / 入参 work_branch（非空且通过校验）
+    1. 入参 work_branch（非空且通过校验；非保护分支）
     2. 环境变量 LOCAL_DEV_WORK_BRANCH / CURSOR_DEV_WORK_BRANCH
     3. **仓库当前分支**（非保护分支时）
-    4. 按用户名生成 dev/wb/<slug>（无仓库或当前在保护分支时的兜底）
+    4. 按用户名生成 dev/wb/<slug>（无仓库或当前在保护分支时自动创建用）
     """
     fixed = (work_branch or "").strip().strip("/")
     if not fixed:
@@ -457,7 +457,11 @@ def resolve_work_branch(
     if workspace:
         info = inspect_git_repo(workspace)
         cur = str(info.get("current_branch") or "").strip()
-        if cur and cur.lower() not in {"head", "detached"}:
+        if (
+            cur
+            and cur.lower() not in {"head", "detached"}
+            and cur.lower() not in _PROTECTED
+        ):
             ok, _ = validate_branch_name(cur)
             if ok:
                 return cur

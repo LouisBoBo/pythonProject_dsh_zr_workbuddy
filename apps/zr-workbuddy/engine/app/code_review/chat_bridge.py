@@ -97,17 +97,6 @@ async def handle_chat_code_review(text: str) -> dict[str, Any]:
 
     cfg = get_config()
     avail = availability()
-    if not cfg.enabled:
-        return _base(
-            thinking="检查审码车道配置。",
-            reply=(
-                "您这是在提**本机审码**需求。\n\n"
-                "审码车道尚未开启。请打开引擎 **配置中心 → 审码车道**，勾选开启并保存；"
-                "同时确保 LLM（DeepSeek / Ollama）已配置。\n\n"
-                "开启后在本对话中说「审核代码」，会出现**目标目录确认卡**。"
-            ),
-            note="code_review.disabled",
-        )
     if not avail.get("ok"):
         return _base(
             thinking="审码依赖 LLM，正在检查就绪状态。",

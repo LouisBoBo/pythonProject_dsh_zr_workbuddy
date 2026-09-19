@@ -62,6 +62,23 @@ ipcMain.handle('workbuddy:pick-folder', async (event, prompt) => {
   return { ok: true, path: result.filePaths[0], error: '' }
 })
 
+ipcMain.handle('workbuddy:check-update', async (event) => {
+  const srcUrl = String((event.sender && event.sender.getURL && event.sender.getURL()) || '')
+  if (!/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$)/i.test(srcUrl)) {
+    return { ok: false, updateAvailable: false, message: '非法来源' }
+  }
+  const currentVersion = String(app.getVersion() || '')
+  return {
+    ok: true,
+    currentVersion,
+    updateAvailable: false,
+    message:
+      '当前桌面壳 v' +
+      currentVersion +
+      '。暂无在线自动升级通道；如需更新请向管理员索取新安装包并覆盖安装（用户配置与后装功能会经 persist 保留）。',
+  }
+})
+
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()

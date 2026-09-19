@@ -18,6 +18,9 @@ SECRET_PATHS: List[Tuple[str, ...]] = [
     ("deepseek", "api_key"),
     ("code_dev", "cursor_api_key"),
     ("usage", "report_token"),
+    ("automations", "wecom_webhook_key"),
+    ("automations", "feishu_app_secret"),
+    ("vision", "api_key"),
 ]
 
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -83,6 +86,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "base_url": "https://api.deepseek.com",  # deepseek 默认；ollama 填 http://127.0.0.1:11434
         "model": "deepseek-chat",  # deepseek 默认；ollama 填已拉取的模型名，如 qwen2.5:7b
     },
+    # 视觉模型（对齐 simplified VISION_*；贴图识图 / 多模态）
+    "vision": {
+        "api_key": "",
+        "base_url": "",
+        "model": "",
+    },
     # P0-1 本机 Cursor Local 写码（默认关闭，避免误改工程）
     "code_dev": {
         "enabled": False,
@@ -116,6 +125,16 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "report_enabled": False,
         "report_url": "",  # 如 http://127.0.0.1:8000/api/usage-hub/v1
         "report_token": "",
+    },
+    # 自动化推送（对齐 simplified WECOM_* / FEISHU_*；P0-4 任务调度读此节）
+    "automations": {
+        "wecom_webhook_key": "",
+        "wecom_push_enabled": False,
+        "wecom_push_dry_run": False,
+        "feishu_app_id": "",
+        "feishu_app_secret": "",
+        "feishu_bitable_enabled": False,
+        "feishu_bitable_dry_run": False,
     },
     # 本机「我的空间」（会话摘要进库、报告正文进空间；失败不影响业务）
     "space": {

@@ -1,8 +1,8 @@
 {
   "name": "company-dsh-plugins",
   "url": "http://175.178.238.31/dsh-plugins",
-  "updated": "2026-09-17",
-  "count": 5,
+  "updated": "2026-09-18",
+  "count": 6,
   "categories": {
     "tools": {
       "en": "Tools & Capabilities",
@@ -79,6 +79,20 @@
       "version": "0.1.1",
       "install": "dsh plugin --profile web add @zhongruan/dsh-automations@0.1.1",
       "added": "2026-09-17"
+    },
+    {
+      "name": "@zhongruan/dsh-esc",
+      "owner": "中软",
+      "url": "https://github.com/zhongruan/dsh-esc",
+      "category": "tools",
+      "description": {
+        "zh": "专家·技能·连接器：PCB 岗位角色、售后/测试 SOP、MES 与 Dify 取数（可与现有查数/8D 并存）",
+        "en": "Experts, skills and connectors for PCB roles, after-sales/test SOPs, MES and Dify"
+      },
+      "npm": "@zhongruan/dsh-esc",
+      "version": "0.1.0",
+      "install": "dsh plugin --profile web add @zhongruan/dsh-esc@0.1.0",
+      "added": "2026-09-18"
     }
   ]
 }

@@ -37,6 +37,9 @@ def mutating_path_guarded(path: str, method: str) -> bool:
         return True
     if p.startswith("/api/space/"):
         return True
+    # 登录用户写盘：有 Origin 时必须回环，避免外站页面带登录态提交
+    if p == "/api/feedback":
+        return True
     return False
 
 

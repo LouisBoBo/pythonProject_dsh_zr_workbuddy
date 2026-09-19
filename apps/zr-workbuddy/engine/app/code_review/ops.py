@@ -29,14 +29,6 @@ async def iter_review_events(
 ):
     """SSE 用：逐步 yield step/status，最后 done（含 report_id）。"""
     cfg = get_config()
-    if not cfg.enabled:
-        yield {
-            "type": "done",
-            "ok": False,
-            "detail": "本机审码未开启：请到引擎「配置中心 → 审码车道」勾选开启并保存",
-            "reply": "本机审码未开启",
-        }
-        return
     avail = availability()
     if not avail.get("ok"):
         yield {

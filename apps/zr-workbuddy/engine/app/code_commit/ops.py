@@ -97,7 +97,7 @@ def preview_commit_branch(
     *,
     user_branch: str = "",
 ) -> dict[str, Any]:
-    """确认卡分支预览：当前分支 → 配置中心 → 需用户填写（不自动生成 anon）。"""
+    """确认卡分支预览：人手填 → 当前分支 → 自动创建名（commit 时 checkout -B）。"""
     cfg = get_config()
     config_branch = (cfg.work_branch or "").strip().strip("/")
     current_branch = ""
@@ -139,41 +139,34 @@ def preview_commit_branch(
                 "on_protected": False,
             }
 
-    if config_branch:
-        ok, err = validate_branch_name(config_branch)
-        if ok:
-            hint = f"使用配置中心工作分支「{config_branch}」"
-            if on_protected and current_branch:
-                hint = (
-                    f"当前在保护分支「{current_branch}」，"
-                    f"已改用配置中心分支「{config_branch}」"
-                )
-            return {
-                "work_branch": config_branch,
-                "current_branch": current_branch,
-                "config_branch": config_branch,
-                "branch_source": "config",
-                "need_user_branch": False,
-                "branch_hint": hint,
-                "on_protected": on_protected,
-            }
+    # 无可用当前分支（含保护分支）：自动起名，确认提交时 checkout -B 创建
+    auto = resolve_work_branch(workspace=root_s or None, work_branch="")
+    if auto:
+        if on_protected and current_branch:
+            hint = (
+                f"当前在保护分支「{current_branch}」，将新建并切换到「{auto}」再提交"
+            )
+        elif not root_s:
+            hint = f"选好工程后将使用分支「{auto}」（无当前分支时自动创建）"
+        else:
+            hint = f"将使用分支「{auto}」（不存在则提交时自动创建）"
+        return {
+            "work_branch": auto,
+            "current_branch": current_branch,
+            "config_branch": config_branch,
+            "branch_source": "auto",
+            "need_user_branch": False,
+            "branch_hint": hint,
+            "on_protected": on_protected,
+        }
 
-    if on_protected and current_branch:
-        hint = (
-            f"当前在保护分支「{current_branch}」，禁止直接提交。"
-            "请填写功能分支名，或到配置中心设置工作分支。"
-        )
-    elif not root_s:
-        hint = "请先选择工程目录；分支将自动填入当前分支或配置中心分支。"
-    else:
-        hint = "未能识别可提交分支，请手动填写要提交的分支名。"
     return {
         "work_branch": "",
         "current_branch": current_branch,
         "config_branch": config_branch,
         "branch_source": "none",
         "need_user_branch": True,
-        "branch_hint": hint,
+        "branch_hint": "未能解析提交分支，请手动填写。",
         "on_protected": on_protected,
     }
 
@@ -214,12 +207,6 @@ def prepare(
 ) -> dict[str, Any]:
     """列出待提交文件（同步池仍脏 ∪ Git 可提交脏文件）。"""
     cfg = get_config()
-    if not cfg.enabled:
-        return {
-            "ok": False,
-            "detail": "提交车道未开启",
-            "reply": "请用浏览器打开 http://127.0.0.1:8000 → 配置中心 → 第 7 步「提交车道」开启并保存",
-        }
     check = check_path(workspace)
     if not check.get("ok"):
         return check
@@ -291,13 +278,6 @@ def start_gate(
 ) -> dict[str, Any]:
     """列出文件 → 跑门禁 → 落盘 Job。阻断则 status=blocked，不可 confirm。"""
     cfg = get_config()
-    if not cfg.enabled:
-        return {
-            "ok": False,
-            "detail": "提交车道未开启",
-            "reply": "请用浏览器打开 http://127.0.0.1:8000 → 配置中心 → 第 7 步「提交车道」开启并保存",
-            "can_commit": False,
-        }
 
     prep = prepare(workspace, files=files, work_branch=work_branch)
     if not prep.get("ok"):
@@ -423,8 +403,6 @@ def confirm(
 ) -> dict[str, Any]:
     """HITL 确认：approve → commit(+push)；reject → skipped。禁止模型代执行。"""
     cfg = get_config()
-    if not cfg.enabled:
-        return {"ok": False, "detail": "提交车道未开启", "reply": "提交车道未开启"}
 
     job = load_job(default_data_dir(), job_id)
     if not job:
@@ -599,8 +577,6 @@ def confirm(
 def push_retry(job_id: str) -> dict[str, Any]:
     """本地已 commit、仅重试 push（不重新 commit）。"""
     cfg = get_config()
-    if not cfg.enabled:
-        return {"ok": False, "detail": "提交车道未开启", "reply": "提交车道未开启"}
 
     job = load_job(default_data_dir(), job_id)
     if not job:

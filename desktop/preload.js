@@ -8,4 +8,5 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('workbuddyDesktop', {
   pickFolder: (prompt) => ipcRenderer.invoke('workbuddy:pick-folder', prompt || '选择工程目录'),
+  checkUpdate: () => ipcRenderer.invoke('workbuddy:check-update'),
 })

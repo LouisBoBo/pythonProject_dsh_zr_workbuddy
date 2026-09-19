@@ -265,15 +265,10 @@ class CodeReviewTests(unittest.TestCase):
         self.assertEqual(seeded, [], [f.title for f in seeded])
 
     def test_run_blocked_when_disabled(self):
-        from app.code_review import ops
+        # 配置层恒开；「未开启」文案不应再出现（启停只认功能插件 code-review）
+        from app.code_review.config import get_config
 
-        with mock.patch.object(ops, "get_config") as gc:
-            from app.code_review.config import CodeReviewConfig
-
-            gc.return_value = CodeReviewConfig(enabled=False)
-            out = ops.run_review(local_path="/tmp/x")
-        self.assertFalse(out.get("ok"))
-        self.assertIn("未开启", out.get("detail") or "")
+        self.assertTrue(get_config().enabled)
 
     def test_is_code_review_question(self):
         from app.code_review.intent import is_code_review_question

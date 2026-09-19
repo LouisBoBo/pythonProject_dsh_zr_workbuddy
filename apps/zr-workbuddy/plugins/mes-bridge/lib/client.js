@@ -2,7 +2,7 @@
  * ZR-WorkBuddy 客户端：
  * - 主聊天 toolview：审码/提交/写码选目录卡
  * - 宿主：settings.section「WorkBuddy」配置中心；
- *   sidebar.footer.action：「资料库」「用量」与「设置」同级（产品入口 :3081）
+ *   conversation.view「资料库」「用量」与对话/轨迹同级（产品入口 :3081）
  * 引擎地址 RUNTIME 块由 plugin.sh 从 runtime.yaml 同步。
  */
 /*RUNTIME_BEGIN*/
@@ -161,7 +161,7 @@ window.__ModuleLoader__.load({
     var cssInjected = false;
     function ensureCss() {
       if (typeof document === "undefined") return;
-      var ver = "composer-72";
+      var ver = "composer-105";
       if (cssInjected && document.querySelector("style[data-wb-cd-css='" + ver + "']")) return;
       document.querySelectorAll("style[data-plugin='@dsh-external/dsh-mes-bridge']").forEach(function (el) {
         if (el.parentNode) el.parentNode.removeChild(el);
@@ -296,35 +296,108 @@ window.__ModuleLoader__.load({
         ".wb-cr-file{display:flex;gap:8px;align-items:flex-start;margin:4px 0;cursor:pointer}" +
         ".wb-cr-file span{word-break:break-all;font-family:ui-monospace,Menlo,monospace}" +
         ".wb-cr-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}" +
-        ".wb-set{font:13px/1.5 -apple-system,'PingFang SC','Microsoft YaHei',sans-serif;color:var(--ds-color-text-primary,#111827);max-width:720px;padding:4px 4px 24px}" +
-        ".wb-set-lead{font-size:12px;color:var(--ds-color-text-secondary,#64748b);margin:0 0 14px}" +
-        ".wb-set-eng{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px;padding:10px 12px;border:1px solid var(--ds-color-border-subtle,#e5e7eb);border-radius:10px;background:var(--ds-color-bg-secondary,#f8fafc)}" +
-        ".wb-set-eng label{font-size:11px;font-weight:600;color:#374151}" +
-        ".wb-set-eng input{width:110px;border:1px solid #d1d5db;border-radius:8px;padding:6px 8px;font:12px/1.4 ui-monospace,Menlo,monospace}" +
-        ".wb-set-card{border:1px solid var(--ds-color-border-subtle,#e5e7eb);border-radius:12px;background:#fff;margin:0 0 12px;overflow:hidden}" +
-        ".wb-set-card h3{margin:0;padding:10px 12px;font-size:13px;font-weight:700;border-bottom:1px solid #eef0f3;background:#fafbfc}" +
-        ".wb-set-card .body{padding:12px}" +
-        ".wb-set-hint{font-size:11px;color:#64748b;margin:0 0 10px}" +
-        ".wb-set-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}" +
+        ".wb-set{display:flex;flex-direction:column;gap:0;height:calc(min(720px,100vh - 120px));max-height:calc(100vh - 140px);min-height:360px;width:100%;max-width:none;margin:0 -4px;padding:0 2px 4px;font:13px/1.5 -apple-system,'PingFang SC','Microsoft YaHei',sans-serif;color:#0f172a;box-sizing:border-box;overflow:hidden}" +
+        /* 宿主设置弹框默认 800px；与用量弹框对齐 920（VOzbGW_panel 为当前 hash，结构选择器兜底） */
+        ".VOzbGW_panel," +
+        "[class*='_panel'][class]:has([class*='_navTitle'])," +
+        "[class*='_panel'][class]:has([class*='_navCell']){width:920px!important;max-width:calc(100vw - 48px)!important}" +
+        ".wb-set-host-wide{width:920px!important;max-width:calc(100vw - 48px)!important}" +
+        /* WorkBuddy 页：外层 options 不滚，只滚右侧主栏；不改宿主 panel 的 display，避免内容被顶到底 */
+        ".VOzbGW_options:has(.wb-set)," +
+        "[class*='_options']:has(.wb-set){overflow:hidden!important;min-height:0}" +
+        ".wb-set-lead{font-size:12px;color:#64748b;margin:0 0 8px;line-height:1.45;padding:0 4px;flex:none}" +
+        ".wb-set-shell{display:flex;align-items:stretch;flex:1 1 auto;min-height:0;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;background:#f1f5f9;box-shadow:0 1px 3px rgba(15,23,42,.04)}" +
+        ".wb-set-nav{flex:none;width:132px;padding:10px 6px;background:#e8edf3;display:flex;flex-direction:column;gap:2px;border-right:1px solid #dde4ec;overflow-x:hidden;overflow-y:auto}" +
+        ".wb-set-nav-btn{display:block;width:100%;text-align:left;border:none;background:transparent;border-radius:8px;padding:9px 10px;font:600 12px/1.35 inherit;color:#64748b;cursor:pointer;transition:background .12s,color .12s,box-shadow .12s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
+        ".wb-set-nav-btn:hover{background:rgba(255,255,255,.6);color:#0f172a}" +
+        ".wb-set-nav-btn.active{background:#fff;color:#0f172a;box-shadow:0 1px 3px rgba(15,23,42,.08)}" +
+        ".wb-set-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;background:#f8fafc;padding:12px 14px 10px;overflow-x:hidden;overflow-y:auto}" +
+        ".wb-set-eng{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin:0 0 12px;padding:12px 14px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;flex:none}" +
+        ".wb-set-eng .eng-field{display:flex;flex-direction:column;gap:5px}" +
+        ".wb-set-eng label{font-size:12px;font-weight:600;color:#334155}" +
+        ".wb-set-eng input{width:136px;border:1px solid #d0d9e6;border-radius:8px;padding:8px 10px;font:12px/1.4 ui-monospace,Menlo,monospace;background:#fff;color:#0f172a}" +
+        ".wb-set-eng input:focus{outline:none;border-color:#60a5fa;box-shadow:0 0 0 3px rgba(37,99,235,.12)}" +
+        ".wb-set-card{border:1px solid #e2e8f0;border-radius:12px;background:#fff;margin:0;overflow:visible;box-shadow:0 1px 2px rgba(15,23,42,.03);flex:none;display:flex;flex-direction:column}" +
+        ".wb-set-card h3{margin:0;padding:14px 16px 4px;font-size:16px;font-weight:700;letter-spacing:-.01em;color:#0f172a}" +
+        ".wb-set-card .body{padding:2px 16px 14px;overflow:visible;flex:none}" +
+        ".wb-set-hint{font-size:12px;color:#64748b;margin:0 0 12px;line-height:1.55}" +
+        ".wb-set-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px}" +
         ".wb-set-grid .full{grid-column:1/-1}" +
-        ".wb-set-field label{display:block;font-size:11px;font-weight:600;color:#374151;margin:0 0 4px}" +
-        ".wb-set-field input,.wb-set-field select{width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:7px 9px;font:12px/1.4 inherit}" +
-        ".wb-set-check{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:12px}" +
-        ".wb-set-radios{display:flex;flex-wrap:wrap;gap:10px 14px;margin:0 0 10px;font-size:12px}" +
-        ".wb-set-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;position:sticky;bottom:0;padding:10px 0 0;background:linear-gradient(180deg,transparent,var(--ds-color-bg-primary,#fff) 28%)}" +
-        ".wb-set-btn{border:1px solid #d1d5db;background:#f9fafb;border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer}" +
-        ".wb-set-btn:hover{border-color:#0ea5e9;color:#0369a1}" +
+        ".wb-set-field{display:flex;flex-direction:column;gap:6px;min-width:0}" +
+        ".wb-set-field label{display:block;font-size:12px;font-weight:600;color:#334155;margin:0}" +
+        ".wb-set-field input:not([type=radio]):not([type=checkbox]),.wb-set-field select,.wb-set-field textarea{width:100%;box-sizing:border-box;border:1px solid #d0d9e6;border-radius:8px;padding:9px 12px;font:13px/1.4 inherit;background:#fff;color:#0f172a;transition:border-color .12s,box-shadow .12s}" +
+        ".wb-set-field input:not([type=radio]):not([type=checkbox]):focus,.wb-set-field select:focus,.wb-set-field textarea:focus{outline:none;border-color:#60a5fa;box-shadow:0 0 0 3px rgba(37,99,235,.12)}" +
+        ".wb-set-field textarea{min-height:72px;resize:vertical;font-family:ui-monospace,Menlo,monospace;font-size:12px}" +
+        ".wb-set-field input::placeholder,.wb-set-field textarea::placeholder{color:#94a3b8}" +
+        ".wb-set-jobbody{margin-top:10px;max-height:220px;overflow:auto;border:1px solid #eef2f7;border-radius:8px;padding:10px 12px;background:#f8fafc;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:#334155}" +
+        ".wb-set-jobbody.empty{color:#94a3b8}" +
+        /* 宿主侧栏「远端审码 / Cursor 写码」并进 WorkBuddy 后隐藏，避免双入口（勿伤 .wb-set 内二级导航） */
+        "[data-wb-host-hide='1']{display:none!important}" +
+        ".wb-set-check{display:flex;align-items:flex-start;gap:10px;margin:0;font-size:13px;color:#0f172a;padding:4px 0;line-height:1.45}" +
+        ".wb-set-check input[type=checkbox]{width:16px;height:16px;margin-top:2px;accent-color:#2563eb;cursor:pointer;flex:none}" +
+        ".wb-set-radios{display:flex;flex-wrap:wrap;gap:8px;margin:0;font-size:12px;align-items:center}" +
+        ".wb-set-radios label{display:inline-flex;align-items:center;gap:6px;width:auto;max-width:none;height:34px;box-sizing:border-box;padding:0 12px;border:1px solid #d0d9e6;border-radius:8px;background:#fff;cursor:pointer;color:#475569;font-weight:500;line-height:1.2;white-space:nowrap;flex:0 0 auto;transition:border-color .12s,background .12s,color .12s}" +
+        ".wb-set-radios label:has(input:checked),.wb-set-radios label.active{border-color:#93c5fd;background:#eff6ff;color:#1d4ed8}" +
+        ".wb-set-radios input[type=radio]{width:14px!important;height:14px!important;min-width:14px;margin:0;padding:0;flex:none;accent-color:#2563eb;border:none;box-shadow:none}" +
+        ".wb-set-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;padding-top:4px}" +
+        ".wb-set-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;margin:6px 0 0;padding:8px 4px 0;border-top:1px solid #e2e8f0;flex:none;background:#fff;z-index:1}" +
+        ".wb-set-bar .wb-set-msg{margin-right:auto;max-width:min(480px,55%);text-align:left}" +
+        ".wb-set-auto-stack{display:flex;flex-direction:column;gap:12px;flex:none}" +
+        ".wb-set-presets{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px}" +
+        ".wb-set-preset{border:1px solid #d0d9e6;background:#fff;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;color:#334155;transition:background .12s,border-color .12s,color .12s}" +
+        ".wb-set-preset:hover{border-color:#93c5fd;color:#1d4ed8}" +
+        ".wb-set-preset.active{background:#2563eb;border-color:#2563eb;color:#fff}" +
+        ".wb-set-badge{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;color:#6366f1;background:#eef2ff;vertical-align:middle;line-height:1.4}" +
+        ".wb-set-field-meta{font-size:12px;color:#94a3b8;margin:4px 0 0;line-height:1.45}" +
+        ".wb-set-clear{border:none;background:none;color:#dc2626;font-size:12px;cursor:pointer;padding:0;margin-left:8px;font-weight:600}" +
+        ".wb-set-clear:hover{text-decoration:underline}" +
+        ".wb-set-btn{border:1px solid #d0d9e6;background:#fff;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;color:#0f172a;transition:border-color .12s,background .12s,color .12s}" +
+        ".wb-set-btn:hover{border-color:#93c5fd;color:#1d4ed8;background:#f8fbff}" +
         ".wb-set-btn:disabled{opacity:.5;cursor:not-allowed}" +
-        ".wb-set-btn.primary{background:linear-gradient(135deg,#0f766e,#0ea5e9);border:none;color:#fff;font-weight:600}" +
+        ".wb-set-btn.primary{background:#2563eb;border-color:#2563eb;color:#fff}" +
+        ".wb-set-btn.primary:hover{background:#1d4ed8;border-color:#1d4ed8;color:#fff}" +
         ".wb-set-msg{font-size:12px;color:#64748b}" +
         ".wb-set-msg.ok{color:#047857}" +
         ".wb-set-msg.err{color:#b91c1c}" +
-        ".wb-set-test{font-size:11px;margin:8px 0 0;white-space:pre-wrap;color:#64748b}" +
+        ".wb-set-test{font-size:12px;margin:12px 0 0;white-space:pre-wrap;color:#475569;background:#f8fafc;border:1px solid #eef2f7;border-radius:8px;padding:10px 12px}" +
+        "@media (max-width:720px){.wb-set{height:auto;max-height:none;min-height:0;overflow:visible}.wb-set-shell{flex-direction:column;min-height:0;overflow:visible}.wb-set-nav{width:auto;flex-direction:row;flex-wrap:wrap;overflow:auto;border-right:none;border-bottom:1px solid #dde4ec}.wb-set-nav-btn{width:auto}.wb-set-main{overflow:visible}.wb-set-grid{grid-template-columns:1fr}}" +
         ".wb-usage-nav-slot{width:100%;min-width:0;flex:1 0 100%}" +
         ".wb-usage-nav{box-sizing:border-box;cursor:pointer;width:calc(100% + 4px);height:42px;color:var(--dsw-alias-label-primary,inherit);background:transparent;border:none;border-radius:12px;flex:none;align-items:center;gap:8px;margin:4px -2px;padding:0 10px 0 8px;font:inherit;font-size:14px;line-height:22px;display:flex;overflow:hidden}" +
         ".wb-usage-nav:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(15,23,42,.06))}" +
         ".wb-usage-nav.rail{border-radius:50%;justify-content:center;gap:0;width:36px;height:36px;margin:8px 0 10px;padding:0}" +
         ".wb-usage-nav-label{white-space:nowrap;overflow:hidden}" +
+        /* 资料库 / 用量页签：隐藏宿主输入区与 StatsLine，扩大内容区 */
+        "[data-conversation-scroll]:has(.wb-space-view) > [data-composer-seat]," +
+        "[data-conversation-scroll]:has(.wb-usage-view) > [data-composer-seat]," +
+        "[data-conversation-scroll]:has([data-wb-space-view]) > [data-composer-seat]," +
+        "[data-conversation-scroll]:has([data-wb-usage-view]) > [data-composer-seat]{display:none!important;height:0!important;min-height:0!important;overflow:hidden!important;pointer-events:none!important}" +
+        "[data-conversation-scroll]:has(.wb-space-view)," +
+        "[data-conversation-scroll]:has(.wb-usage-view)," +
+        "[data-conversation-scroll]:has([data-wb-space-view])," +
+        "[data-conversation-scroll]:has([data-wb-usage-view]){--dsh-composer-height:0px}" +
+        /* 资料库：conversation.view 全页；内容区宽度与用量一致（920 居中） */
+        ".wb-space-view{box-sizing:border-box;display:flex;flex-direction:column;height:100%;min-height:0;width:100%;max-width:920px;margin-left:auto;margin-right:auto;overflow:hidden;background:var(--dsw-alias-bg-layer-2,#fff);flex:1 1 auto}" +
+        ".wb-space-view-body{box-sizing:border-box;flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;padding:12px 20px 16px;position:relative;width:100%;max-width:920px}" +
+        ".wb-space-view-body .wb-lib-page{flex:1;min-height:0;height:auto!important;max-width:920px;width:100%;padding-top:0;box-sizing:border-box}" +
+        ".wb-space-view-body:has(.wb-lib-has-preview){padding:0;overflow:hidden}" +
+        ".wb-space-view .wb-lib-has-preview{flex:1;min-height:0;height:100%;position:relative;max-width:920px;width:100%}" +
+        "[data-conversation-scroll]:has(.wb-space-view) > [data-slot='conversation.session']," +
+        "[class*='_viewArea']:has(.wb-space-view){display:flex!important;flex-direction:column;flex:1 1 0!important;min-height:0!important;height:100%;overflow:hidden!important;width:100%}" +
+        /* 用量：conversation.view 全页（与对话/轨迹同级 tab）
+         * 短内容在会话区垂直居中；长内容随宿主 scrollBody 滚，不裁切明细。 */
+        "[data-conversation-scroll]:has(.wb-usage-view) > [data-slot='conversation.session']{display:flex;flex-direction:column;justify-content:center;flex:1 1 auto;min-height:100%;width:100%;max-width:100%;box-sizing:border-box}" +
+        "[class*='_viewArea']:has(.wb-usage-view){display:flex!important;flex-direction:column;justify-content:center;align-items:stretch;flex:1 1 auto;height:auto!important;max-height:none!important;min-height:0;overflow:visible!important;width:100%}" +
+        ".wb-usage-view{box-sizing:border-box;display:flex;flex-direction:column;height:auto!important;max-height:none!important;min-height:0;width:100%;max-width:920px;margin-left:auto;margin-right:auto;flex:none;overflow:visible!important;background:var(--dsw-alias-bg-layer-2,#fff)}" +
+        ".wb-usage-view-head{box-sizing:border-box;flex:none;display:flex;align-items:center;justify-content:flex-start;gap:12px;padding:12px 20px 10px;border-bottom:1px solid #eef0f3}" +
+        ".wb-usage-view-head .t{font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary,#111827)}" +
+        ".wb-usage-view-body{flex:none;min-height:0;height:auto;overflow:visible;padding:0 20px 40px}" +
+        "[data-conversation-scroll] .wb-usage-view{height:auto!important;max-height:none!important;min-height:0;overflow:visible!important}" +
+        /* 勿沿用配置中心 .wb-set 固定高度+overflow:hidden，否则 LLM/Cursor 明细图与底栏被裁掉 */
+        ".wb-usage-view .wb-set," +
+        ".wb-usage-view .wb-usage-page," +
+        ".wb-usage-panel .wb-set," +
+        ".wb-usage-panel .wb-usage-page{height:auto!important;max-height:none!important;min-height:0!important;overflow:visible!important;margin:0}" +
+        ".wb-usage-view-body .wb-usage-page{max-width:920px;padding-top:12px;padding-bottom:8px}" +
         ".wb-usage-overlay{z-index:1000;justify-content:center;align-items:center;display:flex;position:fixed;inset:0}" +
         ".wb-usage-mask{background:var(--dsw-alias-bg-mask-1,rgba(15,23,42,.45));backdrop-filter:var(--dsw-mask-blur,blur(8px));position:absolute;inset:0}" +
         ".wb-usage-panel{z-index:1;background:var(--dsw-alias-bg-layer-2,#fff);width:920px;max-width:calc(100vw - 48px);height:min(800px,100vh - 48px);box-shadow:var(--dsw-shadow-lv3,0 16px 48px rgba(15,23,42,.18));border-radius:24px;display:flex;flex-direction:column;position:relative;overflow:hidden}" +
@@ -347,7 +420,8 @@ window.__ModuleLoader__.load({
         ".wb-usage-panel .wb-usage-page{max-width:none;padding-top:0}" +
         ".wb-usage-panel .wb-usage-page-title{display:none}" +
         ".wb-usage-panel .wb-set-bar{position:static;background:transparent}" +
-        ".wb-usage-page{max-width:920px;padding-top:12px}" +
+        ".wb-usage-page{max-width:920px;padding-top:12px;box-sizing:border-box;width:100%;font:13px/1.5 -apple-system,'PingFang SC','Microsoft YaHei',sans-serif;color:#0f172a}" +
+        ".wb-usage-page-title{font-size:18px;font-weight:700;margin:0 0 8px;color:#0f172a}" +
         ".wb-usage-filter{display:flex;align-items:center;gap:8px;margin:0 0 12px;min-height:36px}" +
         ".wb-usage-filter label{font-size:12px;color:#64748b;font-weight:600}" +
         ".wb-usage-filter input[type=date]{border:1px solid #d1d5db;border-radius:8px;padding:6px 10px;font:13px inherit;color:#111827;background:#fff}" +
@@ -382,19 +456,62 @@ window.__ModuleLoader__.load({
         ".wb-header-logout .name{max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--ds-color-text-primary,#0f172a);font-size:13px}" +
         ".wb-header-logout .caret{width:10px;height:10px;flex:none;color:#94a3b8;transition:transform .15s}" +
         ".wb-header-logout.open .caret{transform:rotate(180deg)}" +
-        ".wb-header-logout .menu{position:absolute;top:calc(100% + 10px);right:0;z-index:2147483002;min-width:148px;background:#fff;border:1px solid #e8eef5;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.12);padding:6px 0}" +
+        ".wb-header-logout .menu{position:absolute;top:calc(100% + 10px);right:0;z-index:2147483002;min-width:168px;background:#fff;border:1px solid #e8eef5;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.12);padding:6px 0}" +
         ".wb-header-logout .menu::before{content:'';position:absolute;top:-5px;right:18px;width:10px;height:10px;background:#fff;border-left:1px solid #e8eef5;border-top:1px solid #e8eef5;transform:rotate(45deg)}" +
-        ".wb-header-logout .menu-logout{position:relative;z-index:1;display:block;width:100%;border:none;background:transparent;text-align:left;padding:8px 14px;font:13px inherit;color:#0f172a;cursor:pointer}" +
-        ".wb-header-logout .menu-logout:hover{background:#f8fafc}" +
-        ".wb-header-logout .menu-logout:disabled{opacity:.6;cursor:not-allowed}" +
+        ".wb-header-logout .menu-item,.wb-header-logout .menu-logout{position:relative;z-index:1;display:block;width:100%;border:none;background:transparent;text-align:left;padding:8px 14px;font:13px inherit;color:#0f172a;cursor:pointer}" +
+        ".wb-header-logout .menu-item:hover,.wb-header-logout .menu-logout:hover{background:#f8fafc}" +
+        ".wb-header-logout .menu-item:disabled,.wb-header-logout .menu-logout:disabled{opacity:.6;cursor:not-allowed}" +
+        ".wb-header-logout .menu-sep{height:1px;margin:6px 10px;background:#eef2f7;border:none}" +
         ".wb-header-logout-mask{position:fixed;inset:0;z-index:2147483001;background:transparent}" +
+        ".wb-account-dialog-overlay{position:fixed;inset:0;z-index:2147483010;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(15,23,42,.28)}" +
+        ".wb-account-dialog{width:min(640px,100%);background:#fff;border-radius:14px;border:1px solid #e8eef5;box-shadow:0 16px 48px rgba(15,23,42,.18);overflow:hidden;font:13px/1.5 -apple-system,'PingFang SC','Microsoft YaHei',sans-serif;color:#0f172a}" +
+        ".wb-account-dialog.feedback{width:min(720px,100%)}" +
+        ".wb-account-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 16px 8px 20px}" +
+        ".wb-account-dialog-head .t{font-size:16px;font-weight:600}" +
+        ".wb-account-dialog-x{width:28px;height:28px;border:none;border-radius:28px;background:transparent;cursor:pointer;font-size:18px;line-height:1;color:#0f172a}" +
+        ".wb-account-dialog-x:hover{background:rgba(15,23,42,.06)}" +
+        ".wb-account-dialog-body{padding:8px 20px 20px;display:flex;flex-direction:column;gap:12px}" +
+        ".wb-account-dialog-body .hint{margin:0;color:#64748b;font-size:12px;line-height:1.55}" +
+        ".wb-account-dialog-body .ver{margin:0;font-size:13px;font-weight:600}" +
+        ".wb-account-dialog-body textarea{width:100%;min-height:220px;box-sizing:border-box;resize:vertical;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;font:14px/1.55 inherit;color:#0f172a}" +
+        ".wb-account-dialog-body textarea:focus{outline:none;border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.15)}" +
+        ".wb-account-dialog-body .err{margin:0;color:#e11d48;font-size:12px}" +
+        ".wb-account-dialog-body .ok{margin:0;color:#15803d;font-size:12px}" +
+        ".wb-fb-success{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:260px;padding:24px 12px;text-align:center}" +
+        ".wb-fb-success .ico{width:48px;height:48px;border-radius:999px;background:#dcfce7;color:#15803d;display:inline-flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;line-height:1}" +
+        ".wb-fb-success .t{margin:0;font-size:18px;font-weight:700;color:#166534}" +
+        ".wb-fb-success .s{margin:0;font-size:13px;color:#64748b}" +
+        ".wb-account-dialog-body .msg-banner{margin:0;padding:10px 12px;border-radius:10px;font-size:13px;font-weight:600;line-height:1.4}" +
+        ".wb-account-dialog-body .msg-banner.ok{background:#ecfdf5;color:#166534;border:1px solid #bbf7d0}" +
+        ".wb-account-dialog-body .msg-banner.err{background:#fff1f2;color:#be123c;border:1px solid #fecdd3}" +
+        ".wb-fb-images{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}" +
+        ".wb-fb-thumb{position:relative;width:96px;height:96px;border-radius:10px;overflow:hidden;border:1px solid #e2e8f0;background:#f1f5f9;flex:none;cursor:zoom-in;padding:0}" +
+        ".wb-fb-thumb img{width:100%;height:100%;object-fit:contain;display:block;background:#f8fafc}" +
+        ".wb-fb-thumb .rm{position:absolute;top:4px;right:4px;z-index:2;width:22px;height:22px;border:none;border-radius:999px;background:rgba(15,23,42,.72);color:#fff;font-size:14px;line-height:1;cursor:pointer}" +
+        ".wb-fb-thumb .rm:hover{background:rgba(15,23,42,.9)}" +
+        ".wb-fb-add{width:96px;height:96px;border:1px dashed #cbd5e1;border-radius:10px;background:#fff;color:#64748b;font:12px inherit;cursor:pointer;display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}" +
+        ".wb-fb-add:hover{border-color:#94a3b8;color:#0f172a;background:#f8fafc}" +
+        ".wb-fb-add:disabled{opacity:.55;cursor:not-allowed}" +
+        ".wb-fb-add input{display:none}" +
+        ".wb-fb-lightbox{position:fixed;inset:0;z-index:2147483020;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(15,23,42,.72)}" +
+        ".wb-fb-lightbox-inner{position:relative;max-width:min(960px,96vw);max-height:90vh;display:flex;flex-direction:column;align-items:center;gap:10px}" +
+        ".wb-fb-lightbox-inner img{max-width:100%;max-height:calc(90vh - 40px);object-fit:contain;border-radius:10px;background:#0f172a;box-shadow:0 16px 48px rgba(0,0,0,.35)}" +
+        ".wb-fb-lightbox-cap{margin:0;color:#e2e8f0;font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+        ".wb-fb-lightbox-x{position:absolute;top:-8px;right:-8px;width:32px;height:32px;border:none;border-radius:999px;background:#fff;color:#0f172a;font-size:20px;line-height:1;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.2)}" +
+        ".wb-fb-lightbox-x:hover{background:#f8fafc}" +
+        ".wb-fb-broken{display:flex;align-items:center;justify-content:center;width:100%;height:100%;padding:8px;box-sizing:border-box;font-size:11px;color:#94a3b8;text-align:center;line-height:1.35}" +
+        ".wb-account-dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}" +
+        ".wb-account-dialog-actions .btn{height:36px;padding:0 14px;border-radius:9px;border:1px solid #e2e8f0;background:#fff;font:600 13px inherit;cursor:pointer;color:#0f172a}" +
+        ".wb-account-dialog-actions .btn.primary{background:#1B5E3B;border-color:#1B5E3B;color:#fff}" +
+        ".wb-account-dialog-actions .btn:disabled{opacity:.65;cursor:not-allowed}" +
         ".wb-usage-kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 18px}" +
         ".wb-usage-kpi{border:1px solid var(--ds-color-border-subtle,#e5e7eb);border-radius:14px;padding:12px 14px;background:#fff;min-width:0}" +
         ".wb-usage-kpi .k{font-size:12px;font-weight:600;color:#64748b;margin:0 0 8px}" +
         ".wb-usage-kpi .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:3px 0}" +
         ".wb-usage-kpi .row .t{font-size:12px;color:#64748b}" +
         ".wb-usage-kpi .row .n{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:#111827}" +
-        ".wb-usage-meter{margin:0 0 22px}" +
+        ".wb-usage-meter{margin:28px 0 22px}" +
+        ".wb-usage-page .wb-set-card{margin-bottom:4px}" +
         ".wb-usage-meter-title{font-size:14px;font-weight:700;line-height:1.4;margin:0 0 2px}" +
         ".wb-usage-meter-sub{font-size:12px;color:#64748b;margin:4px 0 10px}" +
         ".wb-usage-meter-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}" +
@@ -402,8 +519,8 @@ window.__ModuleLoader__.load({
         ".wb-usage-chart-head{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}" +
         ".wb-usage-chart-head .t{font-size:12px;color:#64748b}" +
         ".wb-usage-chart-head .n{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}" +
-        ".wb-usage-chart-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}" +
-        ".wb-usage-chart-inner{height:150px}" +
+        ".wb-usage-chart-scroll{overflow:hidden;width:100%}" +
+        ".wb-usage-chart-inner{height:150px;width:100%}" +
         ".wb-usage-chart svg{display:block;width:100%;height:150px;overflow:visible}" +
         ".wb-usage-chart-plot{position:relative;height:150px;cursor:crosshair}" +
         ".wb-usage-guide{position:absolute;width:1px;background:currentColor;opacity:.35;pointer-events:none;transform:translateX(-50%)}" +
@@ -7871,11 +7988,648 @@ window.__ModuleLoader__.load({
     }
 
     function field(label, props, full) {
+      var p = props || {};
       return h(
         "div",
         { className: "wb-set-field" + (full ? " full" : "") },
         h("label", null, label),
-        h("input", props),
+        p.multiline ? h("textarea", p) : h("input", p),
+      );
+    }
+
+    var WB_SECRET_MASK = "••••••••••••";
+    var HOST_SET_HIDE_LABELS = ["远端审码", "Cursor 写码"];
+
+    var _wbHostHideCleanup = null;
+    function hideHostSettingsDupes() {
+      if (typeof document === "undefined") return function () {};
+      if (_wbHostHideCleanup) return _wbHostHideCleanup;
+      var marked = [];
+      function labelMatch(text) {
+        for (var i = 0; i < HOST_SET_HIDE_LABELS.length; i++) {
+          var lab = HOST_SET_HIDE_LABELS[i];
+          if (text === lab || text.indexOf(lab) >= 0) return true;
+        }
+        return false;
+      }
+      function scan() {
+        var nodes = document.querySelectorAll("button, [class*='_navCell'], [role='tab']");
+        for (var i = 0; i < nodes.length; i++) {
+          var el = nodes[i];
+          // 只藏宿主设置侧栏，勿藏 WorkBuddy 内二级导航
+          if (el.closest && el.closest(".wb-set")) continue;
+          var text = String(el.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (!labelMatch(text)) continue;
+          var cell =
+            (el.closest && (el.closest("[class*='_navCell']") || el.closest("[role='tab']"))) || el;
+          if (cell.closest && cell.closest(".wb-set")) continue;
+          if (cell.getAttribute("data-wb-host-hide") === "1") continue;
+          cell.setAttribute("data-wb-host-hide", "1");
+          marked.push(cell);
+        }
+      }
+      scan();
+      var obs =
+        typeof MutationObserver !== "undefined"
+          ? new MutationObserver(function () {
+              scan();
+            })
+          : null;
+      if (obs) obs.observe(document.body, { childList: true, subtree: true });
+      _wbHostHideCleanup = function () {
+        if (obs) obs.disconnect();
+        marked.forEach(function (el) {
+          try {
+            el.removeAttribute("data-wb-host-hide");
+          } catch (e) {}
+        });
+        _wbHostHideCleanup = null;
+      };
+      return _wbHostHideCleanup;
+    }
+
+    function WbRemoteReviewPanel(props) {
+      ensureCss();
+      var reportStatus = (props && props.reportStatus) || null;
+      var apiRef = (props && props.apiRef) || null;
+      var hostState = useState(function () {
+        try {
+          return localStorage.getItem("dsh-remote-review-host") || "127.0.0.1";
+        } catch (e) {
+          return "127.0.0.1";
+        }
+      });
+      var svcHost = hostState[0];
+      var setSvcHost = hostState[1];
+      var portState = useState(function () {
+        try {
+          return localStorage.getItem("dsh-remote-review-port") || "18787";
+        } catch (e) {
+          return "18787";
+        }
+      });
+      var svcPort = portState[0];
+      var setSvcPort = portState[1];
+      var prefixState = useState(function () {
+        try {
+          var x = localStorage.getItem("dsh-remote-review-prefix");
+          return x != null ? x : "";
+        } catch (e) {
+          return "";
+        }
+      });
+      var svcPrefix = prefixState[0];
+      var setSvcPrefix = prefixState[1];
+      var draftState = useState({
+        engine: "http://127.0.0.1:8000",
+        listen: "127.0.0.1",
+        port: "18787",
+        secret: "",
+        secretConfigured: false,
+        feishuAppId: "",
+        feishuAppSecret: "",
+        feishuAppSecretConfigured: false,
+        feishuFolderToken: "",
+        feishuWikiSpaceId: "",
+        feishuWikiParentNodeToken: "",
+        webhook: "",
+        dataRoot: "",
+      });
+      var draft = draftState[0];
+      var setDraft = draftState[1];
+      var busyState = useState(false);
+      var busy = busyState[0];
+      var setBusy = busyState[1];
+      var msgState = useState("");
+      var msg = msgState[0];
+      var setMsg = msgState[1];
+      var msgOkState = useState(false);
+      var msgOk = msgOkState[0];
+      var setMsgOk = msgOkState[1];
+      var healthState = useState("");
+      var health = healthState[0];
+      var setHealth = healthState[1];
+
+      function setStatus(nextBusy, nextMsg, nextOk) {
+        setBusy(!!nextBusy);
+        if (nextMsg != null) setMsg(String(nextMsg));
+        if (nextOk != null) setMsgOk(!!nextOk);
+        if (reportStatus) reportStatus(!!nextBusy, nextMsg, nextOk);
+      }
+
+      function remember() {
+        try {
+          localStorage.setItem("dsh-remote-review-host", String(svcHost || "127.0.0.1").trim());
+          localStorage.setItem("dsh-remote-review-port", String(svcPort || "18787").trim());
+          localStorage.setItem("dsh-remote-review-prefix", String(svcPrefix || "").trim());
+        } catch (e) {}
+      }
+
+      function base() {
+        var host = String(svcHost || "127.0.0.1").trim();
+        var port = String(svcPort || "18787").trim();
+        var prefix = String(svcPrefix || "").trim();
+        if (prefix && prefix.charAt(0) !== "/") prefix = "/" + prefix;
+        if (prefix.endsWith("/")) prefix = prefix.slice(0, -1);
+        if (port === "80") return "http://" + host + prefix;
+        if (port === "443") return "https://" + host + prefix;
+        return "http://" + host + ":" + port + prefix;
+      }
+
+      function secretForSave(v) {
+        var s = String(v || "").trim();
+        if (!s || s === WB_SECRET_MASK || /^•+$/.test(s)) return undefined;
+        return s;
+      }
+
+      function loadConfig() {
+        setStatus(true, "加载中…", false);
+        remember();
+        fetch(base() + "/api/config")
+          .then(function (r) {
+            return r.json().then(function (d) {
+              return { ok: r.ok, d: d };
+            });
+          })
+          .then(function (x) {
+            if (!x.ok || !x.d || !x.d.ok || !x.d.config) {
+              throw new Error((x.d && x.d.detail) || "无法加载：请先启用「远端审码」插件");
+            }
+            var c = x.d.config;
+            setDraft({
+              engine: c.engine || "http://127.0.0.1:8000",
+              listen: c.listen || "127.0.0.1",
+              port: String(c.port != null ? c.port : 18787),
+              secret: c.secretConfigured ? WB_SECRET_MASK : "",
+              secretConfigured: !!c.secretConfigured,
+              feishuAppId: c.feishuAppId || "",
+              feishuAppSecret: c.feishuAppSecretConfigured ? WB_SECRET_MASK : "",
+              feishuAppSecretConfigured: !!c.feishuAppSecretConfigured,
+              feishuFolderToken: c.feishuFolderToken || "",
+              feishuWikiSpaceId: c.feishuWikiSpaceId || "",
+              feishuWikiParentNodeToken: c.feishuWikiParentNodeToken || "",
+              webhook: c.webhook || "",
+              dataRoot: c.dataRoot || "",
+            });
+            setStatus(false, "已加载远端审码配置（本机，不进 git）", true);
+          })
+          .catch(function (e) {
+            setStatus(false, "加载失败：" + (e && e.message ? e.message : String(e)), false);
+          });
+      }
+
+      function saveConfig() {
+        setStatus(true, "保存中…", false);
+        remember();
+        if (!String(draft.feishuAppId || "").trim()) {
+          setStatus(false, "保存失败：请填写飞书 App ID", false);
+          return;
+        }
+        if (!draft.feishuAppSecretConfigured && !secretForSave(draft.feishuAppSecret)) {
+          setStatus(false, "保存失败：请填写飞书 App Secret", false);
+          return;
+        }
+        var payload = {
+          engine: draft.engine,
+          listen: draft.listen,
+          port: draft.port,
+          secret: secretForSave(draft.secret),
+          feishuAppId: draft.feishuAppId,
+          feishuAppSecret: secretForSave(draft.feishuAppSecret),
+          feishuFolderToken: draft.feishuFolderToken,
+          feishuWikiSpaceId: draft.feishuWikiSpaceId,
+          feishuWikiParentNodeToken: draft.feishuWikiParentNodeToken,
+        };
+        fetch(base() + "/api/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ config: payload }),
+        })
+          .then(function (r) {
+            return r.json().then(function (d) {
+              return { ok: r.ok, d: d };
+            });
+          })
+          .then(function (x) {
+            if (!x.ok || !x.d || !x.d.ok) throw new Error((x.d && x.d.detail) || "保存失败");
+            setStatus(false, (x.d.detail || "已保存") + (x.d.note ? "；" + x.d.note : ""), true);
+            loadConfig();
+          })
+          .catch(function (e) {
+            setStatus(false, "保存失败：" + (e && e.message ? e.message : String(e)), false);
+          });
+      }
+
+      function checkHealth() {
+        remember();
+        setHealth("检测中…");
+        fetch(base() + "/health")
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (d) {
+            setHealth((d && d.ok ? "OK" : "FAIL") + " · " + ((d && d.detail) || JSON.stringify(d).slice(0, 120)));
+          })
+          .catch(function (e) {
+            setHealth("无法连接 " + base() + "：" + (e && e.message ? e.message : e));
+          });
+      }
+
+      useEffect(function () {
+        loadConfig();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, []);
+
+      if (apiRef) {
+        apiRef.current = { save: saveConfig, load: loadConfig };
+      }
+
+      function patch(k, v) {
+        var n = Object.assign({}, draft);
+        n[k] = v;
+        setDraft(n);
+      }
+
+      return h(
+        "div",
+        { className: "wb-set-card" },
+        h("h3", null, "远端审码"),
+        h(
+          "div",
+          { className: "body" },
+          h(
+            "p",
+            { className: "wb-set-hint" },
+            "配置写到本机 ~/.zhongruan/remote-review（插件服务），不进业务 git。保存请用底部「保存配置」。",
+          ),
+          h(
+            "div",
+            { className: "wb-set-eng", style: { marginBottom: "14px" } },
+            h("div", { className: "eng-field" }, h("label", null, "服务 host"), h("input", {
+              value: svcHost,
+              onChange: function (e) {
+                setSvcHost(e.target.value);
+              },
+            })),
+            h("div", { className: "eng-field" }, h("label", null, "port"), h("input", {
+              value: svcPort,
+              onChange: function (e) {
+                setSvcPort(e.target.value);
+              },
+            })),
+            h("div", { className: "eng-field" }, h("label", null, "路径前缀"), h("input", {
+              value: svcPrefix,
+              placeholder: "本机空",
+              style: { width: "140px" },
+              onChange: function (e) {
+                setSvcPrefix(e.target.value);
+              },
+            })),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "wb-set-btn",
+                disabled: busy,
+                onClick: function () {
+                  loadConfig();
+                  checkHealth();
+                },
+              },
+              "连接并加载",
+            ),
+          ),
+          h("div", { className: "wb-set-grid" },
+            field("WorkBuddy 引擎地址", {
+              value: draft.engine,
+              onChange: function (e) {
+                patch("engine", e.target.value);
+              },
+            }, true),
+            field("飞书 App ID", {
+              value: draft.feishuAppId,
+              onChange: function (e) {
+                patch("feishuAppId", e.target.value);
+              },
+            }, true),
+            field(draft.feishuAppSecretConfigured ? "飞书 App Secret（已保存）" : "飞书 App Secret", {
+              type: "password",
+              autoComplete: "new-password",
+              value: draft.feishuAppSecret,
+              onFocus: function () {
+                if (draft.feishuAppSecret === WB_SECRET_MASK) patch("feishuAppSecret", "");
+              },
+              onChange: function (e) {
+                patch("feishuAppSecret", e.target.value);
+              },
+            }, true),
+            field("文档库 space_id", {
+              value: draft.feishuWikiSpaceId,
+              onChange: function (e) {
+                patch("feishuWikiSpaceId", e.target.value);
+              },
+            }, true),
+            field("文档库父节点（可选）", {
+              value: draft.feishuWikiParentNodeToken,
+              onChange: function (e) {
+                patch("feishuWikiParentNodeToken", e.target.value);
+              },
+            }, true),
+            field("云盘文件夹 Token（备用）", {
+              value: draft.feishuFolderToken,
+              onChange: function (e) {
+                patch("feishuFolderToken", e.target.value);
+              },
+            }, true),
+            field("Webhook 监听", {
+              value: draft.listen,
+              onChange: function (e) {
+                patch("listen", e.target.value);
+              },
+            }),
+            field("Webhook 端口", {
+              value: draft.port,
+              onChange: function (e) {
+                patch("port", e.target.value);
+              },
+            }),
+            field(draft.secretConfigured ? "Webhook 密钥（已保存）" : "Webhook 密钥（可选）", {
+              type: "password",
+              autoComplete: "new-password",
+              value: draft.secret,
+              onFocus: function () {
+                if (draft.secret === WB_SECRET_MASK) patch("secret", "");
+              },
+              onChange: function (e) {
+                patch("secret", e.target.value);
+              },
+            }, true),
+          ),
+          h(
+            "p",
+            { className: "wb-set-hint" },
+            "Webhook：" + (draft.webhook || base() + "/webhook") + (draft.dataRoot ? " · " + draft.dataRoot : ""),
+          ),
+          h(
+            "div",
+            { className: "wb-set-actions" },
+            h(
+              "button",
+              { type: "button", className: "wb-set-btn", disabled: busy, onClick: checkHealth },
+              "检测服务",
+            ),
+            !reportStatus && msg
+              ? h("span", { className: "wb-set-msg" + (msgOk ? " ok" : " err") }, msg)
+              : null,
+          ),
+          health ? h("p", { className: "wb-set-hint" }, health) : null,
+        ),
+      );
+    }
+
+    function WbCursorCodingPanel(props) {
+      ensureCss();
+      var reportStatus = (props && props.reportStatus) || null;
+      var apiRef = (props && props.apiRef) || null;
+      var draftState = useState({
+        port: "18788",
+        cursorApiKey: "",
+        cursorKeyConfigured: false,
+        writeScopeText: "",
+        dataRoot: "",
+      });
+      var draft = draftState[0];
+      var setDraft = draftState[1];
+      var busyState = useState(false);
+      var busy = busyState[0];
+      var setBusy = busyState[1];
+      var msgState = useState("");
+      var msg = msgState[0];
+      var setMsg = msgState[1];
+      var msgOkState = useState(false);
+      var msgOk = msgOkState[0];
+      var setMsgOk = msgOkState[1];
+      var healthState = useState("");
+      var health = healthState[0];
+      var setHealth = healthState[1];
+      var jobIdState = useState("");
+      var jobId = jobIdState[0];
+      var setJobId = jobIdState[1];
+      var jobBodyState = useState("");
+      var jobBody = jobBodyState[0];
+      var setJobBody = jobBodyState[1];
+      var jobMetaState = useState("");
+      var jobMeta = jobMetaState[0];
+      var setJobMeta = jobMetaState[1];
+
+      function setStatus(nextBusy, nextMsg, nextOk) {
+        setBusy(!!nextBusy);
+        if (nextMsg != null) setMsg(String(nextMsg));
+        if (nextOk != null) setMsgOk(!!nextOk);
+        if (reportStatus) reportStatus(!!nextBusy, nextMsg, nextOk);
+      }
+
+      function base() {
+        return "http://127.0.0.1:" + String(draft.port || "18788").trim();
+      }
+
+      function remember() {
+        try {
+          localStorage.setItem("dsh-cursor-coding-host", "127.0.0.1");
+          localStorage.setItem("dsh-cursor-coding-port", String(draft.port || "18788").trim());
+        } catch (e) {}
+      }
+
+      function loadConfig() {
+        setStatus(true, "加载中…", false);
+        fetch(base() + "/api/config")
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (data) {
+            if (!data || !data.ok) throw new Error((data && data.detail) || "加载失败");
+            var c = data.config || {};
+            setDraft({
+              port: String(c.port || 18788),
+              cursorApiKey: c.cursorKeyConfigured ? WB_SECRET_MASK : "",
+              cursorKeyConfigured: Boolean(c.cursorKeyConfigured),
+              writeScopeText: c.writeScopeText || "",
+              dataRoot: c.dataRoot || "",
+            });
+            remember();
+            setStatus(false, "已加载 Cursor 写码配置（本机，不进 git）", true);
+          })
+          .catch(function (err) {
+            setStatus(false, String(err && err.message ? err.message : err) + "（请先启用 Cursor 写码插件）", false);
+          });
+      }
+
+      function saveConfig() {
+        setStatus(true, "保存中…", false);
+        remember();
+        var key = String(draft.cursorApiKey || "").trim();
+        var body = {
+          listen: "127.0.0.1",
+          port: draft.port,
+          writeScopeText: draft.writeScopeText,
+        };
+        if (key && key !== WB_SECRET_MASK && !/^•+$/.test(key)) body.cursorApiKey = key;
+        fetch(base() + "/api/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        })
+          .then(function (r) {
+            return r.json().then(function (d) {
+              return { ok: r.ok, d: d };
+            });
+          })
+          .then(function (out) {
+            if (!out.d || !out.d.ok) throw new Error((out.d && out.d.detail) || "保存失败");
+            setStatus(false, out.d.detail || "已保存", true);
+            loadConfig();
+          })
+          .catch(function (err) {
+            setStatus(false, String(err && err.message ? err.message : err), false);
+          });
+      }
+
+      function checkHealth() {
+        remember();
+        fetch(base() + "/health")
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (d) {
+            setHealth(
+              (d.ok ? "OK" : "FAIL") +
+                " · Key " +
+                (d.cursorKeyReady ? "已配置" : "未配置") +
+                " · " +
+                (d.detail || ""),
+            );
+          })
+          .catch(function (err) {
+            setHealth("无法连接 " + base() + "：" + String(err));
+          });
+      }
+
+      function loadJobBody() {
+        var jid = String(jobId || "").trim();
+        if (!jid) {
+          setJobMeta("请填写 job_id");
+          return;
+        }
+        setBusy(true);
+        setJobMeta("加载中…");
+        setJobBody("");
+        fetch(base() + "/api/cursor-coding/jobs/" + encodeURIComponent(jid))
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (d) {
+            if (!d || !d.ok) throw new Error((d && d.detail) || "加载失败");
+            var text =
+              (d.job && (d.job.assistant_text || d.job.body || d.job.reply)) ||
+              d.assistant_text ||
+              d.body ||
+              "";
+            setJobBody(String(text || ""));
+            setJobMeta(text ? "已加载" : "无正文");
+          })
+          .catch(function (err) {
+            setJobMeta(String(err && err.message ? err.message : err));
+          })
+          .finally(function () {
+            setBusy(false);
+          });
+      }
+
+      useEffect(function () {
+        loadConfig();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, []);
+
+      if (apiRef) {
+        apiRef.current = { save: saveConfig, load: loadConfig };
+      }
+
+      return h(
+        "div",
+        { className: "wb-set-card" },
+        h("h3", null, "Cursor 写码"),
+        h(
+          "div",
+          { className: "body" },
+          h(
+            "p",
+            { className: "wb-set-hint" },
+            "唯一写码通道。配置写到 ~/.zhongruan/cursor-coding。保存请用底部「保存配置」。",
+          ),
+          h(
+            "div",
+            { className: "wb-set-grid" },
+            field("Cursor API Key", {
+              type: "password",
+              autoComplete: "new-password",
+              value: draft.cursorApiKey,
+              placeholder: draft.cursorKeyConfigured ? "已配置，留空保存则保持不变" : "必填",
+              onChange: function (e) {
+                setDraft(Object.assign({}, draft, { cursorApiKey: e.target.value }));
+              },
+            }, true),
+            field("监听端口", {
+              value: draft.port,
+              onChange: function (e) {
+                setDraft(Object.assign({}, draft, { port: e.target.value }));
+              },
+            }),
+            field("默认可写范围（每行一个相对前缀）", {
+              multiline: true,
+              rows: 3,
+              value: draft.writeScopeText,
+              placeholder: "例如\nsrc/\napps/",
+              onChange: function (e) {
+                setDraft(Object.assign({}, draft, { writeScopeText: e.target.value }));
+              },
+            }, true),
+          ),
+          draft.dataRoot ? h("p", { className: "wb-set-hint" }, "数据目录：" + draft.dataRoot) : null,
+          h("p", { className: "wb-set-hint" }, "回看 Cursor 正文（对照 IDE）"),
+          h(
+            "div",
+            { className: "wb-set-grid" },
+            field("job_id", {
+              value: jobId,
+              placeholder: "例如 ccj-20260911-201421-fb75",
+              onChange: function (e) {
+                setJobId(e.target.value);
+              },
+            }, true),
+          ),
+          h(
+            "div",
+            { className: "wb-set-actions" },
+            h(
+              "button",
+              { type: "button", className: "wb-set-btn", disabled: busy, onClick: loadJobBody },
+              "加载正文",
+            ),
+            h(
+              "button",
+              { type: "button", className: "wb-set-btn", disabled: busy, onClick: checkHealth },
+              "检测服务",
+            ),
+            !reportStatus && msg
+              ? h("span", { className: "wb-set-msg" + (msgOk ? " ok" : " err") }, msg)
+              : null,
+          ),
+          jobMeta ? h("p", { className: "wb-set-hint" }, jobMeta) : null,
+          h("div", { className: "wb-set-jobbody" + (jobBody ? "" : " empty") }, jobBody || "加载后显示 Cursor 完整正文。"),
+          health ? h("p", { className: "wb-set-hint" }, health) : null,
+        ),
       );
     }
 
@@ -7898,6 +8652,11 @@ window.__ModuleLoader__.load({
           base_url: "https://api.deepseek.com",
           model: "deepseek-chat",
         },
+        vision: {
+          api_key: "",
+          base_url: "",
+          model: "",
+        },
         code_dev: {
           enabled: false,
           cursor_api_key: "",
@@ -7907,7 +8666,7 @@ window.__ModuleLoader__.load({
           default_workspace: "",
         },
         code_review: {
-          enabled: false,
+          enabled: true,
           max_files: 40,
           max_file_bytes: 120000,
           max_total_bytes: 800000,
@@ -7941,6 +8700,15 @@ window.__ModuleLoader__.load({
           health_url: "",
           health_timeout_sec: 8,
         },
+        automations: {
+          wecom_webhook_key: "",
+          wecom_push_enabled: false,
+          wecom_push_dry_run: false,
+          feishu_app_id: "",
+          feishu_app_secret: "",
+          feishu_bitable_enabled: false,
+          feishu_bitable_dry_run: false,
+        },
       };
     }
 
@@ -7958,6 +8726,18 @@ window.__ModuleLoader__.load({
       });
     }
 
+    function fetchAbout() {
+      return fetch(engineBase() + "/api/about", { headers: authHeaders() })
+        .then(function (r) {
+          return r.json().then(function (d) {
+            return { http: r.status, data: d };
+          });
+        })
+        .catch(function (e) {
+          return { http: 0, data: { ok: false, detail: (e && e.message) || "网络错误" } };
+        });
+    }
+
     function WorkBuddyHeaderLogout() {
       ensureCss();
       var userState = useState(null);
@@ -7969,6 +8749,35 @@ window.__ModuleLoader__.load({
       var busyState = useState(false);
       var busy = busyState[0];
       var setBusy = busyState[1];
+      var panelState = useState(null);
+      var panel = panelState[0];
+      var setPanel = panelState[1];
+      var feedbackState = useState("");
+      var feedback = feedbackState[0];
+      var setFeedback = feedbackState[1];
+      var imagesState = useState([]);
+      var images = imagesState[0];
+      var setImages = imagesState[1];
+      var previewImgState = useState(null);
+      var previewImg = previewImgState[0];
+      var setPreviewImg = previewImgState[1];
+      var fileInputRef = useRef(null);
+      var successCloseTimerRef = useRef(null);
+      var panelBusyState = useState(false);
+      var panelBusy = panelBusyState[0];
+      var setPanelBusy = panelBusyState[1];
+      var panelMsgState = useState("");
+      var panelMsg = panelMsgState[0];
+      var setPanelMsg = panelMsgState[1];
+      var panelOkState = useState(false);
+      var panelOk = panelOkState[0];
+      var setPanelOk = panelOkState[1];
+      var aboutState = useState(null);
+      var about = aboutState[0];
+      var setAbout = aboutState[1];
+      var feedbackDoneState = useState(false);
+      var feedbackDone = feedbackDoneState[0];
+      var setFeedbackDone = feedbackDoneState[1];
 
       function refresh() {
         var sess = readAuthSession();
@@ -7989,6 +8798,209 @@ window.__ModuleLoader__.load({
           .catch(function () {});
       }
 
+      function clearFeedbackImages(list) {
+        (list || images || []).forEach(function (it) {
+          try {
+            if (it && it.url) URL.revokeObjectURL(it.url);
+          } catch (e0) {}
+        });
+      }
+
+      function closePanel() {
+        if (successCloseTimerRef.current) {
+          clearTimeout(successCloseTimerRef.current);
+          successCloseTimerRef.current = null;
+        }
+        if (panel === "feedback") clearFeedbackImages();
+        setPreviewImg(null);
+        setPanel(null);
+        setPanelBusy(false);
+        setPanelMsg("");
+        setPanelOk(false);
+        setFeedbackDone(false);
+        setFeedback("");
+        setImages([]);
+      }
+
+      function openFeedback() {
+        setOpen(false);
+        clearFeedbackImages();
+        setFeedback("");
+        setImages([]);
+        setPreviewImg(null);
+        setPanelMsg("");
+        setPanelOk(false);
+        setFeedbackDone(false);
+        setPanel("feedback");
+      }
+
+      function openUpdate() {
+        setOpen(false);
+        setPanelMsg("");
+        setPanelOk(false);
+        setAbout(null);
+        setPanel("update");
+        setPanelBusy(true);
+        var desk =
+          typeof window !== "undefined" && window.workbuddyDesktop
+            ? window.workbuddyDesktop
+            : null;
+        var deskP =
+          desk && typeof desk.checkUpdate === "function"
+            ? Promise.resolve(desk.checkUpdate()).catch(function () {
+                return null;
+              })
+            : Promise.resolve(null);
+        Promise.all([fetchAbout(), deskP])
+          .then(function (pair) {
+            var aboutRes = pair[0] || {};
+            var deskRes = pair[1];
+            var d = (aboutRes && aboutRes.data) || {};
+            var info = {
+              ok: !!(d && d.ok),
+              app_version: (d && d.app_version) || "",
+              product: (d && d.product) || "ZR-WorkBuddy",
+              desktop: deskRes && typeof deskRes === "object" ? deskRes : null,
+              detail: (d && d.detail) || "",
+            };
+            setAbout(info);
+            if (!info.ok && info.detail) {
+              setPanelOk(false);
+              setPanelMsg(info.detail);
+            } else {
+              setPanelOk(true);
+              var deskMsg =
+                info.desktop && info.desktop.message
+                  ? String(info.desktop.message)
+                  : "";
+              setPanelMsg(
+                deskMsg ||
+                  (info.desktop && info.desktop.updateAvailable
+                    ? "发现可用更新，请按提示安装新包。"
+                    : "当前为本机已安装版本；在线升级通道未开通时，请向管理员索取新安装包覆盖安装。"),
+              );
+            }
+          })
+          .finally(function () {
+            setPanelBusy(false);
+          });
+      }
+
+      function onPickImages(ev) {
+        var files = ev && ev.target && ev.target.files ? Array.from(ev.target.files) : [];
+        if (ev && ev.target) ev.target.value = "";
+        if (!files.length) return;
+        var next = images.slice();
+        var err = "";
+        files.forEach(function (f) {
+          if (next.length >= 6) {
+            err = "最多上传 6 张图片";
+            return;
+          }
+          if (!f || !(f.type || "").startsWith("image/")) {
+            err = "仅支持图片文件";
+            return;
+          }
+          if (f.size > 5 * 1024 * 1024) {
+            err = "单张图片请不超过 5MB";
+            return;
+          }
+          next.push({
+            id: String(Date.now()) + "-" + Math.random().toString(36).slice(2, 8),
+            file: f,
+            name: f.name || "image",
+            url: URL.createObjectURL(f),
+            broken: false,
+          });
+        });
+        setImages(next);
+        if (err) {
+          setPanelOk(false);
+          setPanelMsg(err);
+        } else {
+          setPanelMsg("");
+        }
+      }
+
+      function removeImage(id) {
+        var kept = [];
+        images.forEach(function (it) {
+          if (it.id === id) {
+            try {
+              if (it.url) URL.revokeObjectURL(it.url);
+            } catch (e1) {}
+          } else {
+            kept.push(it);
+          }
+        });
+        setImages(kept);
+      }
+
+      function submitFeedback() {
+        var text = String(feedback || "").trim();
+        if (!text) {
+          setPanelOk(false);
+          setPanelMsg("请填写反馈内容");
+          return;
+        }
+        if (text.length > 4000) {
+          setPanelOk(false);
+          setPanelMsg("反馈内容请控制在 4000 字以内");
+          return;
+        }
+        setPanelBusy(true);
+        setPanelMsg("");
+        var fd = new FormData();
+        fd.append("message", text);
+        images.forEach(function (it) {
+          if (it && it.file) fd.append("images", it.file, it.name || "image.png");
+        });
+        var headers = authHeaders();
+        // 让浏览器自动带 multipart boundary，勿手写 Content-Type
+        fetch(engineBase() + "/api/feedback", {
+          method: "POST",
+          headers: headers,
+          body: fd,
+        })
+          .then(function (r) {
+            return r.json().then(function (d) {
+              return { http: r.status, data: d };
+            });
+          })
+          .then(function (res) {
+            var d = res.data || {};
+            if (res.http >= 200 && res.http < 300 && d.ok) {
+              clearFeedbackImages();
+              setFeedback("");
+              setImages([]);
+              setPreviewImg(null);
+              setPanelBusy(false);
+              setPanelOk(true);
+              setPanelMsg("提交成功");
+              setFeedbackDone(true);
+              if (successCloseTimerRef.current) {
+                clearTimeout(successCloseTimerRef.current);
+              }
+              successCloseTimerRef.current = setTimeout(function () {
+                successCloseTimerRef.current = null;
+                setPanel(null);
+                setPanelMsg("");
+                setPanelOk(false);
+                setFeedbackDone(false);
+              }, 2000);
+            } else {
+              setPanelOk(false);
+              setPanelMsg((d && d.detail) || "提交失败");
+              setPanelBusy(false);
+            }
+          })
+          .catch(function (e) {
+            setPanelOk(false);
+            setPanelMsg((e && e.message) || "网络错误");
+            setPanelBusy(false);
+          });
+      }
+
       useEffect(function () {
         refresh();
         function onAuth() { refresh(); }
@@ -7998,19 +9010,284 @@ window.__ModuleLoader__.load({
 
       useEffect(
         function () {
-          if (!open) return undefined;
+          if (!open && !panel && !previewImg) return undefined;
           function onKey(ev) {
-            if (ev.key === "Escape") setOpen(false);
+            if (ev.key !== "Escape") return;
+            if (previewImg) setPreviewImg(null);
+            else if (panel) closePanel();
+            else setOpen(false);
           }
           document.addEventListener("keydown", onKey);
           return function () { document.removeEventListener("keydown", onKey); };
         },
-        [open],
+        [open, panel, previewImg],
       );
 
       if (!user) return null;
       var label = user.display_name || user.username || "";
       var initial = (label || "?").trim().charAt(0).toUpperCase() || "U";
+      var dialog =
+        panel === "feedback"
+          ? h(
+              "div",
+              {
+                className: "wb-account-dialog-overlay",
+                role: "dialog",
+                "aria-modal": "true",
+                "aria-label": "帮助与反馈",
+                onClick: closePanel,
+              },
+              h(
+                "div",
+                {
+                  className: "wb-account-dialog feedback",
+                  onClick: function (ev) {
+                    ev.stopPropagation();
+                  },
+                },
+                h(
+                  "div",
+                  { className: "wb-account-dialog-head" },
+                  h("span", { className: "t" }, "帮助与反馈"),
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "wb-account-dialog-x",
+                      "aria-label": "关闭",
+                      onClick: closePanel,
+                    },
+                    "×",
+                  ),
+                ),
+                h(
+                  "div",
+                  { className: "wb-account-dialog-body" },
+                  feedbackDone
+                    ? h(
+                        "div",
+                        { className: "wb-fb-success", role: "status", "aria-live": "polite" },
+                        h("div", { className: "ico", "aria-hidden": "true" }, "✓"),
+                        h("p", { className: "t" }, "提交成功"),
+                        h("p", { className: "s" }, "感谢反馈，窗口即将关闭…"),
+                      )
+                    : h(
+                        React.Fragment,
+                        null,
+                        h(
+                          "p",
+                          { className: "hint" },
+                          "请描述现象、复现步骤与期望结果；可附截图（最多 6 张，单张 ≤5MB）。资料库、用量在会话顶栏页签。",
+                        ),
+                        h("textarea", {
+                          value: feedback,
+                          placeholder: "请描述你的问题或建议…",
+                          disabled: panelBusy,
+                          onChange: function (ev) {
+                            setFeedback(ev.target.value);
+                          },
+                        }),
+                        h(
+                          "div",
+                          { className: "wb-fb-images" },
+                          images.map(function (it) {
+                            return h(
+                              "div",
+                              {
+                                key: it.id,
+                                className: "wb-fb-thumb",
+                                role: "button",
+                                tabIndex: 0,
+                                title: "点击预览",
+                                onClick: function () {
+                                  if (it.broken || !it.url) return;
+                                  setPreviewImg({ url: it.url, name: it.name || "截图" });
+                                },
+                                onKeyDown: function (ev) {
+                                  if (ev.key === "Enter" || ev.key === " ") {
+                                    ev.preventDefault();
+                                    if (it.broken || !it.url) return;
+                                    setPreviewImg({ url: it.url, name: it.name || "截图" });
+                                  }
+                                },
+                              },
+                              it.broken
+                                ? h("div", { className: "wb-fb-broken" }, "无法预览此图")
+                                : h("img", {
+                                    src: it.url,
+                                    alt: it.name || "截图",
+                                    onError: function () {
+                                      setImages(function (prev) {
+                                        return (prev || []).map(function (row) {
+                                          if (row.id !== it.id) return row;
+                                          return Object.assign({}, row, { broken: true });
+                                        });
+                                      });
+                                    },
+                                  }),
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "rm",
+                                  title: "移除",
+                                  "aria-label": "移除图片",
+                                  disabled: panelBusy,
+                                  onClick: function (ev) {
+                                    ev.stopPropagation();
+                                    removeImage(it.id);
+                                    if (previewImg && previewImg.url === it.url) setPreviewImg(null);
+                                  },
+                                },
+                                "×",
+                              ),
+                            );
+                          }),
+                          images.length < 6
+                            ? h(
+                                "label",
+                                {
+                                  className: "wb-fb-add",
+                                  title: "添加图片",
+                                },
+                                h("span", null, "+"),
+                                h("span", null, "图片"),
+                                h("input", {
+                                  ref: fileInputRef,
+                                  type: "file",
+                                  accept: "image/*,.png,.jpg,.jpeg,.gif,.webp,.bmp",
+                                  multiple: true,
+                                  disabled: panelBusy,
+                                  onChange: onPickImages,
+                                }),
+                              )
+                            : null,
+                        ),
+                        panelMsg
+                          ? h(
+                              "p",
+                              { className: "msg-banner " + (panelOk ? "ok" : "err") },
+                              panelMsg,
+                            )
+                          : null,
+                        h(
+                          "div",
+                          { className: "wb-account-dialog-actions" },
+                          h(
+                            "button",
+                            {
+                              type: "button",
+                              className: "btn",
+                              disabled: panelBusy,
+                              onClick: closePanel,
+                            },
+                            "关闭",
+                          ),
+                          h(
+                            "button",
+                            {
+                              type: "button",
+                              className: "btn primary",
+                              disabled: panelBusy,
+                              onClick: submitFeedback,
+                            },
+                            panelBusy ? "提交中…" : "提交反馈",
+                          ),
+                        ),
+                      ),
+                ),
+              ),
+            )
+          : panel === "update"
+            ? h(
+                "div",
+                {
+                  className: "wb-account-dialog-overlay",
+                  role: "dialog",
+                  "aria-modal": "true",
+                  "aria-label": "检查更新",
+                  onClick: closePanel,
+                },
+                h(
+                  "div",
+                  {
+                    className: "wb-account-dialog",
+                    onClick: function (ev) {
+                      ev.stopPropagation();
+                    },
+                  },
+                  h(
+                    "div",
+                    { className: "wb-account-dialog-head" },
+                    h("span", { className: "t" }, "检查更新"),
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "wb-account-dialog-x",
+                        "aria-label": "关闭",
+                        onClick: closePanel,
+                      },
+                      "×",
+                    ),
+                  ),
+                  h(
+                    "div",
+                    { className: "wb-account-dialog-body" },
+                    panelBusy
+                      ? h("p", { className: "hint" }, "正在检查…")
+                      : h(
+                          React.Fragment,
+                          null,
+                          h(
+                            "p",
+                            { className: "ver" },
+                            (about && about.product ? about.product : "ZR-WorkBuddy") +
+                              " " +
+                              (about && about.app_version
+                                ? "v" + about.app_version
+                                : ""),
+                          ),
+                          about &&
+                            about.desktop &&
+                            about.desktop.currentVersion
+                            ? h(
+                                "p",
+                                { className: "hint" },
+                                "桌面壳版本 v" + about.desktop.currentVersion,
+                              )
+                            : h(
+                                "p",
+                                { className: "hint" },
+                                "当前为浏览器/开发壳；桌面一体包可在应用内检查桌面版本。",
+                              ),
+                          panelMsg
+                            ? h(
+                                "p",
+                                { className: panelOk ? "hint" : "err" },
+                                panelMsg,
+                              )
+                            : null,
+                        ),
+                    h(
+                      "div",
+                      { className: "wb-account-dialog-actions" },
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "btn primary",
+                          disabled: panelBusy,
+                          onClick: closePanel,
+                        },
+                        "知道了",
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            : null;
+
       return h(
         React.Fragment,
         null,
@@ -8056,6 +9333,27 @@ window.__ModuleLoader__.load({
                   "button",
                   {
                     type: "button",
+                    className: "menu-item",
+                    role: "menuitem",
+                    onClick: openFeedback,
+                  },
+                  "帮助与反馈",
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "menu-item",
+                    role: "menuitem",
+                    onClick: openUpdate,
+                  },
+                  "检查更新",
+                ),
+                h("div", { className: "menu-sep", role: "separator" }),
+                h(
+                  "button",
+                  {
+                    type: "button",
                     className: "menu-logout",
                     role: "menuitem",
                     disabled: busy,
@@ -8072,6 +9370,49 @@ window.__ModuleLoader__.load({
               )
             : null,
         ),
+        dialog,
+        previewImg
+          ? h(
+              "div",
+              {
+                className: "wb-fb-lightbox",
+                role: "dialog",
+                "aria-modal": "true",
+                "aria-label": "图片预览",
+                onClick: function () {
+                  setPreviewImg(null);
+                },
+              },
+              h(
+                "div",
+                {
+                  className: "wb-fb-lightbox-inner",
+                  onClick: function (ev) {
+                    ev.stopPropagation();
+                  },
+                },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "wb-fb-lightbox-x",
+                    "aria-label": "关闭预览",
+                    onClick: function () {
+                      setPreviewImg(null);
+                    },
+                  },
+                  "×",
+                ),
+                h("img", {
+                  src: previewImg.url,
+                  alt: previewImg.name || "预览",
+                }),
+                previewImg.name
+                  ? h("p", { className: "wb-fb-lightbox-cap" }, previewImg.name)
+                  : null,
+              ),
+            )
+          : null,
       );
     }
 
@@ -8098,6 +9439,17 @@ window.__ModuleLoader__.load({
       var testState = useState({});
       var tests = testState[0];
       var setTests = testState[1];
+      var tabState = useState("mes");
+      var tab = tabState[0];
+      var setTab = tabState[1];
+      var SET_NAV = [
+        { id: "mes", label: "MES 连接" },
+        { id: "llm", label: "商用模型" },
+        { id: "remote_review", label: "远端审码" },
+        { id: "cursor_coding", label: "Cursor 写码" },
+        { id: "code_deploy", label: "自动化部署" },
+        { id: "automations", label: "自动化推送" },
+      ];
 
       function applyEngineEndpoint() {
         try {
@@ -8126,10 +9478,12 @@ window.__ModuleLoader__.load({
             setDraft({
               mes: Object.assign({}, base.mes, c.mes || {}),
               deepseek: Object.assign({}, base.deepseek, c.deepseek || {}),
+              vision: Object.assign({}, base.vision, c.vision || {}),
               code_dev: Object.assign({}, base.code_dev, c.code_dev || {}),
               code_review: Object.assign({}, base.code_review, c.code_review || {}),
               code_commit: Object.assign({}, base.code_commit, c.code_commit || {}),
               code_deploy: Object.assign({}, base.code_deploy, c.code_deploy || {}),
+              automations: Object.assign({}, base.automations, c.automations || {}),
             });
             setMsg("已从引擎加载");
             setMsgOk(true);
@@ -8143,9 +9497,94 @@ window.__ModuleLoader__.load({
           });
       }
 
+      var rootRef = useRef(null);
+      var pluginApiRef = useRef(null);
+
+      function reportPluginStatus(nextBusy, nextMsg, nextOk) {
+        setBusy(!!nextBusy);
+        if (nextMsg != null) setMsg(String(nextMsg));
+        if (nextOk != null) setMsgOk(!!nextOk);
+      }
+
+      function saveCurrent() {
+        if (tab === "remote_review" || tab === "cursor_coding") {
+          var api = pluginApiRef.current;
+          if (api && typeof api.save === "function") api.save();
+          else {
+            setMsg("当前页尚未就绪，请稍候再保存");
+            setMsgOk(false);
+          }
+          return;
+        }
+        saveConfig();
+      }
+
+      function loadCurrent() {
+        if (tab === "remote_review" || tab === "cursor_coding") {
+          var api = pluginApiRef.current;
+          if (api && typeof api.load === "function") api.load();
+          else {
+            setMsg("当前页尚未就绪，请稍候再加载");
+            setMsgOk(false);
+          }
+          return;
+        }
+        loadConfig();
+      }
+
       useEffect(function () {
+        if (tab === "remote_review" || tab === "cursor_coding") return;
         loadConfig();
         // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, []);
+
+      // 兜底：仅拉宽宿主设置 panel，不改其 display（避免内容被顶到底）
+      useLayoutEffect(function () {
+        var el = rootRef.current;
+        if (!el || typeof document === "undefined") return undefined;
+        var panel =
+          document.querySelector(".VOzbGW_panel") ||
+          (el.closest && el.closest("[class*='_panel']")) ||
+          null;
+        if (!panel) {
+          var node = el.parentElement;
+          while (node && node !== document.body) {
+            if (node.className && String(node.className).indexOf("_panel") >= 0) {
+              panel = node;
+              break;
+            }
+            node = node.parentElement;
+          }
+        }
+        if (!panel) return undefined;
+        panel.classList.add("wb-set-host-wide");
+        var prevW = panel.style.width;
+        var prevMw = panel.style.maxWidth;
+        // 清掉上一版误加的 flex/maxHeight，避免残留
+        panel.style.removeProperty("display");
+        panel.style.removeProperty("flex-direction");
+        panel.style.removeProperty("max-height");
+        panel.style.setProperty("width", "920px", "important");
+        panel.style.setProperty("max-width", "calc(100vw - 48px)", "important");
+        var options =
+          panel.querySelector("[class*='_options']") ||
+          (el.closest && el.closest("[class*='_options']")) ||
+          null;
+        if (options) {
+          options.style.removeProperty("display");
+          options.style.removeProperty("flex-direction");
+          options.style.removeProperty("flex");
+          options.style.removeProperty("min-height");
+          options.style.removeProperty("padding-bottom");
+          options.style.removeProperty("margin-bottom");
+          options.style.removeProperty("overflow");
+          options.style.removeProperty("height");
+        }
+        return function () {
+          panel.classList.remove("wb-set-host-wide");
+          panel.style.width = prevW;
+          panel.style.maxWidth = prevMw;
+        };
       }, []);
 
       function saveConfig() {
@@ -8158,6 +9597,11 @@ window.__ModuleLoader__.load({
             timeout: Math.max(5, Number(draft.mes.timeout) || 30),
           }),
           deepseek: Object.assign({}, draft.deepseek),
+          vision: Object.assign({}, draft.vision || {}, {
+            api_key: (draft.vision && draft.vision.api_key) || "",
+            base_url: String((draft.vision && draft.vision.base_url) || "").trim().replace(/\/$/, ""),
+            model: String((draft.vision && draft.vision.model) || "").trim(),
+          }),
           code_dev: Object.assign({}, draft.code_dev, {
             model: (draft.code_dev.model || "").trim() || "composer-2.5",
             max_concurrent: Math.max(1, Number(draft.code_dev.max_concurrent) || 1),
@@ -8165,15 +9609,18 @@ window.__ModuleLoader__.load({
             default_workspace: (draft.code_dev.default_workspace || "").trim(),
           }),
           code_review: Object.assign({}, draft.code_review, {
+            enabled: true,
             max_files: Math.max(1, Number(draft.code_review.max_files) || 40),
             max_file_bytes: Math.max(1024, Number(draft.code_review.max_file_bytes) || 120000),
             max_total_bytes: Math.max(4096, Number(draft.code_review.max_total_bytes) || 800000),
             default_workspace: (draft.code_review.default_workspace || "").trim(),
           }),
           code_commit: Object.assign({}, draft.code_commit, {
+            enabled: true,
             default_workspace: (draft.code_commit.default_workspace || "").trim(),
-            work_branch: (draft.code_commit.work_branch || "").trim(),
+            work_branch: "",
             remote_name: (draft.code_commit.remote_name || "").trim() || "origin",
+            default_push: draft.code_commit.default_push !== false,
             max_files: Math.max(1, Number(draft.code_commit.max_files) || 80),
             use_skill_review: draft.code_commit.use_skill_review !== false,
             allow_blocked: !!draft.code_commit.allow_blocked,
@@ -8195,6 +9642,15 @@ window.__ModuleLoader__.load({
             health_url: (draft.code_deploy.entry_url || draft.code_deploy.health_url || "").trim(),
             health_timeout_sec: 8,
           }),
+          automations: Object.assign({}, draft.automations || {}, {
+            wecom_webhook_key: (draft.automations && draft.automations.wecom_webhook_key) || "",
+            wecom_push_enabled: !!(draft.automations && draft.automations.wecom_push_enabled),
+            wecom_push_dry_run: !!(draft.automations && draft.automations.wecom_push_dry_run),
+            feishu_app_id: String((draft.automations && draft.automations.feishu_app_id) || "").trim(),
+            feishu_app_secret: (draft.automations && draft.automations.feishu_app_secret) || "",
+            feishu_bitable_enabled: !!(draft.automations && draft.automations.feishu_bitable_enabled),
+            feishu_bitable_dry_run: !!(draft.automations && draft.automations.feishu_bitable_dry_run),
+          }),
         };
         fetch(engineBase() + "/api/config", {
           method: "PUT",
@@ -8215,10 +9671,12 @@ window.__ModuleLoader__.load({
             setDraft({
               mes: Object.assign({}, base.mes, c.mes || {}),
               deepseek: Object.assign({}, base.deepseek, c.deepseek || {}),
+              vision: Object.assign({}, base.vision, c.vision || {}),
               code_dev: Object.assign({}, base.code_dev, c.code_dev || {}),
               code_review: Object.assign({}, base.code_review, c.code_review || {}),
               code_commit: Object.assign({}, base.code_commit, c.code_commit || {}),
               code_deploy: Object.assign({}, base.code_deploy, c.code_deploy || {}),
+              automations: Object.assign({}, base.automations, c.automations || {}),
             });
             setMsg("已保存到引擎 config.yaml");
             setMsgOk(true);
@@ -8274,163 +9732,185 @@ window.__ModuleLoader__.load({
           });
       }
 
+
       var mes = draft.mes;
       var llm = draft.deepseek;
-      var cd = draft.code_dev;
-      var cr = draft.code_review;
-      var cc = draft.code_commit;
+      var vision = draft.vision || {};
       var cdp = draft.code_deploy;
+      var auto = draft.automations || {};
 
-      return h(
+      var VISION_PRESETS = [
+        {
+          id: "zhipu",
+          label: "智谱 GLM-4V",
+          base: "https://open.bigmodel.cn/api/paas/v4",
+          model: "glm-4v-flash",
+        },
+        {
+          id: "qwen-vl",
+          label: "Qwen-VL",
+          base: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          model: "qwen-vl-plus",
+        },
+        { id: "custom", label: "自定义", base: "", model: "" },
+      ];
+
+      function inferVisionPresetId() {
+        var base = String(vision.base_url || "")
+          .trim()
+          .replace(/\/$/, "");
+        if (!base) return vision.model ? "custom" : "";
+        for (var i = 0; i < VISION_PRESETS.length; i++) {
+          var p = VISION_PRESETS[i];
+          if (p.id === "custom" || !p.base) continue;
+          if (String(p.base).replace(/\/$/, "") === base) return p.id;
+        }
+        return "custom";
+      }
+
+      var visionPresetId = inferVisionPresetId();
+      var visionKeyConfigured =
+        !!vision.api_key && (/^•+$/.test(String(vision.api_key)) || String(vision.api_key).length > 0);
+
+      function applyVisionPreset(p) {
+        if (p.id === "custom") {
+          setMsg("请自行填写视觉模型 Base URL 与模型名称");
+          setMsgOk(true);
+          return;
+        }
+        patchDraft(setDraft, ["vision", "base_url"], p.base);
+        patchDraft(setDraft, ["vision", "model"], p.model);
+        setMsg("已填入 " + p.label + "（请确认视觉 API Key）");
+        setMsgOk(true);
+      }
+
+      function labeledField(label, props, full, meta) {
+        var p = props || {};
+        return h(
+          "div",
+          { className: "wb-set-field" + (full ? " full" : "") },
+          h("label", null, label, h("span", { className: "wb-set-badge" }, "界面")),
+          p.multiline ? h("textarea", p) : h("input", p),
+          meta || null,
+        );
+      }
+
+      var sectionMes = h(
         "div",
-        { className: "wb-set" },
-        h(
-          "p",
-          { className: "wb-set-lead" },
-          "与宿主「设置」同级的 WorkBuddy 配置中心。保存写入引擎 config.yaml；不必再打开 :8000。",
-        ),
+        { className: "wb-set-card" },
+        h("h3", null, "MES 连接"),
         h(
           "div",
-          { className: "wb-set-eng" },
-          h("label", null, "引擎 host"),
-          h("input", {
-            value: engHost,
-            onChange: function (e) {
-              setEngHost(e.target.value);
-            },
-          }),
-          h("label", null, "port"),
-          h("input", {
-            value: engPort,
-            onChange: function (e) {
-              setEngPort(e.target.value);
-            },
-          }),
-          h(
-            "button",
-            {
-              type: "button",
-              className: "wb-set-btn",
-              disabled: busy,
-              onClick: function () {
-                applyEngineEndpoint();
-                loadConfig();
+          { className: "body" },
+          h("p", { className: "wb-set-hint" }, "业务系统 HTTP 接入；保存后写入引擎 config.yaml。"),
+          h("div", { className: "wb-set-grid" },
+            field(
+              "Base URL",
+              {
+                value: mes.base_url || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["mes", "base_url"], e.target.value);
+                },
               },
-            },
-            "连接并加载",
-          ),
-        ),
-        h(
-          "div",
-          { className: "wb-set-card" },
-          h("h3", null, "1 · MES 连接"),
-          h(
-            "div",
-            { className: "body" },
-            h("div", { className: "wb-set-grid" },
-              field(
-                "Base URL",
-                {
-                  value: mes.base_url || "",
-                  onChange: function (e) {
-                    patchDraft(setDraft, ["mes", "base_url"], e.target.value);
-                  },
-                },
-                true,
-              ),
+              true,
+            ),
+            h(
+              "div",
+              { className: "wb-set-field full" },
+              h("label", null, "认证方式"),
               h(
                 "div",
-                { className: "wb-set-field full" },
-                h("label", null, "认证方式"),
-                h(
-                  "div",
-                  { className: "wb-set-radios" },
-                  ["password", "token", "apikey", "none"].map(function (v) {
-                    return h(
-                      "label",
-                      { key: v },
-                      h("input", {
-                        type: "radio",
-                        name: "wb-mes-auth",
-                        checked: (mes.auth_type || "password") === v,
-                        onChange: function () {
-                          patchDraft(setDraft, ["mes", "auth_type"], v);
-                        },
-                      }),
-                      " ",
-                      v,
-                    );
-                  }),
-                ),
-              ),
-              field("账号", {
-                value: mes.username || "",
-                onChange: function (e) {
-                  patchDraft(setDraft, ["mes", "username"], e.target.value);
-                },
-              }),
-              field("密码（脱敏回显）", {
-                type: "password",
-                autoComplete: "new-password",
-                value: mes.password || "",
-                onChange: function (e) {
-                  patchDraft(setDraft, ["mes", "password"], e.target.value);
-                },
-              }),
-              field(
-                "企业编码",
-                {
-                  value: mes.enterprise_code || "",
-                  onChange: function (e) {
-                    patchDraft(setDraft, ["mes", "enterprise_code"], e.target.value);
-                  },
-                },
-                true,
-              ),
-              field(
-                "Token / API Key",
-                {
-                  type: "password",
-                  autoComplete: "new-password",
-                  value: mes.token || "",
-                  onChange: function (e) {
-                    patchDraft(setDraft, ["mes", "token"], e.target.value);
-                  },
-                },
-                true,
-              ),
-              field(
-                "附加请求头 JSON",
-                {
-                  value: mes.extra_headers || "{}",
-                  onChange: function (e) {
-                    patchDraft(setDraft, ["mes", "extra_headers"], e.target.value);
-                  },
-                },
-                true,
-              ),
-              field("超时（秒）", {
-                type: "number",
-                min: 5,
-                max: 120,
-                value: mes.timeout != null ? mes.timeout : 30,
-                onChange: function (e) {
-                  patchDraft(setDraft, ["mes", "timeout"], e.target.value);
-                },
-              }),
-              h(
-                "div",
-                { className: "wb-set-check" },
-                h("input", {
-                  type: "checkbox",
-                  checked: mes.verify_ssl !== false,
-                  onChange: function (e) {
-                    patchDraft(setDraft, ["mes", "verify_ssl"], e.target.checked);
-                  },
+                { className: "wb-set-radios" },
+                ["password", "token", "apikey", "none"].map(function (v) {
+                  var on = (mes.auth_type || "password") === v;
+                  return h(
+                    "label",
+                    { key: v, className: on ? "active" : "" },
+                    h("input", {
+                      type: "radio",
+                      name: "wb-mes-auth",
+                      checked: on,
+                      onChange: function () {
+                        patchDraft(setDraft, ["mes", "auth_type"], v);
+                      },
+                    }),
+                    " ",
+                    v,
+                  );
                 }),
-                h("span", null, "校验 HTTPS 证书"),
               ),
             ),
+            field("账号", {
+              value: mes.username || "",
+              onChange: function (e) {
+                patchDraft(setDraft, ["mes", "username"], e.target.value);
+              },
+            }),
+            field("密码（脱敏回显）", {
+              type: "password",
+              autoComplete: "new-password",
+              value: mes.password || "",
+              onChange: function (e) {
+                patchDraft(setDraft, ["mes", "password"], e.target.value);
+              },
+            }),
+            field(
+              "企业编码",
+              {
+                value: mes.enterprise_code || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["mes", "enterprise_code"], e.target.value);
+                },
+              },
+              true,
+            ),
+            field(
+              "Token / API Key",
+              {
+                type: "password",
+                autoComplete: "new-password",
+                value: mes.token || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["mes", "token"], e.target.value);
+                },
+              },
+              true,
+            ),
+            field(
+              "附加请求头 JSON",
+              {
+                value: mes.extra_headers || "{}",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["mes", "extra_headers"], e.target.value);
+                },
+              },
+              true,
+            ),
+            field("超时（秒）", {
+              type: "number",
+              min: 5,
+              max: 120,
+              value: mes.timeout != null ? mes.timeout : 30,
+              onChange: function (e) {
+                patchDraft(setDraft, ["mes", "timeout"], e.target.value);
+              },
+            }),
+            h(
+              "div",
+              { className: "wb-set-check full" },
+              h("input", {
+                type: "checkbox",
+                checked: mes.verify_ssl !== false,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["mes", "verify_ssl"], e.target.checked);
+                },
+              }),
+              h("span", null, "校验 HTTPS 证书"),
+            ),
+          ),
+          h(
+            "div",
+            { className: "wb-set-actions" },
             h(
               "button",
               {
@@ -8443,40 +9923,51 @@ window.__ModuleLoader__.load({
               },
               "测试 MES",
             ),
-            tests.mes ? h("div", { className: "wb-set-test" }, tests.mes) : null,
           ),
+          tests.mes ? h("div", { className: "wb-set-test" }, tests.mes) : null,
         ),
+      );
+
+      var sectionLlm = h(
+        "div",
+        { className: "wb-set-auto-stack" },
         h(
           "div",
           { className: "wb-set-card" },
-          h("h3", null, "2 · LLM 意图引擎"),
+          h("h3", null, "商用模型 / LLM 意图引擎"),
           h(
             "div",
             { className: "body" },
             h("p", { className: "wb-set-hint" }, "审码依赖此处 LLM；DeepSeek / Ollama / 关闭任选。"),
             h(
               "div",
-              { className: "wb-set-radios" },
-              [
-                ["deepseek", "DeepSeek API"],
-                ["ollama", "Ollama 本地"],
-                ["none", "不使用 LLM"],
-              ].map(function (pair) {
-                return h(
-                  "label",
-                  { key: pair[0] },
-                  h("input", {
-                    type: "radio",
-                    name: "wb-llm",
-                    checked: (llm.provider || "deepseek") === pair[0],
-                    onChange: function () {
-                      patchDraft(setDraft, ["deepseek", "provider"], pair[0]);
-                    },
-                  }),
-                  " ",
-                  pair[1],
-                );
-              }),
+              { className: "wb-set-field", style: { marginBottom: "12px" } },
+              h("label", null, "提供方"),
+              h(
+                "div",
+                { className: "wb-set-radios" },
+                [
+                  ["deepseek", "DeepSeek API"],
+                  ["ollama", "Ollama 本地"],
+                  ["none", "不使用 LLM"],
+                ].map(function (pair) {
+                  var on = (llm.provider || "deepseek") === pair[0];
+                  return h(
+                    "label",
+                    { key: pair[0], className: on ? "active" : "" },
+                    h("input", {
+                      type: "radio",
+                      name: "wb-llm",
+                      checked: on,
+                      onChange: function () {
+                        patchDraft(setDraft, ["deepseek", "provider"], pair[0]);
+                      },
+                    }),
+                    " ",
+                    pair[1],
+                  );
+                }),
+              ),
             ),
             h(
               "div",
@@ -8507,18 +9998,22 @@ window.__ModuleLoader__.load({
               }),
             ),
             h(
-              "button",
-              {
-                type: "button",
-                className: "wb-set-btn",
-                disabled: busy,
-                onClick: function () {
-                  runTest("llm", "/api/config/test/deepseek", {
-                    config: { deepseek: draft.deepseek },
-                  });
+              "div",
+              { className: "wb-set-actions" },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "wb-set-btn",
+                  disabled: busy,
+                  onClick: function () {
+                    runTest("llm", "/api/config/test/deepseek", {
+                      config: { deepseek: draft.deepseek },
+                    });
+                  },
                 },
-              },
-              "测试 LLM",
+                "测试 LLM",
+              ),
             ),
             tests.llm ? h("div", { className: "wb-set-test" }, tests.llm) : null,
           ),
@@ -8526,345 +10021,231 @@ window.__ModuleLoader__.load({
         h(
           "div",
           { className: "wb-set-card" },
-          h("h3", null, "3 · 写码车道"),
+          h("h3", null, "视觉模型"),
           h(
             "div",
             { className: "body" },
+            h("p", { className: "wb-set-hint", style: { marginBottom: "8px" } }, "快速填入视觉模型默认地址"),
             h(
               "div",
-              { className: "wb-set-check" },
-              h("input", {
-                type: "checkbox",
-                checked: !!cd.enabled,
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_dev", "enabled"], e.target.checked);
-                },
-              }),
-              h("span", null, "开启本机写码（code_dev.enabled）"),
-            ),
-            h(
-              "div",
-              { className: "wb-set-grid" },
-              field(
-                "Cursor API Key",
-                {
-                  type: "password",
-                  autoComplete: "new-password",
-                  value: cd.cursor_api_key || "",
-                  onChange: function (e) {
-                    patchDraft(setDraft, ["code_dev", "cursor_api_key"], e.target.value);
+              { className: "wb-set-presets" },
+              VISION_PRESETS.map(function (p) {
+                return h(
+                  "button",
+                  {
+                    key: p.id,
+                    type: "button",
+                    className: "wb-set-preset" + (visionPresetId === p.id ? " active" : ""),
+                    onClick: function () {
+                      applyVisionPreset(p);
+                    },
                   },
-                },
-                true,
-              ),
-              field("本机模型", {
-                value: cd.model || "",
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_dev", "model"], e.target.value);
-                },
+                  p.label,
+                );
               }),
-              field("最大并发", {
-                type: "number",
-                min: 1,
-                max: 4,
-                value: cd.max_concurrent != null ? cd.max_concurrent : 1,
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_dev", "max_concurrent"], e.target.value);
-                },
-              }),
-              field("超时（秒）", {
-                type: "number",
-                min: 60,
-                max: 7200,
-                value: cd.cursor_timeout_sec != null ? cd.cursor_timeout_sec : 2700,
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_dev", "cursor_timeout_sec"], e.target.value);
-                },
-              }),
-              field(
-                "常用工程路径（备忘）",
-                {
-                  value: cd.default_workspace || "",
-                  onChange: function (e) {
-                    patchDraft(setDraft, ["code_dev", "default_workspace"], e.target.value);
-                  },
-                },
-                true,
-              ),
             ),
-            h(
-              "button",
-              {
-                type: "button",
-                className: "wb-set-btn",
-                disabled: busy,
-                onClick: function () {
-                  runTest("cd", "/api/status");
-                },
-              },
-              "探测引擎状态",
-            ),
-            tests.cd ? h("div", { className: "wb-set-test" }, tests.cd) : null,
-          ),
-        ),
-        h(
-          "div",
-          { className: "wb-set-card" },
-          h("h3", null, "4 · 审码车道"),
-          h(
-            "div",
-            { className: "body" },
-            h(
-              "div",
-              { className: "wb-set-check" },
-              h("input", {
-                type: "checkbox",
-                checked: !!cr.enabled,
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_review", "enabled"], e.target.checked);
-                },
-              }),
-              h("span", null, "开启本机审码（code_review.enabled）"),
-            ),
-            h(
-              "div",
-              { className: "wb-set-grid" },
-              field("单次最多文件", {
-                type: "number",
-                min: 1,
-                max: 200,
-                value: cr.max_files != null ? cr.max_files : 40,
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_review", "max_files"], e.target.value);
-                },
-              }),
-              field("单文件最大字节", {
-                type: "number",
-                value: cr.max_file_bytes != null ? cr.max_file_bytes : 120000,
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_review", "max_file_bytes"], e.target.value);
-                },
-              }),
-              field("总读取上限", {
-                type: "number",
-                value: cr.max_total_bytes != null ? cr.max_total_bytes : 800000,
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_review", "max_total_bytes"], e.target.value);
-                },
-              }),
-              field(
-                "常用工程路径",
-                {
-                  value: cr.default_workspace || "",
-                  onChange: function (e) {
-                    patchDraft(setDraft, ["code_review", "default_workspace"], e.target.value);
-                  },
-                },
-                true,
-              ),
-            ),
-            h(
-              "button",
-              {
-                type: "button",
-                className: "wb-set-btn",
-                disabled: busy,
-                onClick: function () {
-                  runTest("cr", "/api/code-review/status");
-                },
-              },
-              "测试审码就绪",
-            ),
-            tests.cr ? h("div", { className: "wb-set-test" }, tests.cr) : null,
-          ),
-        ),
-        h(
-          "div",
-          { className: "wb-set-card" },
-          h("h3", null, "5 · 提交车道"),
-          h(
-            "div",
-            { className: "body" },
-            h(
-              "div",
-              { className: "wb-set-check" },
-              h("input", {
-                type: "checkbox",
-                checked: !!cc.enabled,
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_commit", "enabled"], e.target.checked);
-                },
-              }),
-              h("span", null, "开启人触发提交（code_commit.enabled）"),
-            ),
-            h(
-              "div",
-              { className: "wb-set-grid" },
-              field(
-                "常用工程路径",
-                {
-                  value: cc.default_workspace || "",
-                  onChange: function (e) {
-                    patchDraft(setDraft, ["code_commit", "default_workspace"], e.target.value);
-                  },
-                },
-                true,
-              ),
-              field("工作分支（空=当前；勿填 main/master）", {
-                value: cc.work_branch || "",
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_commit", "work_branch"], e.target.value);
-                },
-              }),
-              field("远程名", {
-                value: cc.remote_name || "origin",
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_commit", "remote_name"], e.target.value);
-                },
-              }),
-              h(
-                "div",
-                { className: "wb-set-check full" },
-                h("input", {
-                  type: "checkbox",
-                  checked: cc.default_push !== false,
-                  onChange: function (e) {
-                    patchDraft(setDraft, ["code_commit", "default_push"], e.target.checked);
-                  },
-                }),
-                h("span", null, "确认卡默认勾选推送远程"),
-              ),
-            ),
-            h(
-              "button",
-              {
-                type: "button",
-                className: "wb-set-btn",
-                disabled: busy,
-                onClick: function () {
-                  runTest("cc", "/api/code-commit/status");
-                },
-              },
-              "测试提交就绪",
-            ),
-            tests.cc ? h("div", { className: "wb-set-test" }, tests.cc) : null,
-          ),
-        ),
-        h(
-          "div",
-          { className: "wb-set-card" },
-          h("h3", null, "6 · 自动化部署"),
-          h(
-            "div",
-            { className: "body" },
             h(
               "p",
               { className: "wb-set-hint" },
-              "开启后：确认一次即同步到远端。Vite+后端项目会本机构建 frontend/dist、同步 backend，并自动重启远端 API。不自动 git commit。一体部署才会拉远端 WorkBuddy 引擎。"
-            ),
-            h(
-              "div",
-              { className: "wb-set-check" },
-              h("input", {
-                type: "checkbox",
-                checked: !!cdp.enabled,
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_deploy", "enabled"], e.target.checked);
-                },
-              }),
-              h("span", null, "开启自动化部署"),
-            ),
-            h(
-              "div",
-              { className: "wb-set-check" },
-              h("input", {
-                type: "checkbox",
-                checked: cdp.unified_product !== false,
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_deploy", "unified_product"], e.target.checked);
-                },
-              }),
-              h("span", null, "一体部署（推荐）"),
+              "需支持多模态 / 识图的 OpenAI 兼容接口；未配置时贴图无法生成视觉规格。",
             ),
             h(
               "div",
               { className: "wb-set-grid" },
-              field("默认分支 / tag", {
-                value: cdp.default_ref || "",
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_deploy", "default_ref"], e.target.value);
-                },
-              }),
-              field(
-                "浏览器一体入口",
+              labeledField(
+                "API Key",
                 {
-                  value: cdp.entry_url || cdp.health_url || "",
+                  type: "password",
+                  autoComplete: "new-password",
+                  value: /^•+$/.test(String(vision.api_key || "")) ? "" : vision.api_key || "",
+                  placeholder: visionKeyConfigured
+                    ? "留空表示不修改；输入新值则覆盖"
+                    : "必填（智谱 / 通义等）",
                   onChange: function (e) {
-                    patchDraft(setDraft, ["code_deploy", "entry_url"], e.target.value);
-                    patchDraft(setDraft, ["code_deploy", "health_url"], e.target.value);
+                    patchDraft(setDraft, ["vision", "api_key"], e.target.value);
                   },
                 },
                 true,
+                visionKeyConfigured
+                  ? h(
+                      "div",
+                      { className: "wb-set-field-meta" },
+                      /^•+$/.test(String(vision.api_key || ""))
+                        ? "当前已配置（已脱敏）"
+                        : "当前已配置：" +
+                          String(vision.api_key || "")
+                            .replace(/./g, "*")
+                            .slice(0, 8) +
+                          (String(vision.api_key || "").length > 4
+                            ? String(vision.api_key || "").slice(-4)
+                            : "****"),
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "wb-set-clear",
+                          onClick: function () {
+                            patchDraft(setDraft, ["vision", "api_key"], "");
+                            setMsg("已清除视觉 API Key，保存后生效");
+                            setMsgOk(true);
+                          },
+                        },
+                        "清除界面覆盖",
+                      ),
+                    )
+                  : null,
               ),
-              field(
-                "本地项目路径",
+              labeledField(
+                "API Base URL",
                 {
-                  value: cdp.default_workspace || "",
+                  value: vision.base_url || "",
+                  placeholder: "https://open.bigmodel.cn/api/paas/v4",
                   onChange: function (e) {
-                    patchDraft(setDraft, ["code_deploy", "default_workspace"], e.target.value);
+                    patchDraft(setDraft, ["vision", "base_url"], e.target.value);
                   },
                 },
                 true,
+                h("div", { className: "wb-set-field-meta" }, "例：https://open.bigmodel.cn/api/paas/v4/"),
               ),
-              field("SSH 主机", {
-                value: cdp.ssh_host || "",
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_deploy", "ssh_host"], e.target.value);
-                },
-              }),
-              field("SSH 用户", {
-                value: cdp.ssh_user || "",
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_deploy", "ssh_user"], e.target.value);
-                },
-              }),
-              field(
-                "私钥路径",
+              labeledField(
+                "视觉模型名称",
                 {
-                  value: cdp.ssh_key_path || "",
+                  value: vision.model || "",
+                  placeholder: "glm-4v-flash",
                   onChange: function (e) {
-                    patchDraft(setDraft, ["code_deploy", "ssh_key_path"], e.target.value);
+                    patchDraft(setDraft, ["vision", "model"], e.target.value);
                   },
                 },
                 true,
-              ),
-              field(
-                "远端目录",
-                {
-                  value: cdp.ssh_app_path || "",
-                  onChange: function (e) {
-                    patchDraft(setDraft, ["code_deploy", "ssh_app_path"], e.target.value);
-                  },
-                },
-                true,
-              ),
-              field("SSH 端口", {
-                value: cdp.ssh_port != null ? cdp.ssh_port : 22,
-                onChange: function (e) {
-                  patchDraft(setDraft, ["code_deploy", "ssh_port"], e.target.value);
-                },
-              }),
-              field(
-                "远端重启命令（可选；不填则自动重启该目录的 API 服务）",
-                {
-                  value: cdp.remote_restart_cmd || "",
-                  onChange: function (e) {
-                    patchDraft(setDraft, ["code_deploy", "remote_restart_cmd"], e.target.value);
-                  },
-                },
-                true,
+                h(
+                  "div",
+                  { className: "wb-set-field-meta" },
+                  "例：glm-4v-flash、glm-4v、qwen-vl-plus",
+                ),
               ),
             ),
+          ),
+        ),
+      );
+
+      var sectionCdp = h(
+        "div",
+        { className: "wb-set-card" },
+        h("h3", null, "自动化部署"),
+        h(
+          "div",
+          { className: "body" },
+          h(
+            "p",
+            { className: "wb-set-hint" },
+            "开启后：确认一次即同步到远端。Vite+后端项目会本机构建 frontend/dist、同步 backend，并自动重启远端 API。不自动 git commit。一体部署才会拉远端 WorkBuddy 引擎。"
+          ),
+          h(
+            "div",
+            { className: "wb-set-check", style: { marginBottom: "8px" } },
+            h("input", {
+              type: "checkbox",
+              checked: !!cdp.enabled,
+              onChange: function (e) {
+                patchDraft(setDraft, ["code_deploy", "enabled"], e.target.checked);
+              },
+            }),
+            h("span", null, "开启自动化部署"),
+          ),
+          h(
+            "div",
+            { className: "wb-set-check", style: { marginBottom: "12px" } },
+            h("input", {
+              type: "checkbox",
+              checked: cdp.unified_product !== false,
+              onChange: function (e) {
+                patchDraft(setDraft, ["code_deploy", "unified_product"], e.target.checked);
+              },
+            }),
+            h("span", null, "一体部署（推荐）"),
+          ),
+          h(
+            "div",
+            { className: "wb-set-grid" },
+            field("默认分支 / tag", {
+              value: cdp.default_ref || "",
+              onChange: function (e) {
+                patchDraft(setDraft, ["code_deploy", "default_ref"], e.target.value);
+              },
+            }),
+            field(
+              "浏览器一体入口",
+              {
+                value: cdp.entry_url || cdp.health_url || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_deploy", "entry_url"], e.target.value);
+                  patchDraft(setDraft, ["code_deploy", "health_url"], e.target.value);
+                },
+              },
+              true,
+            ),
+            field(
+              "本地项目路径",
+              {
+                value: cdp.default_workspace || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_deploy", "default_workspace"], e.target.value);
+                },
+              },
+              true,
+            ),
+            field("SSH 主机", {
+              value: cdp.ssh_host || "",
+              onChange: function (e) {
+                patchDraft(setDraft, ["code_deploy", "ssh_host"], e.target.value);
+              },
+            }),
+            field("SSH 用户", {
+              value: cdp.ssh_user || "",
+              onChange: function (e) {
+                patchDraft(setDraft, ["code_deploy", "ssh_user"], e.target.value);
+              },
+            }),
+            field(
+              "私钥路径",
+              {
+                value: cdp.ssh_key_path || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_deploy", "ssh_key_path"], e.target.value);
+                },
+              },
+              true,
+            ),
+            field(
+              "远端目录",
+              {
+                value: cdp.ssh_app_path || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_deploy", "ssh_app_path"], e.target.value);
+                },
+              },
+              true,
+            ),
+            field("SSH 端口", {
+              value: cdp.ssh_port != null ? cdp.ssh_port : 22,
+              onChange: function (e) {
+                patchDraft(setDraft, ["code_deploy", "ssh_port"], e.target.value);
+              },
+            }),
+            field(
+              "远端重启命令（可选；不填则自动重启该目录的 API 服务）",
+              {
+                value: cdp.remote_restart_cmd || "",
+                onChange: function (e) {
+                  patchDraft(setDraft, ["code_deploy", "remote_restart_cmd"], e.target.value);
+                },
+              },
+              true,
+            ),
+          ),
+          h(
+            "div",
+            { className: "wb-set-actions" },
             h(
               "button",
               {
@@ -8877,35 +10258,263 @@ window.__ModuleLoader__.load({
               },
               "测试部署就绪",
             ),
-            tests.cdp ? h("div", { className: "wb-set-test" }, tests.cdp) : null,
+          ),
+          tests.cdp ? h("div", { className: "wb-set-test" }, tests.cdp) : null,
+        ),
+      );
+
+      var sectionAuto = h(
+        "div",
+        { className: "wb-set-auto-stack" },
+        h(
+          "div",
+          { className: "wb-set-card" },
+          h("h3", null, "自动化任务推送"),
+          h(
+            "div",
+            { className: "body" },
+            h(
+              "p",
+              { className: "wb-set-hint" },
+              "企微群消息与飞书多维表格写数是两套独立能力，可只开其一。保存写入引擎 config.yaml → automations。",
+            ),
+            h(
+              "div",
+              { className: "wb-set-grid" },
+              field(
+                "群机器人 Webhook",
+                {
+                  type: "password",
+                  autoComplete: "new-password",
+                  value: auto.wecom_webhook_key || "",
+                  placeholder: "完整 Webhook 地址，或 key= 后的值",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["automations", "wecom_webhook_key"], e.target.value);
+                  },
+                },
+                true,
+              ),
+            ),
+            h(
+              "div",
+              { className: "wb-set-check", style: { marginBottom: "8px" } },
+              h("input", {
+                type: "checkbox",
+                checked: !!auto.wecom_push_enabled,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["automations", "wecom_push_enabled"], e.target.checked);
+                },
+              }),
+              h("span", null, "开启自动化结果推送"),
+            ),
+            h(
+              "div",
+              { className: "wb-set-check" },
+              h("input", {
+                type: "checkbox",
+                checked: !!auto.wecom_push_dry_run,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["automations", "wecom_push_dry_run"], e.target.checked);
+                },
+              }),
+              h("span", null, "推送联调模式（仅打日志）"),
+            ),
+            h(
+              "p",
+              { className: "wb-set-hint", style: { marginTop: "12px", marginBottom: 0 } },
+              "开启后，任务勾选「推送到企业微信」且执行成功时会发到上述群；联调模式不真正调用企微接口。",
+            ),
+          ),
+        ),
+        h(
+          "div",
+          { className: "wb-set-card" },
+          h("h3", null, "飞书多维表格同步"),
+          h(
+            "div",
+            { className: "body" },
+            h(
+              "div",
+              { className: "wb-set-grid" },
+              field(
+                "飞书应用 App ID",
+                {
+                  value: auto.feishu_app_id || "",
+                  placeholder: "cli_xxxxxxxx",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["automations", "feishu_app_id"], e.target.value);
+                  },
+                },
+                true,
+              ),
+              field(
+                "飞书应用 App Secret",
+                {
+                  type: "password",
+                  autoComplete: "new-password",
+                  value: auto.feishu_app_secret || "",
+                  placeholder: "开放平台凭证页复制；勿提交 git",
+                  onChange: function (e) {
+                    patchDraft(setDraft, ["automations", "feishu_app_secret"], e.target.value);
+                  },
+                },
+                true,
+              ),
+            ),
+            h(
+              "div",
+              { className: "wb-set-check", style: { marginBottom: "8px", marginTop: "4px" } },
+              h("input", {
+                type: "checkbox",
+                checked: !!auto.feishu_bitable_enabled,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["automations", "feishu_bitable_enabled"], e.target.checked);
+                },
+              }),
+              h("span", null, "开启飞书多维表格同步"),
+            ),
+            h(
+              "div",
+              { className: "wb-set-check" },
+              h("input", {
+                type: "checkbox",
+                checked: !!auto.feishu_bitable_dry_run,
+                onChange: function (e) {
+                  patchDraft(setDraft, ["automations", "feishu_bitable_dry_run"], e.target.checked);
+                },
+              }),
+              h("span", null, "写表联调模式（仅打日志）"),
+            ),
+            h(
+              "p",
+              { className: "wb-set-hint", style: { marginTop: "12px", marginBottom: 0 } },
+              "总开关与企微互不干涉。任务还需开启「同步到飞书多维表格」并填写 app_token / table_id。",
+            ),
+          ),
+        ),
+      );
+
+      var isPluginTab = tab === "remote_review" || tab === "cursor_coding";
+      var pluginPanelProps = {
+        apiRef: pluginApiRef,
+        reportStatus: reportPluginStatus,
+      };
+      var activeSection =
+        tab === "llm"
+          ? sectionLlm
+          : tab === "remote_review"
+            ? h(WbRemoteReviewPanel, pluginPanelProps)
+            : tab === "cursor_coding"
+              ? h(WbCursorCodingPanel, pluginPanelProps)
+              : tab === "code_deploy"
+                ? sectionCdp
+                : tab === "automations"
+                  ? sectionAuto
+                  : sectionMes;
+
+      return h(
+        "div",
+        { className: "wb-set", ref: rootRef },
+        h(
+          "p",
+          { className: "wb-set-lead" },
+          "WorkBuddy 配置中心：MES / 商用模型 / 远端审码 / Cursor 写码 / 部署 / 推送。底部统一保存当前页。",
+        ),
+        h(
+          "div",
+          { className: "wb-set-shell" },
+          h(
+            "nav",
+            { className: "wb-set-nav", "aria-label": "配置分类" },
+            SET_NAV.map(function (item) {
+              return h(
+                "button",
+                {
+                  key: item.id,
+                  type: "button",
+                  className: "wb-set-nav-btn" + (tab === item.id ? " active" : ""),
+                  onClick: function () {
+                    setTab(item.id);
+                    setMsg("");
+                  },
+                },
+                item.label,
+              );
+            }),
+          ),
+          h(
+            "div",
+            { className: "wb-set-main" },
+            isPluginTab
+              ? null
+              : h(
+                  "div",
+                  { className: "wb-set-eng" },
+                  h(
+                    "div",
+                    { className: "eng-field" },
+                    h("label", null, "引擎 host"),
+                    h("input", {
+                      value: engHost,
+                      onChange: function (e) {
+                        setEngHost(e.target.value);
+                      },
+                    }),
+                  ),
+                  h(
+                    "div",
+                    { className: "eng-field" },
+                    h("label", null, "port"),
+                    h("input", {
+                      value: engPort,
+                      onChange: function (e) {
+                        setEngPort(e.target.value);
+                      },
+                    }),
+                  ),
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "wb-set-btn",
+                      disabled: busy,
+                      onClick: function () {
+                        applyEngineEndpoint();
+                        loadConfig();
+                      },
+                    },
+                    "连接并加载",
+                  ),
+                ),
+            activeSection,
           ),
         ),
         h(
           "div",
           { className: "wb-set-bar" },
-          h(
-            "button",
-            {
-              type: "button",
-              className: "wb-set-btn primary",
-              disabled: busy,
-              onClick: saveConfig,
-            },
-            busy ? "处理中…" : "保存全部配置",
-          ),
+          msg
+            ? h("span", { className: "wb-set-msg" + (msgOk ? " ok" : " err") }, msg)
+            : null,
           h(
             "button",
             {
               type: "button",
               className: "wb-set-btn",
               disabled: busy,
-              onClick: loadConfig,
+              onClick: loadCurrent,
             },
             "重新加载",
           ),
-          msg
-            ? h("span", { className: "wb-set-msg" + (msgOk ? " ok" : " err") }, msg)
-            : null,
+          h(
+            "button",
+            {
+              type: "button",
+              className: "wb-set-btn primary",
+              disabled: busy,
+              onClick: saveCurrent,
+            },
+            busy ? "处理中…" : "保存配置",
+          ),
         ),
       );
     }
@@ -8987,11 +10596,10 @@ window.__ModuleLoader__.load({
     }
 
     function usageChartScroll(n, child) {
-      var w = usageChartWidth(n);
       return h(
         "div",
         { className: "wb-usage-chart-scroll" },
-        h("div", { className: "wb-usage-chart-inner", style: { width: w + "px", minWidth: w + "px" } }, child),
+        h("div", { className: "wb-usage-chart-inner" }, child),
       );
     }
 
@@ -10454,13 +12062,13 @@ window.__ModuleLoader__.load({
       if (isEnt && !monthMode && dayLab) dayLab = "全员 · " + dayLab;
 
       if (!authReady) {
-        return h("div", { className: "wb-set wb-usage-page" }, h("p", { className: "wb-set-lead" }, "检查登录状态…"));
+        return h("div", { className: "wb-usage-page" }, h("p", { className: "wb-set-lead" }, "检查登录状态…"));
       }
 
       if (!authUser) {
         return h(
           "div",
-          { className: "wb-set wb-usage-page wb-login-page", ref: pageRef },
+          { className: "wb-usage-page wb-login-page", ref: pageRef },
           h(WorkBuddyLoginForm, {
             onSuccess: function (user) {
               setAuthUser(user);
@@ -10472,17 +12080,7 @@ window.__ModuleLoader__.load({
 
       return h(
         "div",
-        { className: "wb-set wb-usage-page", ref: pageRef },
-        h("div", { className: "wb-usage-page-title" }, isEnt ? "企业用量" : "用量统计"),
-        h(
-          "p",
-          { className: "wb-set-lead" },
-          isEnt
-            ? "企业总用量：全部账号合计的 API 请求次数与 Token。LLM 与 Cursor 分列，不能加总成一笔钱。"
-            : data && data.llm_meter_active
-              ? "本机观测：引擎直连 + 宿主 llm-meter（llm/stream 真明细，含知识库抽取等旁路）。Cursor 另列，不能与 LLM 加总。"
-              : "本机观测：引擎直连 + DSH 会话/记忆/标题补采（未装 llm-meter）。记忆等可能为估算。装 @zhongruan/dsh-llm-meter 后可减漏采。Cursor 另列。",
-        ),
+        { className: "wb-usage-page", ref: pageRef },
         h(
           "div",
           { className: "wb-usage-filter" },
@@ -10735,6 +12333,444 @@ window.__ModuleLoader__.load({
       return false;
     }
 
+    /** 与中软知识库/自动化/ESC 共用的互斥事件：换会话时关掉它们盖住的主面板。 */
+    var WB_WORKSPACE_ACTIVATE = "@lemoncat7/dsh-plugin-ui/workspace-activate";
+
+    function foreignPluginWorkspaceVisible() {
+      try {
+        if (typeof document === "undefined") return false;
+        return !!(
+          document.querySelector(".dsh-knowledge-workspace") ||
+          document.querySelector("[data-knowledge-surface='workspace']") ||
+          document.querySelector(".za-root") ||
+          document.querySelector(".esc-root")
+        );
+      } catch (eVis) {
+        return false;
+      }
+    }
+
+    /** DOM 兜底：只点工作区内部关闭钮，绝不点侧栏 launcher（toggle 会把刚关掉的面板又打开）。 */
+    function clickCloseForeignPluginWorkspaces() {
+      try {
+        if (typeof document === "undefined") return false;
+        var closed = false;
+        var knClose = document.querySelector(
+          ".dsh-knowledge-workspace [data-knowledge-workspace-close], [data-knowledge-surface='workspace'] [data-knowledge-workspace-close]",
+        );
+        if (knClose && typeof knClose.click === "function") {
+          knClose.click();
+          closed = true;
+        }
+        var roots = document.querySelectorAll(
+          ".dsh-knowledge-workspace, [data-knowledge-surface='workspace'], .za-root, .esc-root",
+        );
+        for (var r = 0; r < roots.length; r++) {
+          var btns = roots[r].querySelectorAll("button");
+          for (var i = 0; i < btns.length; i++) {
+            var b = btns[i];
+            if (b.closest && b.closest(".dsh-knowledge-launcher, .za-launcher, .esc-launcher")) continue;
+            var lab = String(
+              b.getAttribute("aria-label") || b.getAttribute("title") || b.textContent || "",
+            )
+              .replace(/\s+/g, " ")
+              .trim();
+            if (lab === "返回对话" || lab.indexOf("返回会话") === 0 || lab === "关闭") {
+              if (typeof b.click === "function") {
+                b.click();
+                closed = true;
+                break;
+              }
+            }
+          }
+        }
+        return closed;
+      } catch (eClick) {
+        return false;
+      }
+    }
+
+    function trySelectHostConversationPanel(ctx) {
+      try {
+        var layout =
+          (ctx && ctx.layout) ||
+          (_wbClientCtx && typeof _wbClientCtx.get === "function" ? _wbClientCtx.get("layout") : null);
+        if (!layout || typeof layout.selectPanel !== "function") return false;
+        var candidates = ["conversation", "chat", "main"];
+        for (var i = 0; i < candidates.length; i++) {
+          try {
+            layout.selectPanel(candidates[i]);
+            return true;
+          } catch (eSel) {}
+        }
+      } catch (eLayout) {}
+      return false;
+    }
+
+    function dismissForeignPluginWorkspaces(ctx) {
+      try {
+        if (typeof window === "undefined" || typeof CustomEvent === "undefined") return;
+        window.dispatchEvent(
+          new CustomEvent(WB_WORKSPACE_ACTIVATE, {
+            detail: { pluginId: "workbuddy-session-switch" },
+          }),
+        );
+      } catch (eDismiss) {}
+      trySelectHostConversationPanel(ctx);
+      // 等 React 卸掉主面板后再 DOM 兜底；多刷几次覆盖自动化/ESC 慢卸载
+      var runDomFallback = function () {
+        if (foreignPluginWorkspaceVisible()) clickCloseForeignPluginWorkspaces();
+      };
+      try {
+        runDomFallback();
+        if (typeof requestAnimationFrame === "function") {
+          requestAnimationFrame(function () {
+            runDomFallback();
+            setTimeout(runDomFallback, 40);
+            setTimeout(runDomFallback, 120);
+            setTimeout(runDomFallback, 280);
+          });
+        } else {
+          setTimeout(runDomFallback, 0);
+          setTimeout(runDomFallback, 50);
+          setTimeout(runDomFallback, 200);
+        }
+      } catch (eFb) {
+        setTimeout(runDomFallback, 0);
+      }
+    }
+
+    function borrowChatStore(slots) {
+      if (!slots || typeof slots.entries !== "function") return null;
+      try {
+        var names = ["conversation.session", "conversation.session.header", "conversation.view"];
+        for (var n = 0; n < names.length; n++) {
+          var entries = slots.entries(names[n]) || [];
+          for (var i = 0; i < entries.length; i++) {
+            var e = entries[i];
+            if (!e || !e.store) continue;
+            if (names[n] === "conversation.view" && (!e.options || e.options.id !== "chat")) continue;
+            return e.store;
+          }
+        }
+      } catch (eBorrow) {}
+      return null;
+    }
+
+    function patchPersistedChatView(sessionId) {
+      try {
+        if (!sessionId || typeof localStorage === "undefined") return;
+        var key = "dsh.conversation.chat." + String(sessionId);
+        var raw = localStorage.getItem(key);
+        var data = raw ? JSON.parse(raw) : {};
+        if (!data || typeof data !== "object") data = {};
+        if (isWorkbuddyStickyView(data.view)) {
+          data.view = "chat";
+          localStorage.setItem(key, JSON.stringify(data));
+        }
+      } catch (ePatch) {}
+    }
+
+    function activateHostChatTab() {
+      try {
+        var lists = document.querySelectorAll('[role="tablist"]');
+        var li;
+        for (li = 0; li < lists.length; li++) {
+          var tabs = lists[li].querySelectorAll('[role="tab"]');
+          var labels = [];
+          var j;
+          for (j = 0; j < tabs.length; j++) {
+            labels.push((tabs[j].textContent || "").replace(/\s+/g, " ").trim());
+          }
+          var joined = labels.join("|");
+          if (
+            joined.indexOf("对话") < 0 &&
+            joined.indexOf("Chat") < 0 &&
+            joined.indexOf("轨迹") < 0 &&
+            joined.indexOf("用量") < 0 &&
+            joined.indexOf("资料库") < 0
+          ) {
+            continue;
+          }
+          for (j = 0; j < tabs.length; j++) {
+            var t = labels[j];
+            if (t === "对话" || t === "Chat") {
+              tabs[j].click();
+              return true;
+            }
+          }
+        }
+        var all = document.querySelectorAll('[role="tab"]');
+        for (var i = 0; i < all.length; i++) {
+          var tx = (all[i].textContent || "").replace(/\s+/g, " ").trim();
+          if (tx === "对话" || tx === "Chat") {
+            all[i].click();
+            return true;
+          }
+        }
+      } catch (eTab) {}
+      return false;
+    }
+
+    function ensureConversationChatView(actions) {
+      try {
+        if (actions && typeof actions.setView === "function") {
+          actions.setView("chat");
+          activateHostChatTab();
+          return true;
+        }
+      } catch (eSet) {}
+      return activateHostChatTab();
+    }
+
+    function forceLeaveStickyWorkbuddyViews(actions, sessionId) {
+      patchPersistedChatView(sessionId);
+      ensureConversationChatView(actions);
+      setTimeout(function () {
+        activateHostChatTab();
+      }, 0);
+      setTimeout(function () {
+        activateHostChatTab();
+      }, 80);
+    }
+
+    function isWorkbuddyStickyView(viewId) {
+      return viewId === "workbuddy-usage" || viewId === "workbuddy-library";
+    }
+
+    /** 跨 fiber 记住上一会话：header utilities 换会话会重挂，不能用组件内 primed。 */
+    var _wbGuardLastSessionId = null;
+
+    /**
+     * 不依赖 header.utilities：知识库/自动化盖住 conversation 时顶栏守卫会被卸掉，
+     * 必须在 apply() 里订阅 sessions.list.current。
+     */
+    function installWorkBuddySessionSwitchWatcher(ctx) {
+      var lastId = null;
+      var primed = false;
+      var unsubList = null;
+      var retryTimer = null;
+      var disposed = false;
+
+      function readCurrentSessionId() {
+        try {
+          var sessions =
+            (ctx && ctx.sessions) ||
+            (ctx && typeof ctx.get === "function" ? ctx.get("sessions") : null);
+          if (!sessions) return null;
+          var list = sessions.list;
+          if (list && typeof list.getSnapshot === "function") {
+            var snap = list.getSnapshot();
+            var cur = snap && snap.current;
+            return cur == null || cur === "" ? null : String(cur);
+          }
+          if (typeof sessions.current === "string") return sessions.current;
+        } catch (eRead) {}
+        return null;
+      }
+
+      function onSessionCurrentChanged(reason) {
+        var sid = readCurrentSessionId();
+        dismissForeignPluginWorkspaces(ctx);
+        forceLeaveStickyWorkbuddyViews(null, sid);
+        setTimeout(function () {
+          dismissForeignPluginWorkspaces(ctx);
+          forceLeaveStickyWorkbuddyViews(null, sid || readCurrentSessionId());
+          activateHostChatTab();
+        }, 0);
+        setTimeout(function () {
+          if (foreignPluginWorkspaceVisible()) dismissForeignPluginWorkspaces(ctx);
+          activateHostChatTab();
+        }, 160);
+        try {
+          console.debug("[dsh-mes-bridge] session-switch", reason || "", sid);
+        } catch (eLog) {}
+      }
+
+      function syncFromList() {
+        var next = readCurrentSessionId();
+        if (!primed) {
+          primed = true;
+          lastId = next;
+          _wbGuardLastSessionId = next;
+          return;
+        }
+        if (next === lastId) return;
+        lastId = next;
+        _wbGuardLastSessionId = next;
+        onSessionCurrentChanged("list");
+      }
+
+      function tryBindList() {
+        if (disposed || unsubList) return !!unsubList;
+        try {
+          var sessions =
+            (ctx && ctx.sessions) ||
+            (ctx && typeof ctx.get === "function" ? ctx.get("sessions") : null);
+          var list = sessions && sessions.list;
+          if (list && typeof list.subscribe === "function") {
+            syncFromList();
+            unsubList = list.subscribe(syncFromList);
+            return true;
+          }
+        } catch (eSub) {}
+        return false;
+      }
+
+      if (!tryBindList()) {
+        var attempts = 0;
+        retryTimer = setInterval(function () {
+          attempts += 1;
+          if (tryBindList() || attempts > 40 || disposed) {
+            clearInterval(retryTimer);
+            retryTimer = null;
+            if (!primed) {
+              primed = true;
+              lastId = readCurrentSessionId();
+              _wbGuardLastSessionId = lastId;
+            }
+          }
+        }, 250);
+      }
+
+      function onSidebarPointerDown(ev) {
+        try {
+          var el = ev && ev.target;
+          if (!el || typeof el.closest !== "function") return;
+          // 排除侧栏底部知识库/自动化/ESC 入口（toggle，不能当会话点）
+          if (
+            el.closest(
+              ".dsh-knowledge-launcher, .dsh-knowledge-trigger, .za-launcher, .esc-launcher, [data-knowledge-workspace-close]",
+            )
+          ) {
+            return;
+          }
+          var foreign = foreignPluginWorkspaceVisible();
+          var stickyNow = false;
+          try {
+            var sid0 = readCurrentSessionId();
+            if (sid0 && typeof localStorage !== "undefined") {
+              var raw0 = localStorage.getItem("dsh.conversation.chat." + sid0);
+              var data0 = raw0 ? JSON.parse(raw0) : null;
+              stickyNow = !!(data0 && isWorkbuddyStickyView(data0.view));
+            }
+          } catch (eSt) {}
+          if (
+            !foreign &&
+            !stickyNow &&
+            !document.querySelector(".wb-usage-view, .wb-space-view, [data-wb-usage-view], [data-wb-space-view]")
+          ) {
+            return;
+          }
+
+          var hit =
+            el.closest("[data-session-id]") ||
+            el.closest('[role="treeitem"]') ||
+            el.closest('[role="option"]') ||
+            el.closest("a[href*='session']");
+          if (!hit) {
+            var btn = el.closest("button, a, [role='button']");
+            if (!btn) return;
+            var side = btn.closest(
+              "aside, nav, [class*='sidebar'], [class*='Sidebar'], [class*='session'], [data-slot*='sidebar']",
+            );
+            if (!side) return;
+            var bt = (btn.textContent || "").replace(/\s+/g, " ").trim();
+            if (!bt || bt.length > 120) return;
+            if (/^(资料库|用量|设置|新会话|记忆|工作区|知识库|自动化|专家)/.test(bt)) return;
+            hit = btn;
+          }
+          // 捕获阶段先关面板+回对话，再让宿主完成 sessions.open
+          onSessionCurrentChanged("sidebar-pointer");
+        } catch (ePtr) {}
+      }
+
+      if (typeof document !== "undefined") {
+        document.addEventListener("pointerdown", onSidebarPointerDown, true);
+      }
+
+      return function () {
+        disposed = true;
+        try {
+          if (retryTimer) clearInterval(retryTimer);
+        } catch (eT) {}
+        try {
+          if (typeof unsubList === "function") unsubList();
+        } catch (eU) {}
+        try {
+          if (typeof document !== "undefined") {
+            document.removeEventListener("pointerdown", onSidebarPointerDown, true);
+          }
+        } catch (eR) {}
+      };
+    }
+
+    /**
+     * 会话切换守卫（header 仍在时的辅助）：
+     * - 关掉知识库/自动化/专家技能盖住的主面板
+     * - 换会话时若落在用量/资料库粘性页签则切回对话
+     * - 整页刷新首次进入不改 view
+     * 主路径已改为 apply() 订阅 sessions.list（见 installWorkBuddySessionSwitchWatcher）。
+     */
+    function WorkBuddySessionSwitchGuard(props) {
+      var sessionId = props && props.sessionId;
+      var actions = props && props.actions;
+      var useStore = props && props.useStore;
+      var view = useStore
+        ? useStore(function (s) {
+            return s && s.view;
+          })
+        : null;
+
+      useEffect(
+        function () {
+          var prev = _wbGuardLastSessionId;
+          _wbGuardLastSessionId = sessionId || null;
+          if (prev == null || prev === sessionId) return;
+          dismissForeignPluginWorkspaces(_wbClientCtx);
+          if (isWorkbuddyStickyView(view)) {
+            ensureConversationChatView(actions);
+            return;
+          }
+          var acts = actions;
+          var storeHook = useStore;
+          setTimeout(function () {
+            try {
+              var cur =
+                storeHook && typeof storeHook.getState === "function"
+                  ? storeHook.getState().view
+                  : null;
+              if (isWorkbuddyStickyView(cur)) ensureConversationChatView(acts);
+              else if (!cur) activateHostChatTab();
+            } catch (eLate) {
+              activateHostChatTab();
+            }
+          }, 0);
+        },
+        [sessionId, view, actions, useStore],
+      );
+
+      useEffect(
+        function () {
+          function onWorkspaceActivate(ev) {
+            var pid = ev && ev.detail && ev.detail.pluginId;
+            if (!pid || pid === "workbuddy-session-switch") return;
+            // 打开知识库/自动化/ESC 时，把底下粘住的用量/资料库收回对话，避免刷新落到用量
+            if (isWorkbuddyStickyView(view)) {
+              ensureConversationChatView(actions);
+            }
+          }
+          window.addEventListener(WB_WORKSPACE_ACTIVATE, onWorkspaceActivate);
+          return function () {
+            window.removeEventListener(WB_WORKSPACE_ACTIVATE, onWorkspaceActivate);
+          };
+        },
+        [view, actions],
+      );
+
+      return null;
+    }
+
     /** 优先走 DSH 官方 sessions.open；失败再点侧栏标题。 */
     function tryOpenDshSession(sessionId, title, extraTitle) {
       var sid = String(sessionId || "").trim();
@@ -10746,25 +12782,24 @@ window.__ModuleLoader__.load({
               : null;
           if (svc && typeof svc.open === "function") {
             svc.open(sid);
+            dismissForeignPluginWorkspaces(_wbClientCtx);
+            setTimeout(function () {
+              activateHostChatTab();
+              forceLeaveStickyWorkbuddyViews(null);
+            }, 0);
             return "opened";
           }
         } catch (eOpen) {}
       }
-      if (tryClickSidebarSession(title, sid, extraTitle)) return "clicked";
+      if (tryClickSidebarSession(title, sid, extraTitle)) {
+        dismissForeignPluginWorkspaces(_wbClientCtx);
+        setTimeout(function () {
+          activateHostChatTab();
+          forceLeaveStickyWorkbuddyViews(null);
+        }, 0);
+        return "clicked";
+      }
       return "failed";
-    }
-
-    function spaceNavIcon(size) {
-      return h(
-        "svg",
-        { width: size, height: size, viewBox: "0 0 16 16", fill: "none", "aria-hidden": "true" },
-        h("path", {
-          d: "M2.5 4.5A1.5 1.5 0 0 1 4 3h2.2c.4 0 .77.2 1 .53L8 4.5h4A1.5 1.5 0 0 1 13.5 6v5.5A1.5 1.5 0 0 1 12 13H4A1.5 1.5 0 0 1 2.5 11.5v-7z",
-          stroke: "currentColor",
-          "stroke-width": "1.4",
-          fill: "none",
-        }),
-      );
     }
 
     function WorkBuddySpaceSection(props) {
@@ -11578,84 +13613,12 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function WorkBuddySpaceNav(props) {
+    function WorkBuddySpaceView(_props) {
       ensureCss();
-      var wide = !!(props && props.wide);
-      var bare = !!(props && props.bare);
-      var openState = useState(false);
-      var open = openState[0];
-      var setOpen = openState[1];
-      useEffect(
-        function () {
-          if (!open) return undefined;
-          function onKey(ev) {
-            if (ev.key !== "Escape") return;
-            if (document.querySelector(".wb-lib-fs")) return;
-            setOpen(false);
-          }
-          document.addEventListener("keydown", onKey);
-          return function () {
-            document.removeEventListener("keydown", onKey);
-          };
-        },
-        [open],
-      );
       return h(
         "div",
-        { className: bare ? "wb-footer-nav-item" : "wb-usage-nav-slot" },
-        h(
-          "button",
-          {
-            type: "button",
-            className: "wb-usage-nav" + (wide ? "" : " rail"),
-            "aria-haspopup": "dialog",
-            "aria-expanded": open,
-            title: "资料库",
-            onClick: function () {
-              setOpen(true);
-            },
-          },
-          spaceNavIcon(wide ? 16 : 18),
-          wide ? h("span", { className: "wb-usage-nav-label" }, "资料库") : null,
-        ),
-        open
-          ? h(
-              "div",
-              { className: "wb-usage-overlay", role: "dialog", "aria-modal": "true", "aria-label": "资料库" },
-              h("div", {
-                className: "wb-usage-mask",
-                onClick: function () {
-                  setOpen(false);
-                },
-              }),
-              h(
-                "div",
-                { className: "wb-usage-panel" },
-                h(
-                  "div",
-                  { className: "wb-usage-panel-head" },
-                  h("span", { className: "t" }, "资料库"),
-                  h(
-                    "button",
-                    {
-                      type: "button",
-                      className: "wb-usage-panel-x",
-                      "aria-label": "关闭",
-                      onClick: function () {
-                        setOpen(false);
-                      },
-                    },
-                    "×",
-                  ),
-                ),
-                h("div", { className: "wb-usage-panel-body" }, h(WorkBuddySpaceSection, {
-                  onClose: function () {
-                    setOpen(false);
-                  },
-                })),
-              ),
-            )
-          : null,
+        { className: "wb-space-view", "data-wb-space-view": "1" },
+        h("div", { className: "wb-space-view-body" }, h(WorkBuddySpaceSection, null)),
       );
     }
 
@@ -11669,148 +13632,87 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function WorkBuddyUsageNav(props) {
+    function WorkBuddyUsageView(_props) {
       ensureCss();
-      var wide = !!(props && props.wide);
-      var bare = !!(props && props.bare);
-      var openState = useState(false);
-      var open = openState[0];
-      var setOpen = openState[1];
       var scopeState = useState("personal");
       var scope = scopeState[0];
       var setScope = scopeState[1];
       var isAdminState = useState(false);
       var isAdmin = isAdminState[0];
       var setIsAdmin = isAdminState[1];
-      useEffect(
-        function () {
-          if (!open) return undefined;
-          function onKey(ev) {
-            if (ev.key === "Escape") setOpen(false);
-          }
-          document.addEventListener("keydown", onKey);
-          return function () {
-            document.removeEventListener("keydown", onKey);
-          };
-        },
-        [open],
-      );
       return h(
         "div",
-        { className: bare ? "wb-footer-nav-item" : "wb-usage-nav-slot" },
-        h(
-          "button",
-          {
-            type: "button",
-            className: "wb-usage-nav" + (wide ? "" : " rail"),
-            "aria-haspopup": "dialog",
-            "aria-expanded": open,
-            title: "用量",
-            onClick: function () {
-              setOpen(true);
-            },
-          },
-          usageNavIcon(wide ? 16 : 18),
-          wide ? h("span", { className: "wb-usage-nav-label" }, "用量") : null,
-        ),
-        open
+        { className: "wb-usage-view", "data-wb-usage-view": "1" },
+        isAdmin
           ? h(
               "div",
-              { className: "wb-usage-overlay", role: "dialog", "aria-modal": "true", "aria-label": "用量" },
-              h("div", {
-                className: "wb-usage-mask",
-                onClick: function () {
-                  setOpen(false);
-                },
-              }),
+              { className: "wb-usage-view-head" },
               h(
-                "div",
-                { className: "wb-usage-panel" },
+                "table",
+                { className: "wb-usage-tabs", role: "tablist", "aria-label": "用量范围" },
                 h(
-                  "div",
-                  { className: "wb-usage-panel-head" },
-                  isAdmin
-                    ? h(
-                        "table",
-                        { className: "wb-usage-tabs", role: "tablist", "aria-label": "用量范围" },
-                        h(
-                          "tbody",
-                          null,
-                          h(
-                            "tr",
-                            null,
-                            h(
-                              "td",
-                              {
-                                className: scope === "personal" ? "active" : "",
-                                role: "presentation",
-                              },
-                              h(
-                                "button",
-                                {
-                                  type: "button",
-                                  role: "tab",
-                                  "aria-selected": scope === "personal",
-                                  onClick: function () {
-                                    setScope("personal");
-                                  },
-                                },
-                                "个人用量",
-                              ),
-                            ),
-                            h(
-                              "td",
-                              {
-                                className: scope === "enterprise" ? "active" : "",
-                                role: "presentation",
-                              },
-                              h(
-                                "button",
-                                {
-                                  type: "button",
-                                  role: "tab",
-                                  "aria-selected": scope === "enterprise",
-                                  onClick: function () {
-                                    setScope("enterprise");
-                                  },
-                                },
-                                "企业用量",
-                              ),
-                            ),
-                          ),
-                        ),
-                      )
-                    : h("span", { className: "t" }, "用量"),
+                  "tbody",
+                  null,
                   h(
-                    "button",
-                    {
-                      type: "button",
-                      className: "wb-usage-panel-x",
-                      "aria-label": "关闭",
-                      onClick: function () {
-                        setOpen(false);
+                    "tr",
+                    null,
+                    h(
+                      "td",
+                      {
+                        className: scope === "personal" ? "active" : "",
+                        role: "presentation",
                       },
-                    },
-                    "×",
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          role: "tab",
+                          "aria-selected": scope === "personal",
+                          onClick: function () {
+                            setScope("personal");
+                          },
+                        },
+                        "个人用量",
+                      ),
+                    ),
+                    h(
+                      "td",
+                      {
+                        className: scope === "enterprise" ? "active" : "",
+                        role: "presentation",
+                      },
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          role: "tab",
+                          "aria-selected": scope === "enterprise",
+                          onClick: function () {
+                            setScope("enterprise");
+                          },
+                        },
+                        "企业用量",
+                      ),
+                    ),
                   ),
-                ),
-                h(
-                  "div",
-                  { className: "wb-usage-panel-body" },
-                  h(WorkBuddyUsageSection, {
-                    scope: isAdmin ? scope : "personal",
-                    onScopeChange: function (next) {
-                      setScope(next === "enterprise" ? "enterprise" : "personal");
-                    },
-                    onAdminChange: function (admin) {
-                      setIsAdmin(!!admin);
-                      if (!admin) setScope("personal");
-                    },
-                  }),
                 ),
               ),
             )
           : null,
+        h(
+          "div",
+          { className: "wb-usage-view-body" },
+          h(WorkBuddyUsageSection, {
+            scope: isAdmin ? scope : "personal",
+            onScopeChange: function (next) {
+              setScope(next === "enterprise" ? "enterprise" : "personal");
+            },
+            onAdminChange: function (admin) {
+              setIsAdmin(!!admin);
+              if (!admin) setScope("personal");
+            },
+          }),
+        ),
       );
     }
 
@@ -11828,6 +13730,7 @@ window.__ModuleLoader__.load({
 
     function apply(ctx) {
       _wbClientCtx = ctx || null;
+      ensureCss();
       discoverEngine();
       ensureLoginGateMounted();
       if (ctx && typeof ctx.effect === "function" && _loginGateUnmount) {
@@ -11862,21 +13765,49 @@ window.__ModuleLoader__.load({
       } catch (eOverlay) {
         console.warn("[dsh-mes-bridge] shell.overlay 不可用，仅用 DOM 登录挡板", eOverlay);
       }
-      // 聊天顶栏右上角（session header utilities）
+      // 聊天顶栏右上角（session header utilities）+ 会话切换守卫
       try {
         ctx.slots.inject("conversation.session.header.utilities", function () {
-          return ctx.slots.register(
-            {
-              name: "conversation.session.header.utilities",
-              id: "workbuddy-logout",
-              order: 1,
-              label: "退出登录",
-            },
-            WorkBuddyHeaderLogout,
+          var chatStore = borrowChatStore(ctx.slots);
+          var regs = [];
+          regs.push(
+            ctx.slots.register(
+              {
+                name: "conversation.session.header.utilities",
+                id: "workbuddy-session-switch-guard",
+                order: 0,
+                store: chatStore || undefined,
+              },
+              WorkBuddySessionSwitchGuard,
+            ),
           );
+          regs.push(
+            ctx.slots.register(
+              {
+                name: "conversation.session.header.utilities",
+                id: "workbuddy-logout",
+                order: 1,
+                label: "账号",
+              },
+              WorkBuddyHeaderLogout,
+            ),
+          );
+          return regs;
         });
       } catch (eHeader) {
         console.warn("[dsh-mes-bridge] header.utilities 不可用", eHeader);
+      }
+      // 主路径：订阅 sessions.list，不依赖 header（知识库盖住 conversation 时顶栏守卫不存在）
+      try {
+        if (typeof ctx.effect === "function") {
+          ctx.effect(function () {
+            return installWorkBuddySessionSwitchWatcher(ctx);
+          }, "workbuddy-session-switch-watcher");
+        } else {
+          installWorkBuddySessionSwitchWatcher(ctx);
+        }
+      } catch (eWatch) {
+        console.warn("[dsh-mes-bridge] session-switch watcher 安装失败", eWatch);
       }
       ctx.slots.inject("settings.section", function () {
         return ctx.slots.register(
@@ -11889,27 +13820,43 @@ window.__ModuleLoader__.load({
           WorkBuddySettingsSection,
         );
       });
-      // 同一槽位只能 register 一次；根节点必须是 wb-usage-nav-slot（flex:1 0 100%），
-      // 才能把宿主「设置」顶到下一行；内层两项用 bare，避免再套一层抢行。
-      function WorkBuddyFooterActions(props) {
-        return h(
-          "div",
-          { className: "wb-usage-nav-slot", "data-wb-footer": "space-usage" },
-          h(WorkBuddySpaceNav, Object.assign({}, props || {}, { bare: true })),
-          h(WorkBuddyUsageNav, Object.assign({}, props || {}, { bare: true })),
-        );
+      // 宿主侧栏「远端审码 / Cursor 写码」并入 WorkBuddy 后常驻隐藏，避免双入口
+      try {
+        hideHostSettingsDupes();
+      } catch (eHide) {
+        console.warn("[dsh-mes-bridge] hideHostSettingsDupes", eHide);
       }
-      ctx.slots.inject("sidebar.footer.action", function () {
-        return ctx.slots.register(
-          {
-            name: "sidebar.footer.action",
-            id: "workbuddy-footer",
-            order: 90,
-            label: "用量",
-          },
-          WorkBuddyFooterActions,
-        );
-      });
+      // 「资料库」「用量」均为 conversation.view，与对话/轨迹同级 tab（不再弹框）
+      try {
+        ctx.slots.inject("conversation.view", function () {
+          return ctx.slots.register(
+            {
+              name: "conversation.view",
+              id: "workbuddy-library",
+              order: 15,
+              label: "资料库",
+            },
+            WorkBuddySpaceView,
+          );
+        });
+      } catch (eSpaceView) {
+        console.warn("[dsh-mes-bridge] conversation.view 资料库页不可用", eSpaceView);
+      }
+      try {
+        ctx.slots.inject("conversation.view", function () {
+          return ctx.slots.register(
+            {
+              name: "conversation.view",
+              id: "workbuddy-usage",
+              order: 20,
+              label: "用量",
+            },
+            WorkBuddyUsageView,
+          );
+        });
+      } catch (eUsageView) {
+        console.warn("[dsh-mes-bridge] conversation.view 用量页不可用", eUsageView);
+      }
       ctx.slots.inject("tool.call.toolview", function () {
         return ctx.slots.register(
           { name: "tool.call.toolview", key: "mes_code_review_begin" },
@@ -11947,7 +13894,7 @@ window.__ModuleLoader__.load({
         );
       });
       console.log(
-        "[dsh-mes-bridge] app-login-gate + settings.section=WorkBuddy + sidebar.footer.action=资料库+用量 + toolview review/commit/code_dev/deploy",
+        "[dsh-mes-bridge] app-login-gate + settings.section=WorkBuddy + conversation.view=资料库/用量 + toolview review/commit/code_dev/deploy",
       );
       try {
         if (document && document.title && document.title.indexOf("WorkBuddy") < 0) {

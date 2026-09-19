@@ -96,7 +96,7 @@ def build_pick_ui(*, workspace: str = "") -> dict[str, Any]:
         "summary": "请确认要提交的本机 Git 工程",
         "desc": (
             "先选目录并勾选待提交文件，再跑门禁（仅阻断 P0/P1）；通过后需再确认才会 commit/push。"
-            "提交分支优先用仓库当前分支，其次用配置中心工作分支；都没有时请手动填写。"
+            "提交分支默认用仓库当前分支；在保护分支或无分支时自动创建功能分支。"
             "模型不会执行 git。"
         ),
     }
@@ -116,21 +116,6 @@ async def handle_chat_code_commit(text: str) -> dict[str, Any]:
 
     cfg = get_config()
     avail = availability()
-    if not cfg.enabled:
-        return _base(
-            thinking="检查提交车道配置。",
-            reply=(
-                "您这是在提**提交代码**需求。\n\n"
-                "提交车道尚未开启。\n\n"
-                "请用浏览器打开 **http://127.0.0.1:8000** "
-                "→ 左侧 **配置中心** → **向下滚动到第 7 步「提交车道」** "
-                "→ 勾选开启并点「保存全部配置」。\n\n"
-                "（DSH 浮层面板里没有完整配置中心；功能插件只负责启停插件本身。）\n\n"
-                "开启后再说「提交代码」，会出现目标目录确认卡；"
-                "门禁通过后还需再确认才会执行 git commit/push。"
-            ),
-            note="code_commit.disabled",
-        )
     if not avail.get("ok"):
         return _base(
             thinking="提交车道未就绪。",
@@ -145,7 +130,7 @@ async def handle_chat_code_commit(text: str) -> dict[str, Any]:
         reply=(
             "已识别为**人触发提交**。\n\n"
             "请在下方确认卡中选择**本机 Git 工程目录**并核对**提交分支**"
-            "（默认当前分支 → 配置中心 → 手填），再点「开始门禁审核」。\n"
+            "（默认当前分支；保护分支/无分支时自动创建），再点「开始门禁审核」。\n"
             "门禁仅列出阻断/严重问题；通过后填写中文说明并确认，才会 commit"
             + ("并默认 push" if cfg.default_push else "")
             + "。**模型不会执行 git。**"

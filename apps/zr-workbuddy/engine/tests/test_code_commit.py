@@ -136,21 +136,23 @@ class CodeCommitTests(unittest.TestCase):
             self.assertEqual(user.get("work_branch"), "feat/manual")
             self.assertEqual(user.get("branch_source"), "user")
 
-            # 保护分支：无配置 → 需手填；有配置 → 用配置
+            # 保护分支：自动创建功能分支名，不再要求手填
             subprocess.run(["git", "checkout", "-b", "main"], cwd=root, check=True, capture_output=True)
             with mock.patch("app.code_commit.ops.get_config") as gc:
                 cfg = mock.Mock()
                 cfg.work_branch = ""
                 gc.return_value = cfg
                 prot = preview_commit_branch(str(root))
-                self.assertTrue(prot.get("need_user_branch"))
-                self.assertEqual(prot.get("work_branch"), "")
+                self.assertFalse(prot.get("need_user_branch"))
+                self.assertEqual(prot.get("branch_source"), "auto")
+                self.assertTrue(str(prot.get("work_branch") or "").startswith("dev/wb/"))
 
+                # 配置中心 work_branch 已不再参与预览优先级（仍可人手填）
                 cfg.work_branch = "dev/from-config"
                 cfg2 = preview_commit_branch(str(root))
-                self.assertEqual(cfg2.get("work_branch"), "dev/from-config")
-                self.assertEqual(cfg2.get("branch_source"), "config")
+                self.assertEqual(cfg2.get("branch_source"), "auto")
                 self.assertFalse(cfg2.get("need_user_branch"))
+                self.assertNotEqual(cfg2.get("work_branch"), "dev/from-config")
 
     def test_chinese_message_validation(self):
         from app.code_commit.git_ops import validate_chinese_commit_message

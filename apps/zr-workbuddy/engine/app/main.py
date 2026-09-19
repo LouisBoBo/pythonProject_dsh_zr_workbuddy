@@ -7,7 +7,7 @@ import os
 from typing import Any, Dict, List
 
 import httpx
-from fastapi import FastAPI, File, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -1455,6 +1455,147 @@ def _require_login(request: Request):
     if err:
         return None, err
     return public_user(row), None
+
+
+def _feedback_image_magic_ok(data: bytes, suffix: str) -> bool:
+    """只认真实图片头，避免把 HTML/脚本伪装成 png 落盘。"""
+    if not data:
+        return False
+    suf = (suffix or "").lower()
+    if suf == ".png":
+        return data.startswith(b"\x89PNG\r\n\x1a\n")
+    if suf in {".jpg", ".jpeg"}:
+        return data.startswith(b"\xff\xd8\xff")
+    if suf == ".gif":
+        return data.startswith(b"GIF87a") or data.startswith(b"GIF89a")
+    if suf == ".webp":
+        return len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP"
+    if suf == ".bmp":
+        return data.startswith(b"BM")
+    return False
+
+
+@app.get(
+    "/api/about",
+    tags=["账号"],
+    summary="产品关于信息",
+    description="返回产品名与应用版本（读 apps/zr-workbuddy/VERSION），供账号菜单「检查更新」展示。",
+)
+def api_about():
+    return {
+        "ok": True,
+        "product": "ZR-WorkBuddy",
+        "app_version": _app_version(),
+    }
+
+
+@app.post(
+    "/api/feedback",
+    tags=["账号"],
+    summary="提交帮助与反馈",
+    description="登录用户提交意见反馈（可附图片，multipart）。正文与附件清单写入 engine/data/feedback.jsonl；"
+    "图片落盘 engine/data/feedback/images/（本机，不含密钥）。",
+)
+async def api_feedback(
+    request: Request,
+    message: str = Form("", description="反馈正文"),
+    images: List[UploadFile] = File(default=[], description="可选截图，最多 6 张"),
+):
+    import re
+    import time as _t
+    import uuid
+    from pathlib import Path
+
+    user, err = _require_login(request)
+    if err:
+        return err
+
+    msg = (message or "").strip()
+    files = [f for f in (images or []) if f is not None and getattr(f, "filename", None)]
+
+    if not msg:
+        return JSONResponse({"ok": False, "detail": "请填写反馈内容"}, status_code=400)
+    if len(msg) > 4000:
+        return JSONResponse({"ok": False, "detail": "反馈内容请控制在 4000 字以内"}, status_code=400)
+    if len(files) > 6:
+        return JSONResponse({"ok": False, "detail": "最多上传 6 张图片"}, status_code=400)
+
+    root = Path(__file__).resolve().parents[1] / "data"
+    img_dir = root / "feedback" / "images"
+    root.mkdir(parents=True, exist_ok=True)
+    img_dir.mkdir(parents=True, exist_ok=True)
+    path = root / "feedback.jsonl"
+    fid = uuid.uuid4().hex[:12]
+    saved: list[dict] = []
+    allowed = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+    for up in files:
+        raw_name = (up.filename or "image.png").strip() or "image.png"
+        suffix = Path(raw_name).suffix.lower()
+        if suffix not in allowed:
+            # 无后缀时按 content-type 猜测
+            ct = (up.content_type or "").lower()
+            if "png" in ct:
+                suffix = ".png"
+            elif "jpeg" in ct or "jpg" in ct:
+                suffix = ".jpg"
+            elif "gif" in ct:
+                suffix = ".gif"
+            elif "webp" in ct:
+                suffix = ".webp"
+            else:
+                return JSONResponse(
+                    {"ok": False, "detail": f"不支持的图片类型：{raw_name}"},
+                    status_code=400,
+                )
+        data = await up.read()
+        if len(data) > 5 * 1024 * 1024:
+            return JSONResponse(
+                {"ok": False, "detail": "单张图片请不超过 5MB"},
+                status_code=400,
+            )
+        if not data:
+            continue
+        if not _feedback_image_magic_ok(data, suffix):
+            return JSONResponse(
+                {"ok": False, "detail": "图片内容与类型不符，请上传 png/jpg/gif/webp/bmp"},
+                status_code=400,
+            )
+        safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", Path(raw_name).stem)[:40] or "img"
+        out_name = f"{fid}_{len(saved)+1}_{safe}{suffix}"
+        out_path = img_dir / out_name
+        try:
+            out_path.write_bytes(data)
+        except OSError:
+            return JSONResponse(
+                {"ok": False, "detail": "保存图片失败"},
+                status_code=500,
+            )
+        saved.append(
+            {
+                "name": raw_name,
+                "path": f"feedback/images/{out_name}",
+                "bytes": len(data),
+                "content_type": up.content_type or "",
+            }
+        )
+
+    entry = {
+        "ts": _t.strftime("%Y-%m-%dT%H:%M:%S%z") or _t.strftime("%Y-%m-%dT%H:%M:%S"),
+        "id": fid,
+        "user_id": str((user or {}).get("id") or ""),
+        "username": str((user or {}).get("username") or ""),
+        "message": msg,
+        "images": saved,
+    }
+    try:
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        return JSONResponse(
+            {"ok": False, "detail": "写入反馈失败"},
+            status_code=500,
+        )
+    return {"ok": True, "id": fid, "images": len(saved)}
 
 
 def _require_admin(request: Request):
