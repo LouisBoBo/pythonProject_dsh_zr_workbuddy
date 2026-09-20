@@ -57,6 +57,7 @@ apps/*/plugins/*/node_modules/
 **/engine/data/_test_space/
 **/engine/data/feedback.jsonl
 **/engine/data/feedback/
+**/engine/data/security/
 
 # 宿主 host/（禁止再导入 DeepSeek Harness Studio 源码树）
 /host/

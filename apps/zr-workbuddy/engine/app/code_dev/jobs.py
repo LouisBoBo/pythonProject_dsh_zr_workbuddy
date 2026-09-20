@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import threading
 import time
 import uuid
@@ -74,6 +75,7 @@ def create_job(
     sess_id = str(ui_session_id or "").strip()[:200]
     job: dict[str, Any] = {
         "id": new_job_id(),
+        "stream_token": secrets.token_urlsafe(18),
         "user_id": "" if user_id is None else str(user_id),
         "username": username or "",
         "thread_id": thread_id or sess_id or "",
@@ -118,6 +120,18 @@ def create_job(
     with _lock:
         path = _job_path(data_dir, job["id"])
         path.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        from ..security_audit import append_audit
+
+        append_audit(
+            "code_dev.job_created",
+            actor="engine",
+            job_id=job.get("id"),
+            workspace=workspace,
+            write_scope_n=len(scope),
+        )
+    except Exception:
+        pass
     return job
 
 
@@ -188,12 +202,28 @@ def update_job(data_dir: Path, job_id: str, **fields: Any) -> dict[str, Any] | N
         tmp.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(path)
         out = dict(job)
+        terminal = {"succeeded", "failed", "cancelled"}
+        final_status = str(job.get("status") or "")
+        became_terminal = final_status in terminal and cur_status not in terminal
     # 锁外：我的空间归档（仅成功入库源码；失败不影响写码）
     if out and str(out.get("status") or "") == "succeeded":
         try:
             from ..space import ingest_code_dev_job
 
             ingest_code_dev_job(out)
+        except Exception:
+            pass
+    if out and became_terminal:
+        try:
+            from ..security_audit import append_audit
+
+            append_audit(
+                "code_dev.job_terminal",
+                actor="engine",
+                job_id=out.get("id"),
+                status=out.get("status"),
+                workspace=out.get("workspace"),
+            )
         except Exception:
             pass
     return out

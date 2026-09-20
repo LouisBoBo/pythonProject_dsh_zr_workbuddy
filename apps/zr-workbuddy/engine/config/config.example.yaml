@@ -45,6 +45,11 @@ code_dev:
   delete_plan_timeout_sec: 120
   # 旧字段兼容：delete_engine_first: true → engine_first；false → cursor_full
   default_workspace: ""
+  # P1 企业开关（默认 false，不改变现网日常行为）
+  # true：空 write_scope 拒绝 confirm，禁止整仓同步
+  require_explicit_write_scope: false
+  # true：订阅 Job SSE 须带 stream_token（UI 已透传；旧无 token 任务仍放行）
+  require_job_stream_token: false
 
 # P0-3 本机目录直读审码（默认关闭；无 Git / 无 IDE Bridge）
 code_review:

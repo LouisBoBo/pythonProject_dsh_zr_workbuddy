@@ -9,8 +9,15 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
-  "files": ["lib"],
+  "files": [
+    "lib"
+  ],
   "description": "ZR-WorkBuddy Bridge：唯一常驻 Cordis 包；features 热插拔 + 聊天面板壳",
+  "scripts": {
+    "build:client": "node ../../../../scripts/build-mes-bridge-client.mjs",
+    "check:client": "node ../../../../scripts/build-mes-bridge-client.mjs --check",
+    "check:client-css": "node ../../../../scripts/build-mes-bridge-client.mjs --check"
+  },
   "dsh": {
     "client": {
       "platform": "web",
@@ -25,5 +32,8 @@
     "@deepseek-ai/dsh-tools": "link:../../../../vendor/@deepseek-ai/dsh-tools",
     "@dsh-external/mes-runtime": "link:../mes-runtime"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "0.25.0"
+  }
 }

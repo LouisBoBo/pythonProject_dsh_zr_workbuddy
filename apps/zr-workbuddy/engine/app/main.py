@@ -376,6 +376,18 @@ def api_hitl_issue(body: HitlIssueBody, request: Request):
     )
     if not out.get("ok"):
         return JSONResponse(out, status_code=400)
+    try:
+        from .security_audit import append_audit
+
+        append_audit(
+            "hitl.issue",
+            actor="ui",
+            action=act,
+            workspace=body.workspace or "",
+            job_id=body.job_id or "",
+        )
+    except Exception:
+        pass
     return out
 
 
@@ -430,6 +442,18 @@ def api_code_dev_confirm(body: CodeDevConfirmBody):
         payload_hash=normalize_payload_hash(body.requirement or ""),
     )
     if not gate.get("ok"):
+        try:
+            from .security_audit import append_audit
+
+            append_audit(
+                "hitl.confirm_denied",
+                actor="api",
+                action=ACTION_DEV,
+                workspace=body.workspace or "",
+                code=gate.get("code") or "",
+            )
+        except Exception:
+            pass
         return JSONResponse(gate, status_code=400)
     out = confirm_and_start(
         workspace=body.workspace or "",
@@ -441,7 +465,30 @@ def api_code_dev_confirm(body: CodeDevConfirmBody):
         ui_session_id=body.ui_session_id or "",
     )
     if not out.get("ok"):
+        try:
+            from .security_audit import append_audit
+
+            append_audit(
+                "code_dev.confirm_failed",
+                actor="ui",
+                workspace=body.workspace or "",
+                code=out.get("code") or "",
+                detail=out.get("detail") or "",
+            )
+        except Exception:
+            pass
         return JSONResponse(out, status_code=400)
+    try:
+        from .security_audit import append_audit
+
+        append_audit(
+            "code_dev.confirm_ok",
+            actor="ui",
+            workspace=body.workspace or "",
+            job_id=out.get("job_id") or "",
+        )
+    except Exception:
+        pass
     return out
 
 
@@ -511,23 +558,59 @@ def api_code_dev_job(job_id: str):
     tags=["本机写码"],
     summary="订阅本机写码任务进度（SSE）",
     description="推送 status / step / token / thinking（Cursor 思考过程，含工具调用）/ tool_call / done / error。"
-    "已结束的任务会立刻推送终态 done。",
+    "已结束的任务会立刻推送终态 done。"
+    "可选 query stream_token；企业开启 require_job_stream_token 后必填。",
 )
-async def api_code_dev_job_stream(job_id: str):
+async def api_code_dev_job_stream(
+    job_id: str,
+    stream_token: str = Query("", description="任务 stream_token；默认可不传，企业强制时必填"),
+):
     import asyncio
     import json as _json
 
     from fastapi.responses import StreamingResponse
 
     from . import plugins_store
-    from .code_dev.ops import FEATURE_ID, format_job_done_reply, get_job as code_dev_get_job
+    from .code_dev.ops import (
+        FEATURE_ID,
+        check_job_stream_token,
+        format_job_done_reply,
+        get_job as code_dev_get_job,
+    )
+    from .code_dev.public_redact import redact_job_public, redact_sse_payload
+    from .code_dev import jobs as job_store
+    from .code_dev.service import default_data_dir
 
     blocked = plugins_store.require_enabled(FEATURE_ID, capability="本机 Cursor 写码")
     if blocked:
         return JSONResponse(blocked, status_code=400)
 
     jid = (job_id or "").strip()
+    raw_job = job_store.get_job(default_data_dir(), jid)
+    if not raw_job:
+        return JSONResponse(
+            {"ok": False, "detail": f"找不到任务 {jid}", "code": "job_not_found"},
+            status_code=404,
+        )
+    tok_gate = check_job_stream_token(raw_job, stream_token)
+    if not tok_gate.get("ok"):
+        try:
+            from .security_audit import append_audit
+
+            append_audit(
+                "code_dev.stream_denied",
+                actor="api",
+                job_id=jid,
+                code=tok_gate.get("code") or "",
+            )
+        except Exception:
+            pass
+        return JSONResponse(tok_gate, status_code=403)
+
     terminal = {"succeeded", "failed", "cancelled"}
+
+    def _sse(obj: dict) -> str:
+        return f"data: {_json.dumps(redact_sse_payload(obj), ensure_ascii=False)}\n\n"
 
     async def event_gen():
         last_n = 0
@@ -543,7 +626,7 @@ async def api_code_dev_job_stream(job_id: str):
             for _ in range(int(3600 / interval)):  # ~1h
                 out = code_dev_get_job(jid)
                 if not out.get("ok"):
-                    yield f"data: {_json.dumps({'type': 'error', 'message': out.get('detail') or '找不到任务'}, ensure_ascii=False)}\n\n"
+                    yield _sse({"type": "error", "message": out.get("detail") or "找不到任务"})
                     return
                 job = out.get("job") or {}
                 st = str(job.get("status") or "")
@@ -552,7 +635,7 @@ async def api_code_dev_job_stream(job_id: str):
                     if isinstance(ev, dict) and ev.get("type"):
                         if str(ev.get("type") or "") in skip_replay:
                             continue
-                        yield f"data: {_json.dumps(ev, ensure_ascii=False)}\n\n"
+                        yield _sse(ev)
                 last_n = len(events)
 
                 live = str(job.get("live_text") or "")
@@ -560,9 +643,9 @@ async def api_code_dev_job_stream(job_id: str):
                     if live.startswith(last_live):
                         delta = live[len(last_live) :]
                         if delta:
-                            yield f"data: {_json.dumps({'type': 'token', 'text': delta}, ensure_ascii=False)}\n\n"
+                            yield _sse({"type": "token", "text": delta})
                     else:
-                        yield f"data: {_json.dumps({'type': 'replace_text', 'text': live}, ensure_ascii=False)}\n\n"
+                        yield _sse({"type": "replace_text", "text": live})
                     last_live = live
 
                 think = str(job.get("thinking_text") or "")
@@ -572,7 +655,7 @@ async def api_code_dev_job_stream(job_id: str):
                         payload = {"type": "thinking", "text": think}
                         if think_ms is not None:
                             payload["thinking_duration_ms"] = think_ms
-                        yield f"data: {_json.dumps(payload, ensure_ascii=False)}\n\n"
+                        yield _sse(payload)
                     last_think = think
                     last_think_ms = think_ms
 
@@ -581,27 +664,37 @@ async def api_code_dev_job_stream(job_id: str):
                     if last_delivery and delivery.startswith(last_delivery):
                         delta = delivery[len(last_delivery) :]
                         if delta:
-                            yield f"data: {_json.dumps({'type': 'token_delivery', 'text': delta}, ensure_ascii=False)}\n\n"
+                            yield _sse({"type": "token_delivery", "text": delta})
                     else:
-                        yield f"data: {_json.dumps({'type': 'replace_delivery', 'text': delivery}, ensure_ascii=False)}\n\n"
+                        yield _sse({"type": "replace_delivery", "text": delivery})
                     last_delivery = delivery
 
                 progress = str(job.get("progress") or "").strip()
                 if progress and progress != last_progress and last_n == len(events):
-                    # 无新 event 时仍推进度文案
-                    yield f"data: {_json.dumps({'type': 'status', 'text': progress}, ensure_ascii=False)}\n\n"
+                    yield _sse({"type": "status", "text": progress})
                     last_progress = progress
 
                 if st in terminal:
                     reply = format_job_done_reply(job)
-                    yield f"data: {_json.dumps({'type': 'done', 'ok': st == 'succeeded', 'status': st, 'job_id': jid, 'job': job, 'reply': reply, 'synced_files': job.get('synced_files') or [], 'error': job.get('error')}, ensure_ascii=False)}\n\n"
+                    yield _sse(
+                        {
+                            "type": "done",
+                            "ok": st == "succeeded",
+                            "status": st,
+                            "job_id": jid,
+                            "job": redact_job_public(job),
+                            "reply": reply,
+                            "synced_files": job.get("synced_files") or [],
+                            "error": job.get("error"),
+                        }
+                    )
                     saw_terminal = True
                     return
                 await asyncio.sleep(interval)
             if not saw_terminal:
-                yield f"data: {_json.dumps({'type': 'error', 'message': '订阅超时，请用 code-dev-job 查询'}, ensure_ascii=False)}\n\n"
+                yield _sse({"type": "error", "message": "订阅超时，请用 code-dev-job 查询"})
         except Exception as e:
-            yield f"data: {_json.dumps({'type': 'error', 'message': f'{type(e).__name__}: {e}'}, ensure_ascii=False)}\n\n"
+            yield _sse({"type": "error", "message": f"{type(e).__name__}: {e}"})
 
     return StreamingResponse(
         event_gen(),

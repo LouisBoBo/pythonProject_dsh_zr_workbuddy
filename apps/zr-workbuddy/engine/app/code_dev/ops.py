@@ -145,10 +145,16 @@ def start(
         }
 
     start_job_background(_dd(), job_id)
+    live = job_store.get_job(_dd(), job_id) or job
+    from .public_redact import redact_job_public
+
+    tok = str(live.get("stream_token") or "").strip()
     return {
         "ok": True,
         "job_id": job_id,
-        "job": job_store.get_job(_dd(), job_id) or job,
+        # 创建响应下发一次 token（GET job 在强制模式下不再回传）
+        "stream_token": tok,
+        "job": redact_job_public(live),
         "detail": "任务已排队/启动，请用 code-dev-job 查询",
         "reply": f"已启动写码任务 {job_id}，请稍后查询状态。",
     }
@@ -161,18 +167,62 @@ def get_job(job_id: str) -> dict[str, Any]:
     job = job_store.get_job(_dd(), jid)
     if not job:
         return {"ok": False, "detail": f"找不到任务 {jid}", "reply": f"找不到任务 {jid}"}
-    return {
+    from .config import get_config
+    from .public_redact import redact_job_public
+
+    pub = redact_job_public(job)
+    out: dict[str, Any] = {
         "ok": True,
         "job_id": jid,
-        "job": job,
-        "status": job.get("status"),
-        "detail": job.get("error") or job.get("status"),
-        "reply": _job_summary(job),
+        "job": pub,
+        "status": pub.get("status"),
+        "detail": pub.get("error") or pub.get("status"),
+        # 摘要也走脱敏副本，避免 error/progress 绕过
+        "reply": _job_summary(pub),
     }
+    # 强制 SSE token 时：禁止用 GET job 白嫖 stream_token（只允许创建/确认响应下发一次）
+    if not get_config().require_job_stream_token:
+        tok = str(job.get("stream_token") or "").strip()
+        if tok:
+            out["stream_token"] = tok
+    return out
+
+
+def check_job_stream_token(job: dict[str, Any] | None, provided: str) -> dict[str, Any]:
+    """SSE 订阅校验。默认不强制；强制时须匹配 job.stream_token。
+
+    无 token 的旧任务：强制模式下仍允许（兼容），避免打断已开跑会话。
+    提供了错误 token：一律拒绝。
+    """
+    from .config import get_config
+
+    cfg = get_config()
+    expect = str((job or {}).get("stream_token") or "").strip()
+    got = str(provided or "").strip()
+    if got and expect and got != expect:
+        return {
+            "ok": False,
+            "detail": "stream_token 无效",
+            "code": "job_stream_token_invalid",
+        }
+    if not cfg.require_job_stream_token:
+        return {"ok": True}
+    if not expect:
+        # 旧任务无 token：放行，避免升级后中断
+        return {"ok": True}
+    if not got:
+        return {
+            "ok": False,
+            "detail": "订阅进度须带 stream_token",
+            "code": "job_stream_token_missing",
+        }
+    return {"ok": True}
 
 
 def list_recent_jobs(*, limit: int = 80, ui_call_id: str = "") -> dict[str, Any]:
     """列出本机写码任务（按更新时间倒序），供历史核对；可按 DSH callId 过滤。"""
+    from ..space.redact import redact_text
+
     cid = str(ui_call_id or "").strip()
     if cid:
         rows = job_store.find_jobs_by_ui_call_id(_dd(), cid, limit=max(1, min(int(limit or 80), 200)))
@@ -192,17 +242,20 @@ def list_recent_jobs(*, limit: int = 80, ui_call_id: str = "") -> dict[str, Any]
         # messages[0] 常是用户需求
         if not req and isinstance(j.get("messages"), list) and j["messages"]:
             req = str((j["messages"][0] or {}).get("content") or "").strip()
+        req_pub, _ = redact_text(req[:160], max_chars=200)
+        err_raw = str(j.get("error") or "")
+        err_pub, _ = redact_text(err_raw, max_chars=400) if err_raw else ("", False)
         slim.append(
             {
                 "id": j.get("id"),
                 "status": j.get("status"),
                 "workspace": j.get("workspace"),
-                "requirement": req[:160],
+                "requirement": req_pub,
                 "ui_call_id": j.get("ui_call_id"),
                 "ui_session_id": j.get("ui_session_id"),
                 "created_at": j.get("created_at"),
                 "updated_at": j.get("updated_at"),
-                "error": j.get("error"),
+                "error": err_pub or None,
             }
         )
     return {
@@ -220,10 +273,12 @@ def cancel(job_id: str) -> dict[str, Any]:
     job = job_store.request_cancel(_dd(), jid, reason="用户取消")
     if not job:
         return {"ok": False, "detail": f"找不到任务 {jid}", "reply": f"找不到任务 {jid}"}
+    from .public_redact import redact_job_public
+
     return {
         "ok": True,
         "job_id": jid,
-        "job": job,
+        "job": redact_job_public(job),
         "detail": "已请求取消",
         "reply": f"已请求取消任务 {jid}",
     }

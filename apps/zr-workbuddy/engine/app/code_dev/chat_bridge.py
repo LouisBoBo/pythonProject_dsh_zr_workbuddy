@@ -330,6 +330,16 @@ def confirm_and_start(
             hints = hint2
         scope = explicit_scope[:40] or write_scope_from_hints(hints, req)
 
+    cfg = get_config()
+    if cfg.require_explicit_write_scope and not scope:
+        return {
+            "ok": False,
+            "detail": "企业策略要求显式 write_scope，当前为空，已拒绝整仓同步开工",
+            "reply": "请先确认同步范围（write_scope）后再开工；空范围整仓同步已按企业策略关闭。",
+            "code": "write_scope_required",
+            "validation": validation,
+        }
+
     out = code_dev_start(
         workspace=ws,
         message=req,
@@ -369,6 +379,12 @@ def confirm_and_start(
         "reply": reply,
         "detail": out.get("detail"),
         "job_id": job_id or None,
+        "stream_token": out.get("stream_token")
+        or (
+            (out.get("job") or {}).get("stream_token")
+            if isinstance(out.get("job"), dict)
+            else None
+        ),
         "job": out.get("job"),
         "data_source": "code_dev",
         "validation": validation,

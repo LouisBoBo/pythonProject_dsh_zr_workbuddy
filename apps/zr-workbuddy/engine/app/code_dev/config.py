@@ -103,6 +103,10 @@ class CodeDevConfig:
     delete_plan_timeout_sec: int = 120
     live_stream_delay_sec: float = 0.0
     default_workspace: str = ""
+    # P1：默认 false，不改变现网行为；企业打开后空 write_scope 拒绝 confirm
+    require_explicit_write_scope: bool = False
+    # P1：默认 false；true 时订阅 SSE 必须带正确 stream_token
+    require_job_stream_token: bool = False
 
 
 def _resolve_delete_mode(raw: dict) -> str:
@@ -152,6 +156,8 @@ def get_config() -> CodeDevConfig:
         delete_plan_timeout_sec=max(45, min(int(raw.get("delete_plan_timeout_sec") or 120), 300)),
         live_stream_delay_sec=max(0.0, min(float(raw.get("live_stream_delay_sec") if raw.get("live_stream_delay_sec") is not None else 0.0), 0.2)),
         default_workspace=str(raw.get("default_workspace") or "").strip(),
+        require_explicit_write_scope=bool(raw.get("require_explicit_write_scope", False)),
+        require_job_stream_token=bool(raw.get("require_job_stream_token", False)),
     )
 
 
